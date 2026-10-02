@@ -1,0 +1,89 @@
+# Reusable: deploy one stage from the site-dist artifact of the calling run, then smoke test.
+name: deploy-stage
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: dev or prod
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NG_CLI_ANALYTICS: 'false'
+  CI: 'true'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: ${{ inputs.stage }}
+      url: ${{ steps.outputs.outputs.site_url }}
+    # A running deploy is never cancelled; newer queued runs supersede older pending ones.
+    concurrency:
+      group: aws-${{ inputs.stage }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      STAGE: ${{ inputs.stage }}
+      STACK_ID: ${{ inputs.stage == 'prod' && 'WordStudyToolStack' || 'WordStudyTool-Dev' }}
+    steps:
+      - name: Validate stage
+        run: '[[ "$STAGE" == "dev" || "$STAGE" == "prod" ]] || { echo "stage must be dev or prod, got: $STAGE"; exit 1; }'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/package-lock.json
+      - run: npm ci --prefix infra
+      - name: Download site build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site-dist
+          path: dist/word-study-tool/browser
+      - name: AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::224670540244:role/GitHubDeployRole
+          aws-region: us-east-1
+          role-session-name: gh-${{ github.run_id }}
+          role-duration-seconds: 3600
+      - name: Synth
+        working-directory: infra
+        run: npx cdk synth "$STACK_ID" --quiet
+      - name: Stateful guard (prod only)
+        if: inputs.stage == 'prod'
+        working-directory: infra
+        run: |
+          aws cloudformation get-template --stack-name WordStudyToolStack --template-stage Original \
+            --query TemplateBody --output json > deployed-prod.json
+          npm run guard -- --deployed deployed-prod.json --synth cdk.out/WordStudyToolStack.template.json
+      # --app cdk.out deploys exactly the assembly the guard checked (no re-synth).
+      - name: Deploy
+        working-directory: infra
+        run: npx cdk deploy --app cdk.out "$STACK_ID" --require-approval never --outputs-file cdk-outputs.json
+      - name: Seed dev Strong's subset
+        if: inputs.stage == 'dev'
+        working-directory: infra
+        env:
+          STRONGS_TABLE_NAME: StrongsData-dev
+        run: npm run seed-dev
+      - name: Smoke test
+        id: outputs
+        run: |
+          SITE_URL=$(jq -er --arg s "$STACK_ID" '.[$s].SiteUrl' infra/cdk-outputs.json)
+          API_URL=$(jq -er --arg s "$STACK_ID" '.[$s].ApiUrl' infra/cdk-outputs.json)
+          echo "site_url=$SITE_URL" >> "$GITHUB_OUTPUT"
+          bash scripts/ci/smoke-test.sh "$SITE_URL" "$API_URL"

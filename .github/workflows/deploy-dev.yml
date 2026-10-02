@@ -1,0 +1,36 @@
+# Manual dev deploy (e.g. after destroy-dev). main only: a dev deploy credential can reach
+# prod through the shared bootstrap roles, so non-main refs must never get it.
+name: deploy-dev
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Always runs (no job-level if), so a non-main ref fails here and nothing after it runs.
+  guard-ref:
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - run: '[[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "deploy-dev runs from main only"; exit 1; }'
+
+  verify:
+    needs: guard-ref
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+
+  dev:
+    needs: verify
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      stage: dev

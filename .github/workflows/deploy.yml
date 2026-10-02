@@ -1,0 +1,40 @@
+# Push to main: verify once, deploy + smoke dev, then prod after the `prod` environment approval.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.kiro/**'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+
+  dev:
+    needs: verify
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      stage: dev
+
+  prod:
+    needs: dev
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      stage: prod
