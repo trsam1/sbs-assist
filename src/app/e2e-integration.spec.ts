@@ -1,18 +1,10 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import {
-  HttpTestingController,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideRouter, ActivatedRoute } from '@angular/router';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { StudyPageComponent } from './study-page/study-page.component';
-import {
-  StrongsStudyResult,
-  CrossReference,
-  StudyWorksheet,
-  WordStudyEntry,
-} from './models';
+import { StrongsStudyResult, CrossReference, WordStudyEntry } from './models';
 import { environment } from './environment';
 
 /**
@@ -37,7 +29,15 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
   ];
 
   const mockEnglishDefResponse = [
-    { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'an intense feeling of deep affection' }] }] },
+    {
+      word: 'love',
+      meanings: [
+        {
+          partOfSpeech: 'noun',
+          definitions: [{ definition: 'an intense feeling of deep affection' }],
+        },
+      ],
+    },
   ];
 
   const mockAiSummary =
@@ -76,7 +76,9 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
   function submitStrongs(component: StudyPageComponent, httpTesting: HttpTestingController): void {
     component.onStrongsNumberSubmitted({ strongsNumber: 'G25' });
     httpTesting.expectOne(`${environment.apiUrl}/strongs/G25`).flush(mockStrongs);
-    httpTesting.expectOne(`${environment.apiUrl}/strongs/G25/cross-references`).flush(mockCrossRefs);
+    httpTesting
+      .expectOne(`${environment.apiUrl}/strongs/G25/cross-references`)
+      .flush(mockCrossRefs);
   }
 
   describe('Step 1: Enter word and view English definition', () => {
@@ -108,8 +110,9 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
       );
       const ws = fixture.nativeElement.querySelector('section[aria-label="Word study worksheet"]');
       expect(ws).not.toBeNull();
-      expect(ws.querySelector('[data-testid="english-definition"]')?.textContent)
-        .toContain('an intense feeling of deep affection');
+      expect(ws.querySelector('[data-testid="english-definition"]')?.textContent).toContain(
+        'an intense feeling of deep affection',
+      );
     });
 
     it('should hide the input form once the worksheet is displayed', () => {
@@ -121,7 +124,7 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
     });
   });
 
-  describe('Step 2-4: Strong\'s lookup, lexicon, and cross-references', () => {
+  describe("Step 2-4: Strong's lookup, lexicon, and cross-references", () => {
     let fixture: ComponentFixture<StudyPageComponent>;
     let component: StudyPageComponent;
     let httpTesting: HttpTestingController;
@@ -138,7 +141,7 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
       localStorage.clear();
     });
 
-    it('should fetch Strong\'s data and cross-references on Strong\'s number submit', () => {
+    it("should fetch Strong's data and cross-references on Strong's number submit", () => {
       submitStrongs(component, httpTesting);
       fixture.detectChanges();
 
@@ -166,7 +169,7 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
       localStorage.clear();
     });
 
-    it('should show AI summary button when Strong\'s data is loaded', () => {
+    it("should show AI summary button when Strong's data is loaded", () => {
       // Navigate to step 5 (AI Summary)
       // Steps: 1 (def) -> 2 (strongs) -> 3 (lexicon) -> 4 (cross-refs) -> 5 (AI)
       component.aiSummaryState.set('idle');
@@ -196,7 +199,15 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
     const savedEntry: WordStudyEntry = {
       word: 'love',
       strongsNumber: 'G25',
-      englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'an intense feeling of deep affection' }] }] },
+      englishDefinition: {
+        word: 'love',
+        meanings: [
+          {
+            partOfSpeech: 'noun',
+            definitions: [{ definition: 'an intense feeling of deep affection' }],
+          },
+        ],
+      },
       strongsDefinition: 'to love (in a social or moral sense)',
       originalWord: 'ἀγαπάω',
       transliteration: 'agapaō',
@@ -255,7 +266,9 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
       expect(aiContent!.textContent).toContain('ἀγαπάω');
 
       // Save button should say "Update Study" (in sticky footer, outside worksheet section)
-      const saveBtn = fixture.nativeElement.querySelector('[data-testid="save-button"]') as HTMLButtonElement;
+      const saveBtn = fixture.nativeElement.querySelector(
+        '[data-testid="save-button"]',
+      ) as HTMLButtonElement;
       expect(saveBtn.textContent?.trim()).toBe('Update Study');
 
       httpTesting.verify();

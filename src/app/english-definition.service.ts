@@ -63,9 +63,8 @@ export class EnglishDefinitionService {
           const entry = entries?.[0];
           if (!entry) return EMPTY_RESULT;
 
-          const phonetic = entry.phonetic
-            || entry.phonetics?.find((p) => p.text)?.text
-            || undefined;
+          const phonetic =
+            entry.phonetic || entry.phonetics?.find((p) => p.text)?.text || undefined;
 
           const meanings: EnglishMeaning[] = entry.meanings.map((m) => ({
             partOfSpeech: m.partOfSpeech,

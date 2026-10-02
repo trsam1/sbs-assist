@@ -12,7 +12,9 @@ interface AiSummaryResponse {
 @Injectable({ providedIn: 'root' })
 export class AiSummaryService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = environment.apiUrl;
+  private get baseUrl(): string {
+    return environment.apiUrl;
+  }
 
   /** Generate an AI summary for a word study entry. Returns the summary string. */
   generateSummary(entry: WordStudyEntry): Observable<string> {

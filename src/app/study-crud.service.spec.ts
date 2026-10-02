@@ -19,7 +19,10 @@ describe('StudyCrudService', () => {
       {
         word: 'love',
         strongsNumber: 'G25',
-        englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
+        englishDefinition: {
+          word: 'love',
+          meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+        },
         strongsDefinition: 'to love',
         originalWord: 'ἀγαπάω',
         transliteration: 'agapaō',
@@ -105,6 +108,32 @@ describe('StudyCrudService', () => {
     expect(result).toEqual(savedWorksheet);
   });
 
+  it('should normalize a legacy string englishDefinition from getStudy', () => {
+    let result: StudyWorksheet | undefined;
+    service.getStudy('legacy-1').subscribe((ws) => (result = ws));
+
+    const req = httpTesting.expectOne(`${environment.apiUrl}/studies/legacy-1`);
+    req.flush({
+      studyId: 'legacy-1',
+      userId: mockWorksheet.userId,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-02T00:00:00.000Z',
+      wordStudies: [
+        {
+          ...mockWorksheet.wordStudies[0],
+          englishDefinition: 'an intense feeling of deep affection',
+        },
+      ],
+    });
+
+    expect(result?.wordStudies[0].englishDefinition).toEqual({
+      word: 'love',
+      meanings: [
+        { partOfSpeech: '', definitions: [{ definition: 'an intense feeling of deep affection' }] },
+      ],
+    });
+  });
+
   it('should propagate HTTP errors from getStudy', () => {
     let error: unknown;
     service.getStudy('bad-id').subscribe({
@@ -130,8 +159,20 @@ describe('StudyCrudService', () => {
     expect(req.request.method).toBe('GET');
 
     req.flush([
-      { studyId: 's1', userId: mockWorksheet.userId, createdAt: mockWorksheet.createdAt, updatedAt: '2025-02-01T00:00:00.000Z', wordStudies: mockWorksheet.wordStudies },
-      { studyId: 's2', userId: mockWorksheet.userId, createdAt: mockWorksheet.createdAt, updatedAt: '2025-01-01T00:00:00.000Z', wordStudies: mockWorksheet.wordStudies },
+      {
+        studyId: 's1',
+        userId: mockWorksheet.userId,
+        createdAt: mockWorksheet.createdAt,
+        updatedAt: '2025-02-01T00:00:00.000Z',
+        wordStudies: mockWorksheet.wordStudies,
+      },
+      {
+        studyId: 's2',
+        userId: mockWorksheet.userId,
+        createdAt: mockWorksheet.createdAt,
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        wordStudies: mockWorksheet.wordStudies,
+      },
     ]);
     expect(result).toEqual(expected);
   });

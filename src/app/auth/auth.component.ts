@@ -25,7 +25,13 @@ import { AuthService } from '../auth.service';
                 <div class="field">
                   <label class="label" for="code-input">Verification Code</label>
                   <div class="control">
-                    <input class="input" id="code-input" type="text" [(ngModel)]="code" placeholder="Enter 6-digit code" />
+                    <input
+                      class="input"
+                      id="code-input"
+                      type="text"
+                      [(ngModel)]="code"
+                      placeholder="Enter 6-digit code"
+                    />
                   </div>
                 </div>
                 <button
@@ -33,25 +39,53 @@ import { AuthService } from '../auth.service';
                   [class.is-loading]="submitting()"
                   [disabled]="!code || submitting()"
                   (click)="onConfirm()"
-                >Verify</button>
+                >
+                  Verify
+                </button>
               } @else {
                 <div class="tabs is-centered">
                   <ul>
-                    <li [class.is-active]="mode() === 'signIn'"><a (click)="mode.set('signIn')">Sign In</a></li>
-                    <li [class.is-active]="mode() === 'signUp'"><a (click)="mode.set('signUp')">Sign Up</a></li>
+                    <li [class.is-active]="mode() === 'signIn'">
+                      <a
+                        tabindex="0"
+                        (click)="mode.set('signIn')"
+                        (keydown.enter)="mode.set('signIn')"
+                        >Sign In</a
+                      >
+                    </li>
+                    <li [class.is-active]="mode() === 'signUp'">
+                      <a
+                        tabindex="0"
+                        (click)="mode.set('signUp')"
+                        (keydown.enter)="mode.set('signUp')"
+                        >Sign Up</a
+                      >
+                    </li>
                   </ul>
                 </div>
 
                 <div class="field">
                   <label class="label" for="email-input">Email</label>
                   <div class="control">
-                    <input class="input" id="email-input" type="email" [(ngModel)]="email" placeholder="you@example.com" />
+                    <input
+                      class="input"
+                      id="email-input"
+                      type="email"
+                      [(ngModel)]="email"
+                      placeholder="you@example.com"
+                    />
                   </div>
                 </div>
                 <div class="field">
                   <label class="label" for="password-input">Password</label>
                   <div class="control">
-                    <input class="input" id="password-input" type="password" [(ngModel)]="password" placeholder="Password" />
+                    <input
+                      class="input"
+                      id="password-input"
+                      type="password"
+                      [(ngModel)]="password"
+                      placeholder="Password"
+                    />
                   </div>
                 </div>
 
@@ -61,7 +95,9 @@ import { AuthService } from '../auth.service';
                     [class.is-loading]="submitting()"
                     [disabled]="!email || !password || submitting()"
                     (click)="onSignIn()"
-                  >Sign In</button>
+                  >
+                    Sign In
+                  </button>
                 } @else {
                   <p class="help mb-3">Password must be at least 8 characters with a number.</p>
                   <button
@@ -69,7 +105,9 @@ import { AuthService } from '../auth.service';
                     [class.is-loading]="submitting()"
                     [disabled]="!email || !password || submitting()"
                     (click)="onSignUp()"
-                  >Create Account</button>
+                  >
+                    Create Account
+                  </button>
                 }
               }
             </div>

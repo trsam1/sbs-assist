@@ -27,11 +27,18 @@ export interface EnglishDefinitionData {
   meanings: EnglishMeaning[];
 }
 
+/** Legacy shape: items saved before 2026-04-27 store the English definition as a plain string. */
+export type LegacyEnglishDefinition = string;
+
 /** All data captured for a single word study entry. */
 export interface WordStudyEntry {
   word: string;
   strongsNumber: string;
-  englishDefinition: EnglishDefinitionData | null;
+  /**
+   * Structured definition, or a plain string for items saved before 2026-04-27
+   * (read tolerantly; re-saving a study writes the object shape).
+   */
+  englishDefinition: EnglishDefinitionData | LegacyEnglishDefinition | null;
   strongsDefinition: string;
   originalWord: string;
   transliteration: string;

@@ -1,8 +1,14 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'node:crypto';
 import type { WordStudyEntry, WordStudyRecord } from '../shared/models';
-import { corsResponse } from '../shared/cors';
+import { corsResponse, getRequestOrigin } from '../shared/cors';
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -12,7 +18,7 @@ interface APIGatewayEvent {
   httpMethod: string;
   resource: string;
   pathParameters?: Record<string, string> | null;
-  headers?: Record<string, string> | null;
+  headers?: Record<string, string | undefined> | null;
   body?: string | null;
   requestContext?: {
     authorizer?: {
@@ -47,9 +53,10 @@ function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
     return {
       id: typeof obj['id'] === 'string' && obj['id'].length > 0 ? obj['id'] : undefined,
       userId: '', // Will be set from Cognito claims
-      createdAt: typeof obj['createdAt'] === 'string' && obj['createdAt'].length > 0
-        ? obj['createdAt'] as string
-        : undefined,
+      createdAt:
+        typeof obj['createdAt'] === 'string' && obj['createdAt'].length > 0
+          ? (obj['createdAt'] as string)
+          : undefined,
       wordStudies: obj['wordStudies'] as WordStudyEntry[],
     };
   } catch {
@@ -73,9 +80,7 @@ async function saveWordStudy(body: SaveStudyBody): Promise<{ studyId: string }> 
     GSI1SK: `UPDATED#${now}`,
   };
 
-  await docClient.send(
-    new PutCommand({ TableName: tableName, Item: record }),
-  );
+  await docClient.send(new PutCommand({ TableName: tableName, Item: record }));
 
   return { studyId };
 }
@@ -120,25 +125,30 @@ async function deleteStudy(userId: string, studyId: string): Promise<boolean> {
 }
 
 export const handler = async (event: APIGatewayEvent) => {
+  const origin = getRequestOrigin(event.headers);
   try {
     // POST /studies — save a word study
     if (event.httpMethod === 'POST' && event.resource === '/studies') {
       const userId = getUserId(event);
       if (!userId) {
-        return corsResponse(400, { message: 'Missing authentication.' });
+        return corsResponse(400, { message: 'Missing authentication.' }, origin);
       }
 
       const body = parseSaveBody(event.body);
       if (!body) {
-        return corsResponse(400, {
-          message: 'Invalid request body. Required: wordStudies (array).',
-        });
+        return corsResponse(
+          400,
+          {
+            message: 'Invalid request body. Required: wordStudies (array).',
+          },
+          origin,
+        );
       }
 
       // Override userId with the authenticated Cognito user
       body.userId = userId;
       const result = await saveWordStudy(body);
-      return corsResponse(200, result);
+      return corsResponse(200, result, origin);
     }
 
     // GET /studies/{studyId} — fetch a single study
@@ -147,18 +157,18 @@ export const handler = async (event: APIGatewayEvent) => {
       const studyId = event.pathParameters?.['studyId'] ?? '';
 
       if (!userId) {
-        return corsResponse(400, { message: 'Missing authentication.' });
+        return corsResponse(400, { message: 'Missing authentication.' }, origin);
       }
       if (!studyId) {
-        return corsResponse(400, { message: 'Missing studyId path parameter.' });
+        return corsResponse(400, { message: 'Missing studyId path parameter.' }, origin);
       }
 
       const study = await getStudy(userId, studyId);
       if (!study) {
-        return corsResponse(404, { message: 'Study not found.' });
+        return corsResponse(404, { message: 'Study not found.' }, origin);
       }
 
-      return corsResponse(200, study);
+      return corsResponse(200, study, origin);
     }
 
     // GET /studies — list studies for a user
@@ -166,11 +176,11 @@ export const handler = async (event: APIGatewayEvent) => {
       const userId = getUserId(event);
 
       if (!userId) {
-        return corsResponse(400, { message: 'Missing authentication.' });
+        return corsResponse(400, { message: 'Missing authentication.' }, origin);
       }
 
       const studies = await listStudies(userId);
-      return corsResponse(200, studies);
+      return corsResponse(200, studies, origin);
     }
 
     // DELETE /studies/{studyId} — delete a study
@@ -179,23 +189,23 @@ export const handler = async (event: APIGatewayEvent) => {
       const studyId = event.pathParameters?.['studyId'] ?? '';
 
       if (!userId) {
-        return corsResponse(400, { message: 'Missing authentication.' });
+        return corsResponse(400, { message: 'Missing authentication.' }, origin);
       }
       if (!studyId) {
-        return corsResponse(400, { message: 'Missing studyId path parameter.' });
+        return corsResponse(400, { message: 'Missing studyId path parameter.' }, origin);
       }
 
       const deleted = await deleteStudy(userId, studyId);
       if (!deleted) {
-        return corsResponse(404, { message: 'Study not found.' });
+        return corsResponse(404, { message: 'Study not found.' }, origin);
       }
 
-      return corsResponse(200, { message: 'Study deleted.' });
+      return corsResponse(200, { message: 'Study deleted.' }, origin);
     }
 
-    return corsResponse(404, { message: 'Not found' });
+    return corsResponse(404, { message: 'Not found' }, origin);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return corsResponse(500, { message });
+    return corsResponse(500, { message }, origin);
   }
 };

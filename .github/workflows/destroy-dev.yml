@@ -1,0 +1,55 @@
+# Manual: delete the dev stack (dev cost → $0). Type "destroy-dev" to confirm. main only.
+name: destroy-dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type destroy-dev to delete the WordStudyTool-Dev stack
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+
+jobs:
+  destroy:
+    if: inputs.confirm == 'destroy-dev' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: dev
+    concurrency:
+      group: aws-dev
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/package-lock.json
+      - run: npm ci --prefix infra
+      - name: AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::224670540244:role/GitHubDeployRole
+          aws-region: us-east-1
+          role-session-name: gh-${{ github.run_id }}
+          role-duration-seconds: 3600
+      # Never names any other stack. No frontend build exists here, so synth uses the placeholder site.
+      - name: Destroy dev
+        working-directory: infra
+        env:
+          CDK_ALLOW_PLACEHOLDER_SITE: '1'
+        run: npx cdk destroy WordStudyTool-Dev --force

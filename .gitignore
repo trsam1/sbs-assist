@@ -49,3 +49,7 @@ infra/node_modules/
 # System files
 .DS_Store
 Thumbs.db
+# Local runtime config and CDK outputs (never commit)
+public/config.json
+infra/cdk-outputs*.json
+infra/deployed-*.json

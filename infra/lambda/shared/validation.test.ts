@@ -3,13 +3,13 @@ import fc from 'fast-check';
 import { getTestament, validateStrongsNumber } from './validation';
 
 describe('getTestament', () => {
-  it('returns OT for Hebrew Strong\'s numbers', () => {
+  it("returns OT for Hebrew Strong's numbers", () => {
     expect(getTestament('H157')).toBe('OT');
     expect(getTestament('H1')).toBe('OT');
     expect(getTestament('H9999')).toBe('OT');
   });
 
-  it('returns NT for Greek Strong\'s numbers', () => {
+  it("returns NT for Greek Strong's numbers", () => {
     expect(getTestament('G25')).toBe('NT');
     expect(getTestament('G1')).toBe('NT');
     expect(getTestament('G5624')).toBe('NT');
@@ -27,7 +27,7 @@ describe('getTestament', () => {
       fc.property(positiveInt, (num) => {
         expect(getTestament(`H${num}`)).toBe('OT');
         expect(getTestament(`G${num}`)).toBe('NT');
-      })
+      }),
     );
   });
 });

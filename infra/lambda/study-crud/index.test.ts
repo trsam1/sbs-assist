@@ -37,56 +37,84 @@ vi.mock('node:crypto', () => ({
 
 // Set env vars before importing handler
 vi.stubEnv('WORD_STUDIES_TABLE_NAME', 'WordStudies');
-vi.stubEnv('ALLOWED_ORIGIN', 'https://example.cloudfront.net');
+vi.stubEnv('ALLOWED_ORIGINS', 'https://example.cloudfront.net');
 
 import { handler } from './index';
 
-function makePostEvent(body: string | null) {
+type UserId = string | null;
+
+/** Cognito authorizer claims as API Gateway delivers them; no claims when userId is null. */
+function authContext(userId: UserId) {
+  return userId ? { authorizer: { claims: { sub: userId } } } : undefined;
+}
+
+function makePostEvent(body: string | null, userId: UserId = 'user-1') {
   return {
     httpMethod: 'POST',
     resource: '/studies',
     body,
     headers: {},
     pathParameters: null,
+    requestContext: authContext(userId),
   };
 }
 
-function makeGetStudyEvent(userId: string | null, studyId: string | null) {
+function makeGetStudyEvent(userId: UserId, studyId: string | null) {
   return {
     httpMethod: 'GET',
     resource: '/studies/{studyId}',
-    headers: userId ? { 'x-user-id': userId } : {},
+    headers: {},
     pathParameters: studyId ? { studyId } : null,
     body: null,
+    requestContext: authContext(userId),
   };
 }
 
-function makeListEvent(userId: string | null) {
+function makeListEvent(userId: UserId) {
   return {
     httpMethod: 'GET',
     resource: '/studies',
-    headers: userId ? { 'x-user-id': userId } : {},
+    headers: {},
     pathParameters: null,
     body: null,
+    requestContext: authContext(userId),
   };
 }
 
-function makeDeleteEvent(userId: string | null, studyId: string | null) {
+function makeDeleteEvent(userId: UserId, studyId: string | null) {
   return {
     httpMethod: 'DELETE',
     resource: '/studies/{studyId}',
-    headers: userId ? { 'x-user-id': userId } : {},
+    headers: {},
     pathParameters: studyId ? { studyId } : null,
     body: null,
+    requestContext: authContext(userId),
   };
 }
 
 function validBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    userId: 'user-1',
     wordStudies: [],
     ...overrides,
   });
+}
+
+function makeWordStudy(englishDefinition: unknown) {
+  return {
+    word: 'love',
+    strongsNumber: 'G25',
+    englishDefinition,
+    strongsDefinition: 'to love',
+    originalWord: 'ἀγαπάω',
+    transliteration: 'agapao',
+    lexiconEntry: 'From agape',
+    crossReferences: [],
+    aiSummary: '',
+    notes: '',
+    definitionNotes: '',
+    strongsNotes: '',
+    lexiconNotes: '',
+  };
 }
 
 describe('Study CRUD Lambda', () => {
@@ -107,20 +135,35 @@ describe('Study CRUD Lambda', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('POST /studies with missing userId returns 400', async () => {
-      const res = await handler(makePostEvent(JSON.stringify({ wordStudies: [] })));
+    it('POST /studies without auth claims returns 400', async () => {
+      const res = await handler(makePostEvent(validBody(), null));
       expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/authentication/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('POST /studies ignores body.userId; PK uses claims.sub', async () => {
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(makePostEvent(validBody({ userId: 'attacker' }), 'u1'));
+      expect(res.statusCode).toBe(200);
+      const item = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['PK']).toBe('USER#u1');
+      expect(item['GSI1PK']).toBe('USER#u1');
+      expect(item['userId']).toBe('u1');
     });
 
     it('POST /studies with missing wordStudies returns 400', async () => {
-      const res = await handler(makePostEvent(JSON.stringify({ userId: 'u1' })));
+      const res = await handler(makePostEvent(JSON.stringify({ id: 's1' })));
       expect(res.statusCode).toBe(400);
     });
 
-    it('GET /studies/{studyId} with missing X-User-Id returns 400', async () => {
+    it('GET /studies/{studyId} without auth claims returns 400', async () => {
       const res = await handler(makeGetStudyEvent(null, 'study-1'));
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/X-User-Id/i);
+      expect(JSON.parse(res.body).message).toMatch(/authentication/i);
     });
 
     it('GET /studies/{studyId} with missing studyId returns 400', async () => {
@@ -129,12 +172,12 @@ describe('Study CRUD Lambda', () => {
       expect(JSON.parse(res.body).message).toMatch(/studyId/i);
     });
 
-    it('GET /studies with missing X-User-Id returns 400', async () => {
+    it('GET /studies without auth claims returns 400', async () => {
       const res = await handler(makeListEvent(null));
       expect(res.statusCode).toBe(400);
     });
 
-    it('DELETE /studies/{studyId} with missing X-User-Id returns 400', async () => {
+    it('DELETE /studies/{studyId} without auth claims returns 400', async () => {
       const res = await handler(makeDeleteEvent(null, 'study-1'));
       expect(res.statusCode).toBe(400);
     });
@@ -185,14 +228,14 @@ describe('Study CRUD Lambda', () => {
 
       const putInput = mockSend.mock.calls[0][0].input as Record<string, unknown>;
       const item = putInput['Item'] as Record<string, unknown>;
-      expect(item['createdAt'] as string >= before).toBe(true);
-      expect(item['createdAt'] as string <= after).toBe(true);
+      expect((item['createdAt'] as string) >= before).toBe(true);
+      expect((item['createdAt'] as string) <= after).toBe(true);
     });
 
     it('sends correct PutCommand with PK, SK, GSI1PK, GSI1SK fields', async () => {
       mockSend.mockResolvedValueOnce({});
 
-      await handler(makePostEvent(validBody({ userId: 'abc' })));
+      await handler(makePostEvent(validBody(), 'abc'));
 
       const putInput = mockSend.mock.calls[0][0].input as Record<string, unknown>;
       const item = putInput['Item'] as Record<string, unknown>;
@@ -334,6 +377,19 @@ describe('Study CRUD Lambda', () => {
       expect(res.headers).toHaveProperty('Access-Control-Allow-Origin');
       expect(res.headers).toHaveProperty('Access-Control-Allow-Methods');
     });
+
+    it('echoes an allowed request Origin and falls back for an unknown one', async () => {
+      const allowed = await handler({
+        ...makeListEvent(null),
+        headers: { origin: 'https://example.cloudfront.net' },
+      });
+      expect(allowed.headers['Access-Control-Allow-Origin']).toBe('https://example.cloudfront.net');
+      const unknown = await handler({
+        ...makeListEvent(null),
+        headers: { Origin: 'https://evil.example' },
+      });
+      expect(unknown.headers['Access-Control-Allow-Origin']).toBe('https://example.cloudfront.net');
+    });
   });
 
   // --- Property-based tests ---
@@ -351,8 +407,8 @@ describe('Study CRUD Lambda', () => {
         fc.asyncProperty(validUserId, validWordStudies, async (userId, wordStudies) => {
           mockSend.mockResolvedValueOnce({});
 
-          const body = JSON.stringify({ userId, wordStudies });
-          const res = await handler(makePostEvent(body));
+          const body = JSON.stringify({ wordStudies });
+          const res = await handler(makePostEvent(body, userId));
 
           expect(res.statusCode).toBe(200);
           const parsed = JSON.parse(res.body);
@@ -375,24 +431,16 @@ describe('Study CRUD Lambda', () => {
       await fc.assert(
         fc.asyncProperty(validUserId, async (userId) => {
           const wordStudies = [
-            {
+            makeWordStudy({
               word: 'love',
-              strongsNumber: 'G25',
-              englishDefinition: 'affection',
-              strongsDefinition: 'to love',
-              originalWord: 'ἀγαπάω',
-              transliteration: 'agapao',
-              lexiconEntry: 'From agape',
-              crossReferences: [],
-              aiSummary: '',
-              notes: '',
-            },
+              meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'affection' }] }],
+            }),
           ];
 
           // Mock the PutCommand for save
           mockSend.mockResolvedValueOnce({});
 
-          const saveRes = await handler(makePostEvent(JSON.stringify({ userId, wordStudies })));
+          const saveRes = await handler(makePostEvent(JSON.stringify({ wordStudies }), userId));
           expect(saveRes.statusCode).toBe(200);
           const { studyId } = JSON.parse(saveRes.body);
 
@@ -412,6 +460,23 @@ describe('Study CRUD Lambda', () => {
           mockSend.mockReset();
         }),
       );
+    });
+  });
+
+  // --- Legacy data (englishDefinition stored as a plain string) ---
+
+  describe('legacy englishDefinition', () => {
+    it('round-trips a legacy string englishDefinition unchanged', async () => {
+      const wordStudies = [makeWordStudy('an intense feeling of deep affection')];
+      mockSend.mockResolvedValueOnce({});
+      const saveRes = await handler(makePostEvent(JSON.stringify({ wordStudies }), 'u1'));
+      expect(saveRes.statusCode).toBe(200);
+      const savedItem = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'];
+
+      mockSend.mockResolvedValueOnce({ Item: savedItem });
+      const getRes = await handler(makeGetStudyEvent('u1', JSON.parse(saveRes.body).studyId));
+      expect(getRes.statusCode).toBe(200);
+      expect(JSON.parse(getRes.body).wordStudies).toEqual(wordStudies);
     });
   });
 });

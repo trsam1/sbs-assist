@@ -16,6 +16,13 @@
     "outDir": "./cdk.out",
     "rootDir": "."
   },
-  "include": ["bin/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "lambda/**/*.ts"],
+  "include": [
+    "bin/**/*.ts",
+    "lib/**/*.ts",
+    "scripts/**/*.ts",
+    "lambda/**/*.ts",
+    "test/**/*.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "cdk.out"]
 }

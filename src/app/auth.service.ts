@@ -8,16 +8,22 @@ import {
   getCurrentUser,
   fetchAuthSession,
 } from 'aws-amplify/auth';
-import { environment } from './environment';
+import { RuntimeConfig } from './environment';
 
-Amplify.configure({
-  Auth: {
-    Cognito: {
-      userPoolId: environment.cognitoUserPoolId,
-      userPoolClientId: environment.cognitoUserPoolClientId,
+/**
+ * Configures Amplify from the runtime config. Called once by the app initializer
+ * (app.config.ts) before any component, and therefore AuthService, is created.
+ */
+export function configureAmplify(cfg: RuntimeConfig): void {
+  Amplify.configure({
+    Auth: {
+      Cognito: {
+        userPoolId: cfg.cognitoUserPoolId,
+        userPoolClientId: cfg.cognitoUserPoolClientId,
+      },
     },
-  },
-});
+  });
+}
 
 export type AuthState = 'loading' | 'signedOut' | 'signedIn' | 'confirmSignUp';
 

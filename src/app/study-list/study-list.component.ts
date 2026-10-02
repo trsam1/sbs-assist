@@ -1,10 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { StudyCrudService } from '../study-crud.service';
@@ -22,7 +16,12 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
         <h2 class="title is-4">My Word Studies</h2>
 
         @if (state() === 'loading') {
-          <div class="has-text-centered py-5" aria-live="polite" aria-busy="true" data-testid="loading">
+          <div
+            class="has-text-centered py-5"
+            aria-live="polite"
+            aria-busy="true"
+            data-testid="loading"
+          >
             <p>Loading your studies…</p>
           </div>
         }
@@ -61,7 +60,7 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
                     <tr data-testid="study-row">
                       <td data-testid="study-word">{{ firstWord(study) }}</td>
                       <td data-testid="study-strongs">{{ firstStrongsNumber(study) }}</td>
-                      <td data-testid="study-date">{{ study.updatedAt | date:'medium' }}</td>
+                      <td data-testid="study-date">{{ study.updatedAt | date: 'medium' }}</td>
                       <td>
                         <div class="buttons are-small">
                           <button
@@ -97,7 +96,7 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 
     @if (studyToDelete()) {
       <div class="modal is-active" data-testid="delete-modal">
-        <div class="modal-background" (click)="cancelDelete()"></div>
+        <div class="modal-background" aria-hidden="true" (click)="cancelDelete()"></div>
         <div
           class="modal-card"
           role="alertdialog"
@@ -118,8 +117,7 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
             <p>
               Are you sure you want to delete the study for
               <strong>{{ firstWord(studyToDelete()!) }}</strong>
-              ({{ firstStrongsNumber(studyToDelete()!) }})?
-              This action cannot be undone.
+              ({{ firstStrongsNumber(studyToDelete()!) }})? This action cannot be undone.
             </p>
           </section>
           <footer class="modal-card-foot">

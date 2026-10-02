@@ -66,7 +66,7 @@ describe('StudyWorksheetComponent', () => {
     expect(def?.textContent).toContain('deep affection');
   });
 
-  it('should show the Strong\'s number form in step 2', () => {
+  it("should show the Strong's number form in step 2", () => {
     // Navigate to step 2
     const nextBtn = query('[data-testid="step1-next"]') as HTMLButtonElement;
     nextBtn.click();

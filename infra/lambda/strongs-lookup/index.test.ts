@@ -27,7 +27,7 @@ vi.mock('@aws-sdk/lib-dynamodb', () => {
 
 // Set env vars before importing handler
 vi.stubEnv('STRONGS_TABLE_NAME', 'StrongsData');
-vi.stubEnv('ALLOWED_ORIGIN', 'https://example.cloudfront.net');
+vi.stubEnv('ALLOWED_ORIGINS', 'https://example.cloudfront.net');
 
 import { handler } from './index';
 
@@ -42,7 +42,7 @@ function makeEvent(
   };
 }
 
-describe('Strong\'s Lookup Lambda', () => {
+describe("Strong's Lookup Lambda", () => {
   beforeEach(() => {
     mockSend.mockReset();
   });
@@ -60,12 +60,12 @@ describe('Strong\'s Lookup Lambda', () => {
       expect(JSON.parse(res.body).message).toMatch(/Invalid/);
     });
 
-    it('returns 400 for an invalid Strong\'s number', async () => {
+    it("returns 400 for an invalid Strong's number", async () => {
       const res = await handler(makeEvent('/strongs/{strongsNumber}', 'X99'));
       expect(res.statusCode).toBe(400);
     });
 
-    it('returns 400 for an empty string Strong\'s number', async () => {
+    it("returns 400 for an empty string Strong's number", async () => {
       const res = await handler(makeEvent('/strongs/{strongsNumber}', ''));
       expect(res.statusCode).toBe(400);
     });
@@ -75,9 +75,7 @@ describe('Strong\'s Lookup Lambda', () => {
      * Validates Requirement 1 correctness property (inverse).
      */
     it('rejects any non-matching string with 400', async () => {
-      const invalidStrongs = fc
-        .string({ minLength: 1 })
-        .filter((s) => !/^[GH]\d+$/.test(s));
+      const invalidStrongs = fc.string({ minLength: 1 }).filter((s) => !/^[GH]\d+$/.test(s));
 
       await fc.assert(
         fc.asyncProperty(invalidStrongs, async (input) => {
@@ -162,7 +160,7 @@ describe('Strong\'s Lookup Lambda', () => {
      * non-undefined string fields (either real data or fallback).
      * Validates Requirement 2 correctness property.
      */
-    it('always returns non-undefined string fields for any valid Strong\'s number', async () => {
+    it("always returns non-undefined string fields for any valid Strong's number", async () => {
       const validStrongs = fc.oneof(
         fc.integer({ min: 1, max: 9999 }).map((n) => `G${n}`),
         fc.integer({ min: 1, max: 9999 }).map((n) => `H${n}`),
@@ -204,9 +202,7 @@ describe('Strong\'s Lookup Lambda', () => {
         ],
       });
 
-      const res = await handler(
-        makeEvent('/strongs/{strongsNumber}/cross-references', 'G25'),
-      );
+      const res = await handler(makeEvent('/strongs/{strongsNumber}/cross-references', 'G25'));
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
@@ -219,9 +215,7 @@ describe('Strong\'s Lookup Lambda', () => {
     it('returns empty array when no cross-references exist', async () => {
       mockSend.mockResolvedValueOnce({ Items: [] });
 
-      const res = await handler(
-        makeEvent('/strongs/{strongsNumber}/cross-references', 'H9999'),
-      );
+      const res = await handler(makeEvent('/strongs/{strongsNumber}/cross-references', 'H9999'));
       const body = JSON.parse(res.body);
       expect(body).toEqual([]);
     });
@@ -229,9 +223,7 @@ describe('Strong\'s Lookup Lambda', () => {
     it('returns empty array when Items is undefined', async () => {
       mockSend.mockResolvedValueOnce({ Items: undefined });
 
-      const res = await handler(
-        makeEvent('/strongs/{strongsNumber}/cross-references', 'G50'),
-      );
+      const res = await handler(makeEvent('/strongs/{strongsNumber}/cross-references', 'G50'));
       const body = JSON.parse(res.body);
       expect(body).toEqual([]);
     });
@@ -255,9 +247,7 @@ describe('Strong\'s Lookup Lambda', () => {
         fc.asyncProperty(validStrongs, refList, async (sn, refs) => {
           mockSend.mockResolvedValueOnce({ Items: refs });
 
-          const res = await handler(
-            makeEvent('/strongs/{strongsNumber}/cross-references', sn),
-          );
+          const res = await handler(makeEvent('/strongs/{strongsNumber}/cross-references', sn));
           const body = JSON.parse(res.body);
 
           expect(body).toHaveLength(refs.length);
@@ -287,9 +277,7 @@ describe('Strong\'s Lookup Lambda', () => {
     it('returns 500 when DynamoDB throws on cross-reference query', async () => {
       mockSend.mockRejectedValueOnce(new Error('Throughput exceeded'));
 
-      const res = await handler(
-        makeEvent('/strongs/{strongsNumber}/cross-references', 'G25'),
-      );
+      const res = await handler(makeEvent('/strongs/{strongsNumber}/cross-references', 'G25'));
       expect(res.statusCode).toBe(500);
       expect(JSON.parse(res.body).message).toBe('Throughput exceeded');
     });

@@ -13,15 +13,12 @@ describe('App', () => {
       isSignedIn: (() => true) as unknown as AuthService['isSignedIn'],
       userEmail: (() => 'test@example.com') as unknown as AuthService['userEmail'],
       error: (() => null) as unknown as AuthService['error'],
-      signOut: async () => {},
+      signOut: () => Promise.resolve(),
     };
 
     TestBed.configureTestingModule({
       imports: [App],
-      providers: [
-        provideRouter([]),
-        { provide: AuthService, useValue: mockAuth },
-      ],
+      providers: [provideRouter([]), { provide: AuthService, useValue: mockAuth }],
     });
   });
 

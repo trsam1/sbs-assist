@@ -1,26 +1,12 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  output,
-} from '@angular/core';
-import {
-  FormControl,
-  FormGroup,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms';
+import { ChangeDetectionStrategy, Component, output } from '@angular/core';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 
 @Component({
   selector: 'app-study-input',
   imports: [ReactiveFormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <form
-      [formGroup]="form"
-      (ngSubmit)="onSubmit()"
-      class="box"
-      aria-label="Word study input"
-    >
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="box" aria-label="Word study input">
       <div class="field">
         <label class="label" for="word-input">English Word</label>
         <div class="control">
@@ -37,19 +23,13 @@ import {
           />
         </div>
         @if (showError()) {
-          <p id="word-error" class="help is-danger" role="alert">
-            Please enter a word to study.
-          </p>
+          <p id="word-error" class="help is-danger" role="alert">Please enter a word to study.</p>
         }
       </div>
 
       <div class="field">
         <div class="control">
-          <button
-            type="submit"
-            class="button is-primary"
-            [disabled]="form.invalid"
-          >
+          <button type="submit" class="button is-primary" [disabled]="form.invalid">
             Begin Study
           </button>
         </div>

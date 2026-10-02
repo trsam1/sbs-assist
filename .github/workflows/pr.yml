@@ -1,0 +1,118 @@
+# PR checks: verify, then a read-only cdk diff + stateful guard posted as one updating
+# comment. `ci-ok` is the ONLY required status check (docs-only PRs skip verify/diff).
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NG_CLI_ANALYTICS: 'false'
+  CI: 'true'
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Detect code changes (anything other than *.md and .kiro/**)
+        id: filter
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+          printf 'Changed files:\n%s\n' "$changed"
+          if grep -qvE '^(.*\.md|\.kiro/.*)$' <<<"$changed"; then code=true; else code=false; fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "code=$code"
+
+  verify:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+
+  diff:
+    needs: [changes, verify]
+    # Fork PRs get no OIDC token and must never reach AWS.
+    if: needs.changes.outputs.code == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/package-lock.json
+      - run: npm ci --prefix infra
+      - name: Download site build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site-dist
+          path: dist/word-study-tool/browser
+      - name: AWS credentials (read-only diff role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::224670540244:role/GitHubDiffRole
+          aws-region: us-east-1
+          role-session-name: gh-${{ github.run_id }}
+          role-duration-seconds: 3600
+      # --method template: read-only (no change set, no asset upload). Exits 0 when there are
+      # differences; pipefail (shell: bash) still fails the step on CLI/credential errors.
+      - name: cdk diff
+        id: diff
+        working-directory: infra
+        run: npx cdk diff WordStudyToolStack WordStudyTool-Dev PipelineBootstrapStack --method template 2>&1 | tee ../cdk-diff.txt
+      - name: Stateful guard (prod)
+        id: guard
+        working-directory: infra
+        run: |
+          aws cloudformation get-template --stack-name WordStudyToolStack --template-stage Original \
+            --query TemplateBody --output json > deployed-prod.json
+          npm run guard -- --deployed deployed-prod.json --synth cdk.out/WordStudyToolStack.template.json 2>&1 | tee ../guard.txt
+      - name: PR comment
+        if: always() && steps.diff.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci/pr-comment.sh "$PR_NUMBER"
+
+  ci-ok:
+    if: always()
+    needs: [changes, verify, diff]
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          VERIFY: ${{ needs.verify.result }}
+          DIFF: ${{ needs.diff.result }}
+        run: |
+          for r in "$CHANGES" "$VERIFY" "$DIFF"; do
+            [[ "$r" == "success" || "$r" == "skipped" ]] || { echo "upstream result: $r"; exit 1; }
+          done
+          [[ "$CHANGES" == "success" ]] || { echo "changes job must succeed"; exit 1; }

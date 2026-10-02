@@ -13,10 +13,7 @@
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import {
-  BatchWriteCommand,
-  DynamoDBDocumentClient,
-} from '@aws-sdk/lib-dynamodb';
+import { BatchWriteCommand, DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import * as https from 'node:https';
 
 // ---------------------------------------------------------------------------
@@ -139,9 +136,7 @@ function buildLexiconEntry(entry: DictionaryEntry): string {
 /**
  * Convert dictionary entries into DynamoDB write requests (DEF + LEXICON per entry).
  */
-function buildWriteRequests(
-  dict: Record<string, DictionaryEntry>,
-): WriteRequest[] {
+function buildWriteRequests(dict: Record<string, DictionaryEntry>): WriteRequest[] {
   const requests: WriteRequest[] = [];
 
   for (const [strongsNum, entry] of Object.entries(dict)) {
@@ -200,14 +195,10 @@ async function batchWrite(
 
       const result = await docClient.send(cmd);
 
-      const retryItems = result.UnprocessedItems?.[TABLE_NAME] as
-        | WriteRequest[]
-        | undefined;
+      const retryItems = result.UnprocessedItems?.[TABLE_NAME] as WriteRequest[] | undefined;
 
       if (retryItems && retryItems.length > 0) {
-        console.log(
-          `  ⏳ ${retryItems.length} unprocessed items, retrying...`,
-        );
+        console.log(`  ⏳ ${retryItems.length} unprocessed items, retrying...`);
         unprocessed = retryItems;
         // Brief pause before retry to respect throughput
         await new Promise((r) => setTimeout(r, 200));

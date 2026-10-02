@@ -17,9 +17,7 @@ import { AuthComponent } from './auth/auth.component';
     } @else {
       <nav class="navbar is-primary" role="navigation" aria-label="main navigation">
         <div class="navbar-brand">
-          <a class="navbar-item has-text-weight-bold" routerLink="/">
-            Bible Word Study Tool
-          </a>
+          <a class="navbar-item has-text-weight-bold" routerLink="/"> Bible Word Study Tool </a>
           <button
             class="navbar-burger"
             [class.is-active]="isMobileMenuOpen()"
@@ -42,12 +40,11 @@ import { AuthComponent } from './auth/auth.component';
               routerLink="/"
               routerLinkActive="is-active"
               [routerLinkActiveOptions]="{ exact: true }"
-            >My Studies</a>
-            <a
-              class="navbar-item"
-              routerLink="/study/new"
-              routerLinkActive="is-active"
-            >New Study</a>
+              >My Studies</a
+            >
+            <a class="navbar-item" routerLink="/study/new" routerLinkActive="is-active"
+              >New Study</a
+            >
           </div>
           <div class="navbar-end">
             <div class="navbar-item">

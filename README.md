@@ -44,15 +44,16 @@ To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use th
 ng test
 ```
 
-## Running end-to-end tests
+## End-to-end tests
 
-For end-to-end (e2e) testing, run:
+There is no browser e2e suite and no `e2e` target. `src/app/e2e-integration.spec.ts` is an integration test of the study flow that runs inside `ng test` with mocked HTTP. Post-deploy checks run in CI via `scripts/ci/smoke-test.sh`.
 
-```bash
-ng e2e
-```
+## Development & delivery
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+- Node 22 (`.nvmrc`). Install with `npm ci && npm ci --prefix infra`.
+- `npm run verify` runs the full gate that CI runs: lint, format check, frontend tests, build, infra typecheck, infra tests, and `cdk synth` for every stack.
+- `npm start` needs a local `public/config.json` (copy `public/config.example.json` and fill in the dev stack outputs).
+- Deploys happen only through GitHub Actions: PR → merge → dev → prod (with approval). See [.kiro/steering/delivery.md](.kiro/steering/delivery.md) for the flow, dev deploy/destroy, costs, and one-time setup, and [docs/domain-cutover.md](docs/domain-cutover.md) for the planned `axiostools.teksnextdoor.com` move.
 
 ## Additional Resources
 
