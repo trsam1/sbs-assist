@@ -17,7 +17,7 @@ function makeStudy(overrides: Partial<StudyWorksheet> = {}): StudyWorksheet {
       {
         word: 'love',
         strongsNumber: 'G25',
-        englishDefinition: 'deep affection',
+        englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
         strongsDefinition: 'to love',
         originalWord: 'ἀγαπάω',
         transliteration: 'agapaō',
@@ -25,9 +25,11 @@ function makeStudy(overrides: Partial<StudyWorksheet> = {}): StudyWorksheet {
         crossReferences: [],
         aiSummary: '',
         notes: '',
+        definitionNotes: '',
+        strongsNotes: '',
+        lexiconNotes: '',
       },
     ],
-    status: 'in_progress',
     ...overrides,
   };
 }
@@ -80,7 +82,7 @@ describe('StudyListComponent', () => {
         wordStudies: [{
           word: 'faith',
           strongsNumber: 'G4102',
-          englishDefinition: '',
+          englishDefinition: null,
           strongsDefinition: 'persuasion',
           originalWord: 'πίστις',
           transliteration: 'pistis',
@@ -88,8 +90,10 @@ describe('StudyListComponent', () => {
           crossReferences: [],
           aiSummary: '',
           notes: '',
+          definitionNotes: '',
+          strongsNotes: '',
+          lexiconNotes: '',
         }],
-        status: 'completed',
       }),
     ];
 
@@ -107,9 +111,6 @@ describe('StudyListComponent', () => {
 
     const strongs = queryAll('[data-testid="study-strongs"]').map((el) => el.textContent?.trim());
     expect(strongs).toEqual(['G25', 'G4102']);
-
-    const statuses = queryAll('[data-testid="study-status"]').map((el) => el.textContent?.trim());
-    expect(statuses).toEqual(['In Progress', 'Completed']);
   });
 
   it('should show empty state when no studies exist', () => {
@@ -184,22 +185,6 @@ describe('StudyListComponent', () => {
 
     const count = query('[data-testid="study-count"]');
     expect(count?.textContent).toContain('2 study(ies) found');
-  });
-
-  it('should display status tags with correct classes', () => {
-    fixture.detectChanges();
-    httpTesting = getHttpTesting();
-
-    const req = httpTesting.expectOne((r) => r.url === `${environment.apiUrl}/studies`);
-    req.flush([
-      makeStudy({ id: 's1', status: 'in_progress' }),
-      makeStudy({ id: 's2', status: 'completed' }),
-    ]);
-    fixture.detectChanges();
-
-    const tags = queryAll('[data-testid="study-status"] .tag');
-    expect(tags[0].classList.contains('is-warning')).toBe(true);
-    expect(tags[1].classList.contains('is-success')).toBe(true);
   });
 
   it('should render an Open button for each study row', () => {

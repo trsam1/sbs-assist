@@ -15,7 +15,6 @@ interface StudyRecord {
   createdAt: string;
   updatedAt: string;
   wordStudies: StudyWorksheet['wordStudies'];
-  status: StudyWorksheet['status'];
   /** May be present if the record was already mapped. */
   id?: string;
 }
@@ -27,7 +26,6 @@ function toWorksheet(record: StudyRecord): StudyWorksheet {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     wordStudies: record.wordStudies,
-    status: record.status,
   };
 }
 
@@ -66,7 +64,6 @@ export class StudyCrudService {
         userId: worksheet.userId,
         createdAt: worksheet.createdAt || undefined,
         wordStudies: worksheet.wordStudies,
-        status: worksheet.status,
       })
       .pipe(map((res) => res.studyId));
   }

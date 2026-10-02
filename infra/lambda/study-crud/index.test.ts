@@ -85,7 +85,6 @@ function validBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     userId: 'user-1',
     wordStudies: [],
-    status: 'in_progress',
     ...overrides,
   });
 }
@@ -109,17 +108,12 @@ describe('Study CRUD Lambda', () => {
     });
 
     it('POST /studies with missing userId returns 400', async () => {
-      const res = await handler(makePostEvent(JSON.stringify({ wordStudies: [], status: 'in_progress' })));
+      const res = await handler(makePostEvent(JSON.stringify({ wordStudies: [] })));
       expect(res.statusCode).toBe(400);
     });
 
     it('POST /studies with missing wordStudies returns 400', async () => {
-      const res = await handler(makePostEvent(JSON.stringify({ userId: 'u1', status: 'in_progress' })));
-      expect(res.statusCode).toBe(400);
-    });
-
-    it('POST /studies with invalid status returns 400', async () => {
-      const res = await handler(makePostEvent(JSON.stringify({ userId: 'u1', wordStudies: [], status: 'draft' })));
+      const res = await handler(makePostEvent(JSON.stringify({ userId: 'u1' })));
       expect(res.statusCode).toBe(400);
     });
 
@@ -213,7 +207,7 @@ describe('Study CRUD Lambda', () => {
 
   describe('GET /studies/{studyId}', () => {
     it('returns 200 with study data when found', async () => {
-      const study = { studyId: 's1', userId: 'u1', wordStudies: [], status: 'in_progress' };
+      const study = { studyId: 's1', userId: 'u1', wordStudies: [] };
       mockSend.mockResolvedValueOnce({ Item: study });
 
       const res = await handler(makeGetStudyEvent('u1', 's1'));
@@ -350,18 +344,14 @@ describe('Study CRUD Lambda', () => {
      * Validates: Requirements 6
      */
     it('POST /studies returns 200 with non-empty studyId for any valid body', async () => {
-      const validStatus = fc.oneof(
-        fc.constant('in_progress' as const),
-        fc.constant('completed' as const),
-      );
       const validUserId = fc.string({ minLength: 1 }).filter((s) => s.trim().length > 0);
       const validWordStudies = fc.constant([]);
 
       await fc.assert(
-        fc.asyncProperty(validUserId, validWordStudies, validStatus, async (userId, wordStudies, status) => {
+        fc.asyncProperty(validUserId, validWordStudies, async (userId, wordStudies) => {
           mockSend.mockResolvedValueOnce({});
 
-          const body = JSON.stringify({ userId, wordStudies, status });
+          const body = JSON.stringify({ userId, wordStudies });
           const res = await handler(makePostEvent(body));
 
           expect(res.statusCode).toBe(200);
@@ -379,15 +369,11 @@ describe('Study CRUD Lambda', () => {
      * same userId and returned studyId retrieves matching wordStudies and status.
      * Validates: Requirements 6
      */
-    it('save then get round-trip preserves wordStudies and status', async () => {
-      const validStatus = fc.oneof(
-        fc.constant('in_progress' as const),
-        fc.constant('completed' as const),
-      );
+    it('save then get round-trip preserves wordStudies', async () => {
       const validUserId = fc.string({ minLength: 1 }).filter((s) => s.trim().length > 0);
 
       await fc.assert(
-        fc.asyncProperty(validUserId, validStatus, async (userId, status) => {
+        fc.asyncProperty(validUserId, async (userId) => {
           const wordStudies = [
             {
               word: 'love',
@@ -406,7 +392,7 @@ describe('Study CRUD Lambda', () => {
           // Mock the PutCommand for save
           mockSend.mockResolvedValueOnce({});
 
-          const saveRes = await handler(makePostEvent(JSON.stringify({ userId, wordStudies, status })));
+          const saveRes = await handler(makePostEvent(JSON.stringify({ userId, wordStudies })));
           expect(saveRes.statusCode).toBe(200);
           const { studyId } = JSON.parse(saveRes.body);
 
@@ -422,7 +408,6 @@ describe('Study CRUD Lambda', () => {
 
           const retrieved = JSON.parse(getRes.body);
           expect(retrieved.wordStudies).toEqual(wordStudies);
-          expect(retrieved.status).toBe(status);
 
           mockSend.mockReset();
         }),

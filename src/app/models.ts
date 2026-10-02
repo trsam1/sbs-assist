@@ -8,11 +8,30 @@ export interface CrossReference {
   notes: string;
 }
 
+/** A single definition within an English meaning group. */
+export interface EnglishDefinitionEntry {
+  definition: string;
+  example?: string;
+}
+
+/** A group of definitions for a specific part of speech. */
+export interface EnglishMeaning {
+  partOfSpeech: string;
+  definitions: EnglishDefinitionEntry[];
+}
+
+/** Structured English dictionary result stored with a word study. */
+export interface EnglishDefinitionData {
+  word: string;
+  phonetic?: string;
+  meanings: EnglishMeaning[];
+}
+
 /** All data captured for a single word study entry. */
 export interface WordStudyEntry {
   word: string;
   strongsNumber: string;
-  englishDefinition: string;
+  englishDefinition: EnglishDefinitionData | null;
   strongsDefinition: string;
   originalWord: string;
   transliteration: string;
@@ -20,6 +39,12 @@ export interface WordStudyEntry {
   crossReferences: CrossReference[];
   aiSummary: string;
   notes: string;
+  /** Per-step notes: English Definition observations. */
+  definitionNotes: string;
+  /** Per-step notes: Strong's Concordance observations. */
+  strongsNotes: string;
+  /** Per-step notes: Lexicon Entry observations. */
+  lexiconNotes: string;
 }
 
 /** The full study worksheet persisted per user. */
@@ -29,7 +54,6 @@ export interface StudyWorksheet {
   createdAt: string;
   updatedAt: string;
   wordStudies: WordStudyEntry[];
-  status: 'in_progress' | 'completed';
 }
 
 /** Input shape emitted by the study input form. */

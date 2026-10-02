@@ -31,11 +31,6 @@ interface SaveStudyBody {
   userId: string;
   createdAt?: string;
   wordStudies: WordStudyEntry[];
-  status: 'in_progress' | 'completed';
-}
-
-function isValidStatus(value: unknown): value is 'in_progress' | 'completed' {
-  return value === 'in_progress' || value === 'completed';
 }
 
 function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
@@ -48,7 +43,6 @@ function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
     const obj = parsed as Record<string, unknown>;
 
     if (!Array.isArray(obj['wordStudies'])) return null;
-    if (!isValidStatus(obj['status'])) return null;
 
     return {
       id: typeof obj['id'] === 'string' && obj['id'].length > 0 ? obj['id'] : undefined,
@@ -57,7 +51,6 @@ function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
         ? obj['createdAt'] as string
         : undefined,
       wordStudies: obj['wordStudies'] as WordStudyEntry[],
-      status: obj['status'] as 'in_progress' | 'completed',
     };
   } catch {
     return null;
@@ -76,7 +69,6 @@ async function saveWordStudy(body: SaveStudyBody): Promise<{ studyId: string }> 
     createdAt: body.createdAt ?? now,
     updatedAt: now,
     wordStudies: body.wordStudies,
-    status: body.status,
     GSI1PK: `USER#${body.userId}`,
     GSI1SK: `UPDATED#${now}`,
   };
@@ -139,7 +131,7 @@ export const handler = async (event: APIGatewayEvent) => {
       const body = parseSaveBody(event.body);
       if (!body) {
         return corsResponse(400, {
-          message: 'Invalid request body. Required: wordStudies (array), status ("in_progress" | "completed").',
+          message: 'Invalid request body. Required: wordStudies (array).',
         });
       }
 

@@ -19,7 +19,7 @@ describe('StudyCrudService', () => {
       {
         word: 'love',
         strongsNumber: 'G25',
-        englishDefinition: 'deep affection',
+        englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
         strongsDefinition: 'to love',
         originalWord: 'ἀγαπάω',
         transliteration: 'agapaō',
@@ -27,9 +27,11 @@ describe('StudyCrudService', () => {
         crossReferences: [{ reference: 'Romans 5:8', notes: 'God demonstrates love' }],
         aiSummary: '',
         notes: 'Overall notes',
+        definitionNotes: '',
+        strongsNotes: '',
+        lexiconNotes: '',
       },
     ],
-    status: 'in_progress',
   };
 
   beforeEach(() => {
@@ -55,7 +57,6 @@ describe('StudyCrudService', () => {
       userId: 'anon-abc123',
       createdAt: undefined,
       wordStudies: mockWorksheet.wordStudies,
-      status: 'in_progress',
     });
 
     req.flush({ studyId: 'new-study-id' });
@@ -100,7 +101,6 @@ describe('StudyCrudService', () => {
       createdAt: savedWorksheet.createdAt,
       updatedAt: savedWorksheet.updatedAt,
       wordStudies: savedWorksheet.wordStudies,
-      status: savedWorksheet.status,
     });
     expect(result).toEqual(savedWorksheet);
   });
@@ -130,8 +130,8 @@ describe('StudyCrudService', () => {
     expect(req.request.method).toBe('GET');
 
     req.flush([
-      { studyId: 's1', userId: mockWorksheet.userId, createdAt: mockWorksheet.createdAt, updatedAt: '2025-02-01T00:00:00.000Z', wordStudies: mockWorksheet.wordStudies, status: mockWorksheet.status },
-      { studyId: 's2', userId: mockWorksheet.userId, createdAt: mockWorksheet.createdAt, updatedAt: '2025-01-01T00:00:00.000Z', wordStudies: mockWorksheet.wordStudies, status: mockWorksheet.status },
+      { studyId: 's1', userId: mockWorksheet.userId, createdAt: mockWorksheet.createdAt, updatedAt: '2025-02-01T00:00:00.000Z', wordStudies: mockWorksheet.wordStudies },
+      { studyId: 's2', userId: mockWorksheet.userId, createdAt: mockWorksheet.createdAt, updatedAt: '2025-01-01T00:00:00.000Z', wordStudies: mockWorksheet.wordStudies },
     ]);
     expect(result).toEqual(expected);
   });

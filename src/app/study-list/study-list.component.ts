@@ -53,7 +53,6 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
                     <th scope="col">Word</th>
                     <th scope="col">Strong's #</th>
                     <th scope="col">Last Updated</th>
-                    <th scope="col">Status</th>
                     <th scope="col"><span class="is-sr-only">Actions</span></th>
                   </tr>
                 </thead>
@@ -63,15 +62,6 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
                       <td data-testid="study-word">{{ firstWord(study) }}</td>
                       <td data-testid="study-strongs">{{ firstStrongsNumber(study) }}</td>
                       <td data-testid="study-date">{{ study.updatedAt | date:'medium' }}</td>
-                      <td data-testid="study-status">
-                        <span
-                          class="tag"
-                          [class.is-success]="study.status === 'completed'"
-                          [class.is-warning]="study.status === 'in_progress'"
-                        >
-                          {{ statusLabel(study.status) }}
-                        </span>
-                      </td>
                       <td>
                         <div class="buttons are-small">
                           <button
@@ -241,9 +231,5 @@ export class StudyListComponent implements OnInit {
 
   firstStrongsNumber(study: StudyWorksheet): string {
     return study.wordStudies[0]?.strongsNumber ?? '—';
-  }
-
-  statusLabel(status: 'in_progress' | 'completed'): string {
-    return status === 'completed' ? 'Completed' : 'In Progress';
   }
 }

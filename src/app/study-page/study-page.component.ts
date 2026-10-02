@@ -161,14 +161,6 @@ export class StudyPageComponent implements OnInit {
     this.notes.set(value);
   }
 
-  private flattenEnglishDef(): string {
-    const result = this.englishDefinition();
-    if (!result || result.meanings.length === 0) return '';
-    return result.meanings
-      .map((m) => `(${m.partOfSpeech}) ${m.definitions.map((d) => d.definition).join('; ')}`)
-      .join(' | ');
-  }
-
   onGenerateAiSummary(): void {
     const sd = this.strongsData();
     console.log('onGenerateAiSummary called, strongsData:', sd ? 'present' : 'null');
@@ -179,7 +171,7 @@ export class StudyPageComponent implements OnInit {
     const entry: WordStudyEntry = {
       word: this.word(),
       strongsNumber: this.strongsNumber() ?? '',
-      englishDefinition: this.flattenEnglishDef(),
+      englishDefinition: this.englishDefinition() ?? null,
       strongsDefinition: sd.definition,
       originalWord: sd.originalWord,
       transliteration: sd.transliteration,
@@ -187,6 +179,9 @@ export class StudyPageComponent implements OnInit {
       crossReferences: this.crossReferences() ?? [],
       aiSummary: '',
       notes: this.notes() ?? '',
+      definitionNotes: this.step1Notes(),
+      strongsNotes: this.step2Notes(),
+      lexiconNotes: this.step3Notes(),
     };
 
     this.aiSummaryService.generateSummary(entry).subscribe({
@@ -206,7 +201,7 @@ export class StudyPageComponent implements OnInit {
     const entry: WordStudyEntry = {
       word: this.word(),
       strongsNumber: this.strongsNumber() ?? '',
-      englishDefinition: this.flattenEnglishDef(),
+      englishDefinition: this.englishDefinition() ?? null,
       strongsDefinition: this.strongsData()?.definition ?? '',
       originalWord: this.strongsData()?.originalWord ?? '',
       transliteration: this.strongsData()?.transliteration ?? '',
@@ -214,6 +209,9 @@ export class StudyPageComponent implements OnInit {
       crossReferences: this.crossReferences() ?? [],
       aiSummary: this.aiSummary() ?? '',
       notes: this.notes() ?? '',
+      definitionNotes: this.step1Notes(),
+      strongsNotes: this.step2Notes(),
+      lexiconNotes: this.step3Notes(),
     };
 
     const worksheet: StudyWorksheet = {
@@ -222,7 +220,6 @@ export class StudyPageComponent implements OnInit {
       createdAt: '',
       updatedAt: '',
       wordStudies: [entry],
-      status: 'in_progress',
     };
 
     this.studyCrud.saveStudy(worksheet).subscribe({
@@ -250,29 +247,31 @@ export class StudyPageComponent implements OnInit {
         }
 
         this.word.set(entry.word);
-        this.strongsNumber.set(entry.strongsNumber);
-        this.englishDefinition.set(
-          entry.englishDefinition
-            ? { word: entry.word, meanings: [{ partOfSpeech: '', definitions: [{ definition: entry.englishDefinition }] }] }
-            : null,
-        );
+        this.strongsNumber.set(entry.strongsNumber || null);
+        this.englishDefinition.set(entry.englishDefinition);
         this.notes.set(entry.notes);
         this.studyId.set(worksheet.id);
-        this.viewAll.set(true);
+        this.step1Notes.set(entry.definitionNotes ?? '');
+        this.step2Notes.set(entry.strongsNotes ?? '');
+        this.step3Notes.set(entry.lexiconNotes ?? '');
 
-        this.strongsData.set({
-          strongsNumber: entry.strongsNumber,
-          definition: entry.strongsDefinition,
-          originalWord: entry.originalWord,
-          transliteration: entry.transliteration,
-          lexiconEntry: entry.lexiconEntry,
-        });
+        if (entry.strongsNumber) {
+          this.viewAll.set(true);
 
-        this.crossReferences.set(entry.crossReferences);
+          this.strongsData.set({
+            strongsNumber: entry.strongsNumber,
+            definition: entry.strongsDefinition,
+            originalWord: entry.originalWord,
+            transliteration: entry.transliteration,
+            lexiconEntry: entry.lexiconEntry,
+          });
 
-        if (entry.aiSummary) {
-          this.aiSummary.set(entry.aiSummary);
-          this.aiSummaryState.set('loaded');
+          this.crossReferences.set(entry.crossReferences);
+
+          if (entry.aiSummary) {
+            this.aiSummary.set(entry.aiSummary);
+            this.aiSummaryState.set('loaded');
+          }
         }
 
         this.loading.set(false);

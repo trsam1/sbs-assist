@@ -18,6 +18,13 @@ interface BedrockResponseBody {
   content?: Array<{ type: string; text?: string }>;
 }
 
+function flattenEnglishDef(def: WordStudyEntry['englishDefinition']): string {
+  if (!def || def.meanings.length === 0) return '';
+  return def.meanings
+    .map((m) => `(${m.partOfSpeech}) ${m.definitions.map((d) => d.definition).join('; ')}`)
+    .join(' | ');
+}
+
 function buildPrompt(entry: WordStudyEntry): string {
   const userObservations = entry.crossReferences
     .filter((ref) => ref.notes.trim().length > 0)
@@ -31,7 +38,7 @@ Strong's Number: ${entry.strongsNumber}
 Strong's Definition: ${entry.strongsDefinition}
 Original Word: ${entry.originalWord} (${entry.transliteration})
 Lexicon Entry: ${entry.lexiconEntry}
-English Definition: ${entry.englishDefinition}
+English Definition: ${flattenEnglishDef(entry.englishDefinition)}
 User's Cross-Reference Observations:
 ${userObservations || 'None provided'}
 User's General Notes: ${entry.notes || 'None'}

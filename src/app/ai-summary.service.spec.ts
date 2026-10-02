@@ -16,7 +16,7 @@ describe('AiSummaryService', () => {
   const mockEntry: WordStudyEntry = {
     word: 'love',
     strongsNumber: 'G25',
-    englishDefinition: 'an intense feeling of deep affection',
+    englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'an intense feeling of deep affection' }] }] },
     strongsDefinition: 'to love (in a social or moral sense)',
     originalWord: 'ἀγαπάω',
     transliteration: 'agapaō',
@@ -26,6 +26,9 @@ describe('AiSummaryService', () => {
     ],
     aiSummary: '',
     notes: 'Self-sacrificial love',
+    definitionNotes: '',
+    strongsNotes: '',
+    lexiconNotes: '',
   };
 
   beforeEach(() => {

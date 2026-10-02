@@ -119,7 +119,7 @@ describe('StudyPageComponent', () => {
         {
           word: 'love',
           strongsNumber: 'G25',
-          englishDefinition: 'deep affection',
+          englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
           strongsDefinition: 'to love',
           originalWord: 'ἀγαπάω',
           transliteration: 'agapaō',
@@ -129,9 +129,11 @@ describe('StudyPageComponent', () => {
           ],
           aiSummary: 'The Greek word agapaō represents self-sacrificial love...',
           notes: 'Overall notes about agape',
+          definitionNotes: '',
+          strongsNotes: '',
+          lexiconNotes: '',
         },
       ],
-      status: 'in_progress' as const,
     };
 
     it('should load study from route param on init', () => {

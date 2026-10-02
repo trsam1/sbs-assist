@@ -43,6 +43,9 @@ __screenshots__/
 infra/cdk.out/
 infra/node_modules/
 
+# Agent working files (reports, task state)
+.agents/
+
 # System files
 .DS_Store
 Thumbs.db
