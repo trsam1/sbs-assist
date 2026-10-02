@@ -96,9 +96,11 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                         @if (dictResult.phonetic) {
                           <p class="has-text-grey is-size-7 mb-3">{{ dictResult.phonetic }}</p>
                         }
-                        @for (meaning of dictResult.meanings; track meaning.partOfSpeech) {
+                        @for (meaning of dictResult.meanings; track $index) {
                           <div class="mb-4">
-                            <p class="has-text-weight-semibold is-italic is-size-7 mb-1">{{ meaning.partOfSpeech }}</p>
+                            @if (meaning.partOfSpeech) {
+                              <p class="has-text-weight-semibold is-italic is-size-7 mb-1">{{ meaning.partOfSpeech }}</p>
+                            }
                             <ol class="ml-4 is-size-7">
                               @for (def of meaning.definitions; track def.definition) {
                                 <li class="mb-1">
@@ -464,7 +466,8 @@ export class StudyWorksheetComponent {
     const result = this.englishDefinition();
     if (!result || result.meanings.length === 0) return '';
     const first = result.meanings[0];
-    return `(${first.partOfSpeech}) ${first.definitions[0]?.definition ?? ''}`;
+    const d = first.definitions[0]?.definition ?? '';
+    return first.partOfSpeech ? `(${first.partOfSpeech}) ${d}` : d;
   });
 
   readonly strongsDefFields = computed(() => {

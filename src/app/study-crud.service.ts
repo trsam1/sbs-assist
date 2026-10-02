@@ -1,8 +1,9 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
-import { StudyWorksheet } from './models';
+import { StudyWorksheet, WordStudyEntry } from './models';
 import { environment } from './environment';
+import { normalizeEnglishDefinition } from './english-definition.normalize';
 
 interface SaveStudyResponse {
   studyId: string;
@@ -14,7 +15,8 @@ interface StudyRecord {
   userId: string;
   createdAt: string;
   updatedAt: string;
-  wordStudies: StudyWorksheet['wordStudies'];
+  /** `englishDefinition` may be a legacy plain string (items saved before 2026-04-27). */
+  wordStudies: (Omit<WordStudyEntry, 'englishDefinition'> & { englishDefinition?: unknown })[];
   /** May be present if the record was already mapped. */
   id?: string;
 }
@@ -25,7 +27,10 @@ function toWorksheet(record: StudyRecord): StudyWorksheet {
     userId: record.userId,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
-    wordStudies: record.wordStudies,
+    wordStudies: (record.wordStudies ?? []).map((e) => ({
+      ...e,
+      englishDefinition: normalizeEnglishDefinition(e.englishDefinition, e.word),
+    })),
   };
 }
 

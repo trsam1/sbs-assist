@@ -156,6 +156,26 @@ describe('StudyPageComponent', () => {
       expect(component.englishDefinition()?.meanings[0]?.definitions[0]?.definition).toBe('deep affection');
     });
 
+    it('should load a legacy study whose englishDefinition is a plain string', () => {
+      const legacy = {
+        ...savedWorksheet,
+        wordStudies: [{ ...savedWorksheet.wordStudies[0], englishDefinition: 'an intense feeling of deep affection' }],
+      };
+      const { fixture, component, httpTesting } = setup({ studyId: 'study-123' });
+      fixture.detectChanges();
+
+      const req = httpTesting.expectOne((r) => r.url === `${environment.apiUrl}/studies/study-123`);
+      req.flush(legacy);
+      fixture.detectChanges();
+
+      expect(component.error()).toBeFalsy();
+      const el: HTMLElement | null = fixture.nativeElement.querySelector('[data-testid="english-definition"]');
+      expect(el).toBeTruthy();
+      expect(el?.textContent).toContain('an intense feeling of deep affection');
+      expect(el?.textContent).not.toContain('()');
+      expect(fixture.nativeElement.textContent).not.toContain('()');
+    });
+
     it('should show error when study load fails', () => {
       const { fixture, component, httpTesting } = setup({ studyId: 'bad-id' });
       fixture.detectChanges();
