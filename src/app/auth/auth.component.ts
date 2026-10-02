@@ -37,8 +37,8 @@ import { AuthService } from '../auth.service';
               } @else {
                 <div class="tabs is-centered">
                   <ul>
-                    <li [class.is-active]="mode() === 'signIn'"><a (click)="mode.set('signIn')">Sign In</a></li>
-                    <li [class.is-active]="mode() === 'signUp'"><a (click)="mode.set('signUp')">Sign Up</a></li>
+                    <li [class.is-active]="mode() === 'signIn'"><a tabindex="0" (click)="mode.set('signIn')" (keydown.enter)="mode.set('signIn')">Sign In</a></li>
+                    <li [class.is-active]="mode() === 'signUp'"><a tabindex="0" (click)="mode.set('signUp')" (keydown.enter)="mode.set('signUp')">Sign Up</a></li>
                   </ul>
                 </div>
 

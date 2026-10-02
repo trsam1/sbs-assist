@@ -10,7 +10,6 @@ import { StudyPageComponent } from './study-page/study-page.component';
 import {
   StrongsStudyResult,
   CrossReference,
-  StudyWorksheet,
   WordStudyEntry,
 } from './models';
 import { environment } from './environment';

@@ -97,7 +97,7 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 
     @if (studyToDelete()) {
       <div class="modal is-active" data-testid="delete-modal">
-        <div class="modal-background" (click)="cancelDelete()"></div>
+        <div class="modal-background" aria-hidden="true" (click)="cancelDelete()"></div>
         <div
           class="modal-card"
           role="alertdialog"

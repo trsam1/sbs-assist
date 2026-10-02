@@ -7,7 +7,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideRouter, ActivatedRoute } from '@angular/router';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { StudyPageComponent } from './study-page.component';
-import { StrongsStudyResult, CrossReference, StudyWorksheet } from '../models';
+import { StrongsStudyResult, CrossReference } from '../models';
 import { environment } from '../environment';
 
 describe('StudyPageComponent', () => {

@@ -163,7 +163,6 @@ export class StudyPageComponent implements OnInit {
 
   onGenerateAiSummary(): void {
     const sd = this.strongsData();
-    console.log('onGenerateAiSummary called, strongsData:', sd ? 'present' : 'null');
     if (!sd) return;
 
     this.aiSummaryState.set('loading');
