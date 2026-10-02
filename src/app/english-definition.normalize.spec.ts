@@ -6,7 +6,9 @@ describe('normalizeEnglishDefinition', () => {
   it('wraps a legacy string as a single meaning with empty part of speech', () => {
     expect(normalizeEnglishDefinition('  an intense feeling of deep affection ', 'love')).toEqual({
       word: 'love',
-      meanings: [{ partOfSpeech: '', definitions: [{ definition: 'an intense feeling of deep affection' }] }],
+      meanings: [
+        { partOfSpeech: '', definitions: [{ definition: 'an intense feeling of deep affection' }] },
+      ],
     });
   });
 

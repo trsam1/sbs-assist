@@ -17,7 +17,10 @@ function makeStudy(overrides: Partial<StudyWorksheet> = {}): StudyWorksheet {
       {
         word: 'love',
         strongsNumber: 'G25',
-        englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
+        englishDefinition: {
+          word: 'love',
+          meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+        },
         strongsDefinition: 'to love',
         originalWord: 'ἀγαπάω',
         transliteration: 'agapaō',
@@ -79,27 +82,27 @@ describe('StudyListComponent', () => {
       makeStudy({ id: 's1' }),
       makeStudy({
         id: 's2',
-        wordStudies: [{
-          word: 'faith',
-          strongsNumber: 'G4102',
-          englishDefinition: null,
-          strongsDefinition: 'persuasion',
-          originalWord: 'πίστις',
-          transliteration: 'pistis',
-          lexiconEntry: '',
-          crossReferences: [],
-          aiSummary: '',
-          notes: '',
-          definitionNotes: '',
-          strongsNotes: '',
-          lexiconNotes: '',
-        }],
+        wordStudies: [
+          {
+            word: 'faith',
+            strongsNumber: 'G4102',
+            englishDefinition: null,
+            strongsDefinition: 'persuasion',
+            originalWord: 'πίστις',
+            transliteration: 'pistis',
+            lexiconEntry: '',
+            crossReferences: [],
+            aiSummary: '',
+            notes: '',
+            definitionNotes: '',
+            strongsNotes: '',
+            lexiconNotes: '',
+          },
+        ],
       }),
     ];
 
-    const req = httpTesting.expectOne(
-      (r) => r.url === `${environment.apiUrl}/studies`,
-    );
+    const req = httpTesting.expectOne((r) => r.url === `${environment.apiUrl}/studies`);
     req.flush(studies);
     fixture.detectChanges();
 
@@ -117,9 +120,7 @@ describe('StudyListComponent', () => {
     fixture.detectChanges();
     httpTesting = getHttpTesting();
 
-    const req = httpTesting.expectOne(
-      (r) => r.url === `${environment.apiUrl}/studies`,
-    );
+    const req = httpTesting.expectOne((r) => r.url === `${environment.apiUrl}/studies`);
     req.flush([]);
     fixture.detectChanges();
 

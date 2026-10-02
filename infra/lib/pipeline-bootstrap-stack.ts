@@ -33,7 +33,8 @@ export class PipelineBootstrapStack extends cdk.Stack {
 
     const cdkRole = (kind: string) =>
       `arn:aws:iam::${account}:role/cdk-hnb659fds-${kind}-role-${account}-${region}`;
-    const stackArn = (stackName: string) => `arn:aws:cloudformation:${region}:${account}:stack/${stackName}/*`;
+    const stackArn = (stackName: string) =>
+      `arn:aws:cloudformation:${region}:${account}:stack/${stackName}/*`;
 
     // Deploy role: environment jobs only (dev, prod). The main-only restriction is
     // enforced by the GitHub environments' deployment-branch policies.
@@ -86,7 +87,11 @@ export class PipelineBootstrapStack extends cdk.Stack {
           'cloudformation:ListStackResources',
           'cloudformation:GetTemplateSummary',
         ],
-        resources: [stackArn('WordStudyToolStack'), stackArn('WordStudyTool-Dev'), stackArn('PipelineBootstrapStack')],
+        resources: [
+          stackArn('WordStudyToolStack'),
+          stackArn('WordStudyTool-Dev'),
+          stackArn('PipelineBootstrapStack'),
+        ],
       }),
     );
     diffRole.addToPolicy(

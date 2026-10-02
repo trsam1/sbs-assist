@@ -19,14 +19,24 @@ function frontendAssetPath(): string {
   if (process.env['CDK_ALLOW_PLACEHOLDER_SITE'] === '1') {
     return path.resolve(__dirname, '../test/fixtures/site');
   }
-  throw new Error(`Frontend build not found at ${dist}. Run "npm run build" at the repo root first.`);
+  throw new Error(
+    `Frontend build not found at ${dist}. Run "npm run build" at the repo root first.`,
+  );
 }
 
 const app = new cdk.App();
 const siteDir = frontendAssetPath();
 
 // Prod: stack ID frozen.
-new WordStudyToolStack(app, STAGES.prod.stackId, { env, config: STAGES.prod, frontendAssetPath: siteDir });
-new WordStudyToolStack(app, STAGES.dev.stackId, { env, config: STAGES.dev, frontendAssetPath: siteDir });
+new WordStudyToolStack(app, STAGES.prod.stackId, {
+  env,
+  config: STAGES.prod,
+  frontendAssetPath: siteDir,
+});
+new WordStudyToolStack(app, STAGES.dev.stackId, {
+  env,
+  config: STAGES.dev,
+  frontendAssetPath: siteDir,
+});
 // Deployed only by the user, locally. Never by CI.
 new PipelineBootstrapStack(app, 'PipelineBootstrapStack', { env });

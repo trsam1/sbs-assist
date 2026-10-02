@@ -27,7 +27,9 @@ describe('parseRuntimeConfig', () => {
   });
 
   it('accepts http://localhost with a port', () => {
-    expect(parseRuntimeConfig({ ...VALID, apiUrl: 'http://localhost:3000' }).apiUrl).toBe('http://localhost:3000');
+    expect(parseRuntimeConfig({ ...VALID, apiUrl: 'http://localhost:3000' }).apiUrl).toBe(
+      'http://localhost:3000',
+    );
   });
 
   it('rejects non-objects', () => {
@@ -41,8 +43,12 @@ describe('parseRuntimeConfig', () => {
       const missing: Record<string, unknown> = { ...VALID };
       delete missing[key];
       expect(() => parseRuntimeConfig(missing)).toThrow(`Invalid runtime config: ${key}`);
-      expect(() => parseRuntimeConfig({ ...VALID, [key]: '' })).toThrow(`Invalid runtime config: ${key}`);
-      expect(() => parseRuntimeConfig({ ...VALID, [key]: 42 })).toThrow(`Invalid runtime config: ${key}`);
+      expect(() => parseRuntimeConfig({ ...VALID, [key]: '' })).toThrow(
+        `Invalid runtime config: ${key}`,
+      );
+      expect(() => parseRuntimeConfig({ ...VALID, [key]: 42 })).toThrow(
+        `Invalid runtime config: ${key}`,
+      );
     });
   }
 
@@ -66,7 +72,12 @@ describe('parseRuntimeConfig', () => {
 });
 
 describe('loadRuntimeConfig', () => {
-  const blank = { apiUrl: '', cognitoUserPoolId: '', cognitoUserPoolClientId: '', cognitoRegion: '' };
+  const blank = {
+    apiUrl: '',
+    cognitoUserPoolId: '',
+    cognitoUserPoolClientId: '',
+    cognitoRegion: '',
+  };
 
   afterEach(() => {
     Object.assign(environment, blank);
@@ -87,13 +98,17 @@ describe('loadRuntimeConfig', () => {
   });
 
   it('throws when the body is HTML (SPA fallback)', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(fakeResponse(200, new SyntaxError('Unexpected token <')));
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(fakeResponse(200, new SyntaxError('Unexpected token <')));
     await expect(loadRuntimeConfig(fetchFn)).rejects.toThrow('config.json is not valid JSON');
   });
 
   it('throws when the config is invalid', async () => {
     const fetchFn = vi.fn().mockResolvedValue(fakeResponse(200, { ...VALID, cognitoRegion: '' }));
-    await expect(loadRuntimeConfig(fetchFn)).rejects.toThrow('Invalid runtime config: cognitoRegion');
+    await expect(loadRuntimeConfig(fetchFn)).rejects.toThrow(
+      'Invalid runtime config: cognitoRegion',
+    );
     expect(environment.apiUrl).toBe('');
   });
 
@@ -110,7 +125,9 @@ describe('showFatalConfigError', () => {
     showFatalConfigError(doc);
     const root = doc.querySelector('app-root');
     expect(root?.getAttribute('role')).toBe('alert');
-    expect(root?.textContent).toBe('The app could not load its configuration. Please refresh the page.');
+    expect(root?.textContent).toBe(
+      'The app could not load its configuration. Please refresh the page.',
+    );
   });
 
   it('does nothing when <app-root> is missing', () => {

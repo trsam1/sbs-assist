@@ -1,5 +1,11 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'node:crypto';
 import type { WordStudyEntry, WordStudyRecord } from '../shared/models';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
@@ -47,9 +53,10 @@ function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
     return {
       id: typeof obj['id'] === 'string' && obj['id'].length > 0 ? obj['id'] : undefined,
       userId: '', // Will be set from Cognito claims
-      createdAt: typeof obj['createdAt'] === 'string' && obj['createdAt'].length > 0
-        ? obj['createdAt'] as string
-        : undefined,
+      createdAt:
+        typeof obj['createdAt'] === 'string' && obj['createdAt'].length > 0
+          ? (obj['createdAt'] as string)
+          : undefined,
       wordStudies: obj['wordStudies'] as WordStudyEntry[],
     };
   } catch {
@@ -73,9 +80,7 @@ async function saveWordStudy(body: SaveStudyBody): Promise<{ studyId: string }> 
     GSI1SK: `UPDATED#${now}`,
   };
 
-  await docClient.send(
-    new PutCommand({ TableName: tableName, Item: record }),
-  );
+  await docClient.send(new PutCommand({ TableName: tableName, Item: record }));
 
   return { studyId };
 }
@@ -131,9 +136,13 @@ export const handler = async (event: APIGatewayEvent) => {
 
       const body = parseSaveBody(event.body);
       if (!body) {
-        return corsResponse(400, {
-          message: 'Invalid request body. Required: wordStudies (array).',
-        }, origin);
+        return corsResponse(
+          400,
+          {
+            message: 'Invalid request body. Required: wordStudies (array).',
+          },
+          origin,
+        );
       }
 
       // Override userId with the authenticated Cognito user

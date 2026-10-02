@@ -18,10 +18,7 @@
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import {
-  BatchWriteCommand,
-  DynamoDBDocumentClient,
-} from '@aws-sdk/lib-dynamodb';
+import { BatchWriteCommand, DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import * as https from 'node:https';
 
 // ---------------------------------------------------------------------------
@@ -57,73 +54,73 @@ interface BookMeta {
 
 const BOOKS: BookMeta[] = [
   // -- Old Testament --
-  { order: 1,  folder: 'genesis',          display: 'Genesis',         chapters: 50 },
-  { order: 2,  folder: 'exodus',           display: 'Exodus',          chapters: 40 },
-  { order: 3,  folder: 'leviticus',        display: 'Leviticus',       chapters: 27 },
-  { order: 4,  folder: 'numbers',          display: 'Numbers',         chapters: 36 },
-  { order: 5,  folder: 'deuteronomy',      display: 'Deuteronomy',     chapters: 34 },
-  { order: 6,  folder: 'joshua',           display: 'Joshua',          chapters: 24 },
-  { order: 7,  folder: 'judges',           display: 'Judges',          chapters: 21 },
-  { order: 8,  folder: 'ruth',             display: 'Ruth',            chapters: 4  },
-  { order: 9,  folder: 'i_samuel',         display: '1 Samuel',        chapters: 31 },
-  { order: 10, folder: 'ii_samuel',        display: '2 Samuel',        chapters: 24 },
-  { order: 11, folder: 'i_kings',          display: '1 Kings',         chapters: 22 },
-  { order: 12, folder: 'ii_kings',         display: '2 Kings',         chapters: 25 },
-  { order: 13, folder: 'i_chronicles',     display: '1 Chronicles',    chapters: 29 },
-  { order: 14, folder: 'ii_chronicles',    display: '2 Chronicles',    chapters: 36 },
-  { order: 15, folder: 'ezra',             display: 'Ezra',            chapters: 10 },
-  { order: 16, folder: 'nehemiah',         display: 'Nehemiah',        chapters: 13 },
-  { order: 17, folder: 'esther',           display: 'Esther',          chapters: 10 },
-  { order: 18, folder: 'job',              display: 'Job',             chapters: 42 },
-  { order: 19, folder: 'psalms',           display: 'Psalms',          chapters: 150 },
-  { order: 20, folder: 'proverbs',         display: 'Proverbs',        chapters: 31 },
-  { order: 21, folder: 'ecclesiastes',     display: 'Ecclesiastes',    chapters: 12 },
-  { order: 22, folder: 'song_of_solomon',  display: 'Song of Solomon', chapters: 8  },
-  { order: 23, folder: 'isaiah',           display: 'Isaiah',          chapters: 66 },
-  { order: 24, folder: 'jeremiah',         display: 'Jeremiah',        chapters: 52 },
-  { order: 25, folder: 'lamentations',     display: 'Lamentations',    chapters: 5  },
-  { order: 26, folder: 'ezekiel',          display: 'Ezekiel',         chapters: 48 },
-  { order: 27, folder: 'daniel',           display: 'Daniel',          chapters: 12 },
-  { order: 28, folder: 'hosea',            display: 'Hosea',           chapters: 14 },
-  { order: 29, folder: 'joel',             display: 'Joel',            chapters: 3  },
-  { order: 30, folder: 'amos',             display: 'Amos',            chapters: 9  },
-  { order: 31, folder: 'obadiah',          display: 'Obadiah',         chapters: 1  },
-  { order: 32, folder: 'jonah',            display: 'Jonah',           chapters: 4  },
-  { order: 33, folder: 'micah',            display: 'Micah',           chapters: 7  },
-  { order: 34, folder: 'nahum',            display: 'Nahum',           chapters: 3  },
-  { order: 35, folder: 'habakkuk',         display: 'Habakkuk',        chapters: 3  },
-  { order: 36, folder: 'zephaniah',        display: 'Zephaniah',       chapters: 3  },
-  { order: 37, folder: 'haggai',           display: 'Haggai',          chapters: 2  },
-  { order: 38, folder: 'zechariah',        display: 'Zechariah',       chapters: 14 },
-  { order: 39, folder: 'malachi',          display: 'Malachi',         chapters: 4  },
+  { order: 1, folder: 'genesis', display: 'Genesis', chapters: 50 },
+  { order: 2, folder: 'exodus', display: 'Exodus', chapters: 40 },
+  { order: 3, folder: 'leviticus', display: 'Leviticus', chapters: 27 },
+  { order: 4, folder: 'numbers', display: 'Numbers', chapters: 36 },
+  { order: 5, folder: 'deuteronomy', display: 'Deuteronomy', chapters: 34 },
+  { order: 6, folder: 'joshua', display: 'Joshua', chapters: 24 },
+  { order: 7, folder: 'judges', display: 'Judges', chapters: 21 },
+  { order: 8, folder: 'ruth', display: 'Ruth', chapters: 4 },
+  { order: 9, folder: 'i_samuel', display: '1 Samuel', chapters: 31 },
+  { order: 10, folder: 'ii_samuel', display: '2 Samuel', chapters: 24 },
+  { order: 11, folder: 'i_kings', display: '1 Kings', chapters: 22 },
+  { order: 12, folder: 'ii_kings', display: '2 Kings', chapters: 25 },
+  { order: 13, folder: 'i_chronicles', display: '1 Chronicles', chapters: 29 },
+  { order: 14, folder: 'ii_chronicles', display: '2 Chronicles', chapters: 36 },
+  { order: 15, folder: 'ezra', display: 'Ezra', chapters: 10 },
+  { order: 16, folder: 'nehemiah', display: 'Nehemiah', chapters: 13 },
+  { order: 17, folder: 'esther', display: 'Esther', chapters: 10 },
+  { order: 18, folder: 'job', display: 'Job', chapters: 42 },
+  { order: 19, folder: 'psalms', display: 'Psalms', chapters: 150 },
+  { order: 20, folder: 'proverbs', display: 'Proverbs', chapters: 31 },
+  { order: 21, folder: 'ecclesiastes', display: 'Ecclesiastes', chapters: 12 },
+  { order: 22, folder: 'song_of_solomon', display: 'Song of Solomon', chapters: 8 },
+  { order: 23, folder: 'isaiah', display: 'Isaiah', chapters: 66 },
+  { order: 24, folder: 'jeremiah', display: 'Jeremiah', chapters: 52 },
+  { order: 25, folder: 'lamentations', display: 'Lamentations', chapters: 5 },
+  { order: 26, folder: 'ezekiel', display: 'Ezekiel', chapters: 48 },
+  { order: 27, folder: 'daniel', display: 'Daniel', chapters: 12 },
+  { order: 28, folder: 'hosea', display: 'Hosea', chapters: 14 },
+  { order: 29, folder: 'joel', display: 'Joel', chapters: 3 },
+  { order: 30, folder: 'amos', display: 'Amos', chapters: 9 },
+  { order: 31, folder: 'obadiah', display: 'Obadiah', chapters: 1 },
+  { order: 32, folder: 'jonah', display: 'Jonah', chapters: 4 },
+  { order: 33, folder: 'micah', display: 'Micah', chapters: 7 },
+  { order: 34, folder: 'nahum', display: 'Nahum', chapters: 3 },
+  { order: 35, folder: 'habakkuk', display: 'Habakkuk', chapters: 3 },
+  { order: 36, folder: 'zephaniah', display: 'Zephaniah', chapters: 3 },
+  { order: 37, folder: 'haggai', display: 'Haggai', chapters: 2 },
+  { order: 38, folder: 'zechariah', display: 'Zechariah', chapters: 14 },
+  { order: 39, folder: 'malachi', display: 'Malachi', chapters: 4 },
   // -- New Testament --
-  { order: 40, folder: 'matthew',          display: 'Matthew',           chapters: 28 },
-  { order: 41, folder: 'mark',             display: 'Mark',              chapters: 16 },
-  { order: 42, folder: 'luke',             display: 'Luke',              chapters: 24 },
-  { order: 43, folder: 'john',             display: 'John',              chapters: 21 },
-  { order: 44, folder: 'acts',             display: 'Acts',              chapters: 28 },
-  { order: 45, folder: 'romans',           display: 'Romans',            chapters: 16 },
-  { order: 46, folder: 'i_corinthians',    display: '1 Corinthians',     chapters: 16 },
-  { order: 47, folder: 'ii_corinthians',   display: '2 Corinthians',     chapters: 13 },
-  { order: 48, folder: 'galatians',        display: 'Galatians',         chapters: 6  },
-  { order: 49, folder: 'ephesians',        display: 'Ephesians',         chapters: 6  },
-  { order: 50, folder: 'philippians',      display: 'Philippians',       chapters: 4  },
-  { order: 51, folder: 'colossians',       display: 'Colossians',        chapters: 4  },
-  { order: 52, folder: 'i_thessalonians',  display: '1 Thessalonians',   chapters: 5  },
-  { order: 53, folder: 'ii_thessalonians', display: '2 Thessalonians',   chapters: 3  },
-  { order: 54, folder: 'i_timothy',        display: '1 Timothy',         chapters: 6  },
-  { order: 55, folder: 'ii_timothy',       display: '2 Timothy',         chapters: 4  },
-  { order: 56, folder: 'titus',            display: 'Titus',             chapters: 3  },
-  { order: 57, folder: 'philemon',         display: 'Philemon',          chapters: 1  },
-  { order: 58, folder: 'hebrews',          display: 'Hebrews',           chapters: 13 },
-  { order: 59, folder: 'james',            display: 'James',             chapters: 5  },
-  { order: 60, folder: 'i_peter',          display: '1 Peter',           chapters: 5  },
-  { order: 61, folder: 'ii_peter',         display: '2 Peter',           chapters: 3  },
-  { order: 62, folder: 'i_john',           display: '1 John',            chapters: 5  },
-  { order: 63, folder: 'ii_john',          display: '2 John',            chapters: 1  },
-  { order: 64, folder: 'iii_john',         display: '3 John',            chapters: 1  },
-  { order: 65, folder: 'judee',            display: 'Jude',              chapters: 1  },
-  { order: 66, folder: 'revelation',       display: 'Revelation',        chapters: 22 },
+  { order: 40, folder: 'matthew', display: 'Matthew', chapters: 28 },
+  { order: 41, folder: 'mark', display: 'Mark', chapters: 16 },
+  { order: 42, folder: 'luke', display: 'Luke', chapters: 24 },
+  { order: 43, folder: 'john', display: 'John', chapters: 21 },
+  { order: 44, folder: 'acts', display: 'Acts', chapters: 28 },
+  { order: 45, folder: 'romans', display: 'Romans', chapters: 16 },
+  { order: 46, folder: 'i_corinthians', display: '1 Corinthians', chapters: 16 },
+  { order: 47, folder: 'ii_corinthians', display: '2 Corinthians', chapters: 13 },
+  { order: 48, folder: 'galatians', display: 'Galatians', chapters: 6 },
+  { order: 49, folder: 'ephesians', display: 'Ephesians', chapters: 6 },
+  { order: 50, folder: 'philippians', display: 'Philippians', chapters: 4 },
+  { order: 51, folder: 'colossians', display: 'Colossians', chapters: 4 },
+  { order: 52, folder: 'i_thessalonians', display: '1 Thessalonians', chapters: 5 },
+  { order: 53, folder: 'ii_thessalonians', display: '2 Thessalonians', chapters: 3 },
+  { order: 54, folder: 'i_timothy', display: '1 Timothy', chapters: 6 },
+  { order: 55, folder: 'ii_timothy', display: '2 Timothy', chapters: 4 },
+  { order: 56, folder: 'titus', display: 'Titus', chapters: 3 },
+  { order: 57, folder: 'philemon', display: 'Philemon', chapters: 1 },
+  { order: 58, folder: 'hebrews', display: 'Hebrews', chapters: 13 },
+  { order: 59, folder: 'james', display: 'James', chapters: 5 },
+  { order: 60, folder: 'i_peter', display: '1 Peter', chapters: 5 },
+  { order: 61, folder: 'ii_peter', display: '2 Peter', chapters: 3 },
+  { order: 62, folder: 'i_john', display: '1 John', chapters: 5 },
+  { order: 63, folder: 'ii_john', display: '2 John', chapters: 1 },
+  { order: 64, folder: 'iii_john', display: '3 John', chapters: 1 },
+  { order: 65, folder: 'judee', display: 'Jude', chapters: 1 },
+  { order: 66, folder: 'revelation', display: 'Revelation', chapters: 22 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -210,10 +207,7 @@ async function runWithConcurrency<T>(
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, tasks.length) },
-    () => worker(),
-  );
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
   await Promise.all(workers);
   return results;
 }
@@ -279,10 +273,7 @@ async function processChapter(
 /**
  * Merge chapter-level maps into the global inverted index.
  */
-function mergeInto(
-  global: Map<string, XrefLocation[]>,
-  chunk: Map<string, XrefLocation[]>,
-): void {
+function mergeInto(global: Map<string, XrefLocation[]>, chunk: Map<string, XrefLocation[]>): void {
   for (const [strongsNum, locations] of chunk) {
     if (!global.has(strongsNum)) {
       global.set(strongsNum, []);
@@ -298,9 +289,7 @@ function mergeInto(
 /**
  * Convert the inverted index into DynamoDB write requests.
  */
-function buildWriteRequests(
-  index: Map<string, XrefLocation[]>,
-): WriteRequest[] {
+function buildWriteRequests(index: Map<string, XrefLocation[]>): WriteRequest[] {
   const requests: WriteRequest[] = [];
 
   for (const [strongsNum, locations] of index) {
@@ -344,14 +333,10 @@ async function batchWrite(
       });
 
       const result = await docClient.send(cmd);
-      const retryItems = result.UnprocessedItems?.[TABLE_NAME] as
-        | WriteRequest[]
-        | undefined;
+      const retryItems = result.UnprocessedItems?.[TABLE_NAME] as WriteRequest[] | undefined;
 
       if (retryItems && retryItems.length > 0) {
-        console.log(
-          `  ⏳ ${retryItems.length} unprocessed items, retrying...`,
-        );
+        console.log(`  ⏳ ${retryItems.length} unprocessed items, retrying...`);
         unprocessed = retryItems;
         await new Promise((r) => setTimeout(r, 200));
       } else {
@@ -419,7 +404,9 @@ async function main(): Promise<void> {
   const requests = buildWriteRequests(index);
   await batchWrite(docClient, requests);
 
-  console.log(`\n✅ Done! Seeded ${totalXrefs} cross-reference records for ${index.size} Strong's numbers.`);
+  console.log(
+    `\n✅ Done! Seeded ${totalXrefs} cross-reference records for ${index.size} Strong's numbers.`,
+  );
 }
 
 main().catch((err: unknown) => {

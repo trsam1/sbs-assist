@@ -35,9 +35,11 @@ export class ExportConfigError extends Error {}
 /** XREF_CAP: default 50; must be an integer in 1..50. */
 export function parseXrefCap(raw: string | undefined): number {
   if (raw === undefined || raw === '') return 50;
-  if (!/^\d+$/.test(raw)) throw new ExportConfigError(`XREF_CAP must be an integer 1..50, got "${raw}"`);
+  if (!/^\d+$/.test(raw))
+    throw new ExportConfigError(`XREF_CAP must be an integer 1..50, got "${raw}"`);
   const n = Number(raw);
-  if (n < 1 || n > 50) throw new ExportConfigError(`XREF_CAP must be an integer 1..50, got "${raw}"`);
+  if (n < 1 || n > 50)
+    throw new ExportConfigError(`XREF_CAP must be an integer 1..50, got "${raw}"`);
   return n;
 }
 
@@ -106,11 +108,18 @@ export async function main(): Promise<number> {
   const tableName = process.env['SOURCE_TABLE_NAME'] || 'StrongsData';
   const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
   try {
-    const items = await exportDevSubset({ client, tableName, numbers: DEV_SUBSET_NUMBERS, xrefCap });
+    const items = await exportDevSubset({
+      client,
+      tableName,
+      numbers: DEV_SUBSET_NUMBERS,
+      xrefCap,
+    });
     const json = JSON.stringify(items, null, 2) + '\n';
     fs.mkdirSync(path.dirname(FIXTURE_PATH), { recursive: true });
     fs.writeFileSync(FIXTURE_PATH, json);
-    console.log(`Wrote ${items.length} items (${Buffer.byteLength(json)} bytes) to ${FIXTURE_PATH}`);
+    console.log(
+      `Wrote ${items.length} items (${Buffer.byteLength(json)} bytes) to ${FIXTURE_PATH}`,
+    );
     return 0;
   } catch (err) {
     console.error(`Export failed: ${(err as Error).message}`);

@@ -1,8 +1,5 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import {
-  HttpTestingController,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideRouter, ActivatedRoute } from '@angular/router';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -64,12 +61,17 @@ describe('StudyPageComponent', () => {
         'https://api.dictionaryapi.dev/api/v2/entries/en/love',
       );
       engDefReq.flush([
-        { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
+        {
+          word: 'love',
+          meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+        },
       ]);
       fixture.detectChanges();
 
       expect(component.word()).toBe('love');
-      expect(component.englishDefinition()?.meanings[0]?.definitions[0]?.definition).toBe('deep affection');
+      expect(component.englishDefinition()?.meanings[0]?.definitions[0]?.definition).toBe(
+        'deep affection',
+      );
 
       const worksheet = fixture.nativeElement.querySelector(
         'section[aria-label="Word study worksheet"]',
@@ -77,10 +79,14 @@ describe('StudyPageComponent', () => {
       expect(worksheet).not.toBeNull();
     });
 
-    it('should fetch Strong\'s data when Strong\'s number is submitted', () => {
+    it("should fetch Strong's data when Strong's number is submitted", () => {
       component.onWordSubmitted('love');
-      httpTesting.expectOne('https://api.dictionaryapi.dev/api/v2/entries/en/love')
-        .flush([{ word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] }]);
+      httpTesting.expectOne('https://api.dictionaryapi.dev/api/v2/entries/en/love').flush([
+        {
+          word: 'love',
+          meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+        },
+      ]);
       fixture.detectChanges();
 
       const mockStrongs: StrongsStudyResult = {
@@ -119,14 +125,15 @@ describe('StudyPageComponent', () => {
         {
           word: 'love',
           strongsNumber: 'G25',
-          englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }] },
+          englishDefinition: {
+            word: 'love',
+            meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+          },
           strongsDefinition: 'to love',
           originalWord: 'ἀγαπάω',
           transliteration: 'agapaō',
           lexiconEntry: 'From ἀγάπη; to love...',
-          crossReferences: [
-            { reference: 'Romans 5:8', notes: 'God demonstrates love' },
-          ],
+          crossReferences: [{ reference: 'Romans 5:8', notes: 'God demonstrates love' }],
           aiSummary: 'The Greek word agapaō represents self-sacrificial love...',
           notes: 'Overall notes about agape',
           definitionNotes: '',
@@ -142,9 +149,7 @@ describe('StudyPageComponent', () => {
 
       expect(component.loading()).toBe(true);
 
-      const req = httpTesting.expectOne(
-        (r) => r.url === `${environment.apiUrl}/studies/study-123`,
-      );
+      const req = httpTesting.expectOne((r) => r.url === `${environment.apiUrl}/studies/study-123`);
       req.flush(savedWorksheet);
 
       expect(component.loading()).toBe(false);
@@ -153,13 +158,20 @@ describe('StudyPageComponent', () => {
       expect(component.viewAll()).toBe(true);
       expect(component.notes()).toBe('Overall notes about agape');
       expect(component.aiSummaryState()).toBe('loaded');
-      expect(component.englishDefinition()?.meanings[0]?.definitions[0]?.definition).toBe('deep affection');
+      expect(component.englishDefinition()?.meanings[0]?.definitions[0]?.definition).toBe(
+        'deep affection',
+      );
     });
 
     it('should load a legacy study whose englishDefinition is a plain string', () => {
       const legacy = {
         ...savedWorksheet,
-        wordStudies: [{ ...savedWorksheet.wordStudies[0], englishDefinition: 'an intense feeling of deep affection' }],
+        wordStudies: [
+          {
+            ...savedWorksheet.wordStudies[0],
+            englishDefinition: 'an intense feeling of deep affection',
+          },
+        ],
       };
       const { fixture, component, httpTesting } = setup({ studyId: 'study-123' });
       fixture.detectChanges();
@@ -169,7 +181,9 @@ describe('StudyPageComponent', () => {
       fixture.detectChanges();
 
       expect(component.error()).toBeFalsy();
-      const el: HTMLElement | null = fixture.nativeElement.querySelector('[data-testid="english-definition"]');
+      const el: HTMLElement | null = fixture.nativeElement.querySelector(
+        '[data-testid="english-definition"]',
+      );
       expect(el).toBeTruthy();
       expect(el?.textContent).toContain('an intense feeling of deep affection');
       expect(el?.textContent).not.toContain('()');

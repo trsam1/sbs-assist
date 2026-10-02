@@ -9,13 +9,20 @@ import { EnglishDefinitionData } from './models';
  * - object with an array `meanings` → returned as is
  * - anything else (including an empty string) → `null`
  */
-export function normalizeEnglishDefinition(value: unknown, word: string): EnglishDefinitionData | null {
+export function normalizeEnglishDefinition(
+  value: unknown,
+  word: string,
+): EnglishDefinitionData | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (!trimmed) return null;
     return { word, meanings: [{ partOfSpeech: '', definitions: [{ definition: trimmed }] }] };
   }
-  if (value && typeof value === 'object' && Array.isArray((value as { meanings?: unknown }).meanings)) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    Array.isArray((value as { meanings?: unknown }).meanings)
+  ) {
     return value as EnglishDefinitionData;
   }
   return null;

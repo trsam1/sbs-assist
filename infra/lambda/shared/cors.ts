@@ -39,7 +39,8 @@ export function corsResponse(
   body: string;
 } {
   const origins = allowedOrigins();
-  const allowOrigin = requestOrigin && origins.includes(requestOrigin) ? requestOrigin : (origins[0] ?? '');
+  const allowOrigin =
+    requestOrigin && origins.includes(requestOrigin) ? requestOrigin : (origins[0] ?? '');
   return {
     statusCode,
     headers: {

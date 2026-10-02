@@ -1,7 +1,4 @@
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from '@aws-sdk/client-bedrock-runtime';
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import type { WordStudyEntry } from '../shared/models';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
 
@@ -34,11 +31,14 @@ export function flattenEnglishDef(def: unknown): string {
       const { partOfSpeech, definitions } = m as { partOfSpeech?: unknown; definitions?: unknown };
       if (!Array.isArray(definitions)) return '';
       const text = definitions
-        .map((d: unknown) => (d && typeof d === 'object' ? (d as { definition?: unknown }).definition : undefined))
+        .map((d: unknown) =>
+          d && typeof d === 'object' ? (d as { definition?: unknown }).definition : undefined,
+        )
         .filter((d): d is string => typeof d === 'string' && d.length > 0)
         .join('; ');
       if (!text) return '';
-      const prefix = typeof partOfSpeech === 'string' && partOfSpeech.length > 0 ? `(${partOfSpeech}) ` : '';
+      const prefix =
+        typeof partOfSpeech === 'string' && partOfSpeech.length > 0 ? `(${partOfSpeech}) ` : '';
       return `${prefix}${text}`;
     })
     .filter((s) => s.length > 0)
@@ -66,9 +66,7 @@ User's General Notes: ${entry.notes || 'None'}
 Provide a summary that helps the student understand the depth and nuance of this word in its biblical context.`;
 }
 
-export async function generateStudySummary(
-  entry: WordStudyEntry,
-): Promise<string> {
+export async function generateStudySummary(entry: WordStudyEntry): Promise<string> {
   try {
     const prompt = buildPrompt(entry);
 
@@ -85,9 +83,7 @@ export async function generateStudySummary(
       }),
     );
 
-    const responseBody = JSON.parse(
-      new TextDecoder().decode(response.body),
-    ) as BedrockResponseBody;
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body)) as BedrockResponseBody;
 
     const text = responseBody.content?.[0]?.text?.trim();
     if (text && text.length > 0) {
@@ -115,10 +111,13 @@ export const handler = async (event: APIGatewayEvent) => {
   }
 
   if (!entry.word || !entry.strongsNumber || !entry.strongsDefinition) {
-    return corsResponse(400, {
-      message:
-        'Missing required fields: word, strongsNumber, and strongsDefinition are required',
-    }, origin);
+    return corsResponse(
+      400,
+      {
+        message: 'Missing required fields: word, strongsNumber, and strongsDefinition are required',
+      },
+      origin,
+    );
   }
 
   const summary = await generateStudySummary(entry);

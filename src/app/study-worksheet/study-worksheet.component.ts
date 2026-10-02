@@ -7,12 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import {
-  FormControl,
-  FormGroup,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { StrongsStudyResult, CrossReference } from '../models';
 import { TruncatePipe } from '../truncate.pipe';
 import { EnglishDictionaryResult } from '../english-definition.service';
@@ -49,7 +44,9 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                   <li
                     class="steps-segment"
                     [class.is-active]="step.number === activeStep()"
-                    [class.is-completed]="step.number < activeStep() || (viewAll() && step.number <= maxStepReached())"
+                    [class.is-completed]="
+                      step.number < activeStep() || (viewAll() && step.number <= maxStepReached())
+                    "
                     [class.is-future]="step.number > maxStepReached() && !viewAll()"
                     role="listitem"
                   >
@@ -59,7 +56,9 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                         [class.is-clickable]="step.number !== activeStep()"
                         (click)="toggleStep(step.number)"
                         [attr.aria-label]="'Toggle step ' + step.number + ': ' + step.label"
-                      >{{ step.number }}</button>
+                      >
+                        {{ step.number }}
+                      </button>
                     } @else {
                       <span class="steps-marker">{{ step.number }}</span>
                     }
@@ -74,12 +73,21 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
             <!-- Step 1: English Definition -->
             @if (maxStepReached() >= 1 || viewAll()) {
               <article class="box mb-4 step-card" [class.is-collapsed]="!isExpanded(1)">
-                <header class="step-header" (click)="toggleStep(1)" (keydown.enter)="toggleStep(1)" tabindex="0" role="button" [attr.aria-expanded]="isExpanded(1)">
+                <header
+                  class="step-header"
+                  (click)="toggleStep(1)"
+                  (keydown.enter)="toggleStep(1)"
+                  tabindex="0"
+                  role="button"
+                  [attr.aria-expanded]="isExpanded(1)"
+                >
                   <h3 class="subtitle is-5 mb-0">
                     <span class="tag is-info is-light mr-2">1</span>
                     English Definition
                     @if (!isExpanded(1) && englishDefinition()) {
-                      <span class="has-text-grey is-size-7 ml-2">— {{ englishDefSummary() | truncate }}</span>
+                      <span class="has-text-grey is-size-7 ml-2"
+                        >— {{ englishDefSummary() | truncate }}</span
+                      >
                     }
                   </h3>
                   <span class="icon chevron">
@@ -99,14 +107,18 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                         @for (meaning of dictResult.meanings; track $index) {
                           <div class="mb-4">
                             @if (meaning.partOfSpeech) {
-                              <p class="has-text-weight-semibold is-italic is-size-7 mb-1">{{ meaning.partOfSpeech }}</p>
+                              <p class="has-text-weight-semibold is-italic is-size-7 mb-1">
+                                {{ meaning.partOfSpeech }}
+                              </p>
                             }
                             <ol class="ml-4 is-size-7">
                               @for (def of meaning.definitions; track def.definition) {
                                 <li class="mb-1">
                                   {{ def.definition }}
                                   @if (def.example) {
-                                    <span class="has-text-grey is-italic"> — "{{ def.example }}"</span>
+                                    <span class="has-text-grey is-italic">
+                                      — "{{ def.example }}"</span
+                                    >
                                   }
                                 </li>
                               }
@@ -115,7 +127,13 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                         }
                       </div>
                       <p class="is-size-7 has-text-grey">
-                        Source: <a href="https://dictionaryapi.dev/" target="_blank" rel="noopener noreferrer">Free Dictionary API</a>
+                        Source:
+                        <a
+                          href="https://dictionaryapi.dev/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          >Free Dictionary API</a
+                        >
                       </p>
                     } @else {
                       <p class="has-text-grey">Definition not available.</p>
@@ -123,11 +141,25 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                     <div class="field mt-3">
                       <label class="label is-small" for="step1-notes">Your notes</label>
                       <div class="control">
-                        <textarea class="textarea is-small" id="step1-notes" [value]="step1Notes()" (input)="onStep1NotesChange($event)" placeholder="What stands out about this word's English meaning?" rows="2" data-testid="step1-notes"></textarea>
+                        <textarea
+                          class="textarea is-small"
+                          id="step1-notes"
+                          [value]="step1Notes()"
+                          (input)="onStep1NotesChange($event)"
+                          placeholder="What stands out about this word's English meaning?"
+                          rows="2"
+                          data-testid="step1-notes"
+                        ></textarea>
                       </div>
                     </div>
                     @if (!strongsData() && !englishDefLoading()) {
-                      <button class="button is-primary is-small mt-3" (click)="advanceTo(2)" data-testid="step1-next">Next: Strong's Lookup</button>
+                      <button
+                        class="button is-primary is-small mt-3"
+                        (click)="advanceTo(2)"
+                        data-testid="step1-next"
+                      >
+                        Next: Strong's Lookup
+                      </button>
                     }
                   </div>
                 }
@@ -137,15 +169,29 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
             <!-- Step 2: Strong's Concordance -->
             @if (maxStepReached() >= 2 || viewAll()) {
               <article class="box mb-4 step-card" [class.is-collapsed]="!isExpanded(2)">
-                <header class="step-header" (click)="toggleStep(2)" (keydown.enter)="toggleStep(2)" tabindex="0" role="button" [attr.aria-expanded]="isExpanded(2)">
+                <header
+                  class="step-header"
+                  (click)="toggleStep(2)"
+                  (keydown.enter)="toggleStep(2)"
+                  tabindex="0"
+                  role="button"
+                  [attr.aria-expanded]="isExpanded(2)"
+                >
                   <h3 class="subtitle is-5 mb-0">
                     <span class="tag is-info is-light mr-2">2</span>
                     Strong's Concordance
                     @if (!isExpanded(2) && strongsData()) {
-                      <span class="has-text-grey is-size-7 ml-2">— {{ strongsData()!.strongsNumber }} · {{ strongsData()!.originalWord }} ({{ strongsData()!.transliteration }})</span>
+                      <span class="has-text-grey is-size-7 ml-2"
+                        >— {{ strongsData()!.strongsNumber }} ·
+                        {{ strongsData()!.originalWord }} ({{
+                          strongsData()!.transliteration
+                        }})</span
+                      >
                     }
                   </h3>
-                  <span class="icon chevron"><span>{{ isExpanded(2) ? '▾' : '▸' }}</span></span>
+                  <span class="icon chevron"
+                    ><span>{{ isExpanded(2) ? '▾' : '▸' }}</span></span
+                  >
                 </header>
                 @if (isExpanded(2)) {
                   <div class="step-body mt-3">
@@ -153,10 +199,27 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                       <form [formGroup]="strongsForm" (ngSubmit)="onStrongsSubmit()" class="mb-3">
                         <div class="field has-addons">
                           <div class="control is-expanded">
-                            <input id="strongs-input" class="input" type="text" formControlName="strongsNumber" placeholder="e.g. G25 or H157" [class.is-danger]="showStrongsError()" aria-required="true" [attr.aria-invalid]="showStrongsError()" />
+                            <input
+                              id="strongs-input"
+                              class="input"
+                              type="text"
+                              formControlName="strongsNumber"
+                              placeholder="e.g. G25 or H157"
+                              [class.is-danger]="showStrongsError()"
+                              aria-required="true"
+                              [attr.aria-invalid]="showStrongsError()"
+                            />
                           </div>
                           <div class="control">
-                            <button type="submit" class="button is-info" [class.is-loading]="strongsLoading()" [disabled]="strongsForm.invalid || strongsLoading()" data-testid="strongs-submit">Look Up</button>
+                            <button
+                              type="submit"
+                              class="button is-info"
+                              [class.is-loading]="strongsLoading()"
+                              [disabled]="strongsForm.invalid || strongsLoading()"
+                              data-testid="strongs-submit"
+                            >
+                              Look Up
+                            </button>
                           </div>
                         </div>
                         @if (showStrongsError()) {
@@ -170,21 +233,35 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                         }
                       </form>
                       @if (strongsError()) {
-                        <div class="notification is-danger is-light" role="alert">{{ strongsError() }}</div>
+                        <div class="notification is-danger is-light" role="alert">
+                          {{ strongsError() }}
+                        </div>
                       }
                     } @else {
                       <dl aria-label="Strong's concordance data">
                         @for (field of strongsDefFields(); track field.testId) {
                           <div class="columns is-mobile mb-1" [attr.data-testid]="field.testId">
-                            <dt class="column is-one-third has-text-weight-semibold is-size-7">{{ field.label }}</dt>
-                            <dd class="column is-size-7" style="margin-left:0">{{ field.value }}</dd>
+                            <dt class="column is-one-third has-text-weight-semibold is-size-7">
+                              {{ field.label }}
+                            </dt>
+                            <dd class="column is-size-7" style="margin-left:0">
+                              {{ field.value }}
+                            </dd>
                           </div>
                         }
                       </dl>
                       <div class="field mt-3">
                         <label class="label is-small" for="step2-notes">Your notes</label>
                         <div class="control">
-                          <textarea class="textarea is-small" id="step2-notes" [value]="step2Notes()" (input)="onStep2NotesChange($event)" placeholder="What do you notice about the original word?" rows="2" data-testid="step2-notes"></textarea>
+                          <textarea
+                            class="textarea is-small"
+                            id="step2-notes"
+                            [value]="step2Notes()"
+                            (input)="onStep2NotesChange($event)"
+                            placeholder="What do you notice about the original word?"
+                            rows="2"
+                            data-testid="step2-notes"
+                          ></textarea>
                         </div>
                       </div>
                     }
@@ -196,15 +273,26 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
             <!-- Step 3: Lexicon Entry -->
             @if ((maxStepReached() >= 3 && strongsData()) || viewAll()) {
               <article class="box mb-4 step-card" [class.is-collapsed]="!isExpanded(3)">
-                <header class="step-header" (click)="toggleStep(3)" (keydown.enter)="toggleStep(3)" tabindex="0" role="button" [attr.aria-expanded]="isExpanded(3)">
+                <header
+                  class="step-header"
+                  (click)="toggleStep(3)"
+                  (keydown.enter)="toggleStep(3)"
+                  tabindex="0"
+                  role="button"
+                  [attr.aria-expanded]="isExpanded(3)"
+                >
                   <h3 class="subtitle is-5 mb-0">
                     <span class="tag is-info is-light mr-2">3</span>
                     Lexicon Entry
                     @if (!isExpanded(3) && strongsData()) {
-                      <span class="has-text-grey is-size-7 ml-2">— {{ strongsData()!.lexiconEntry | truncate }}</span>
+                      <span class="has-text-grey is-size-7 ml-2"
+                        >— {{ strongsData()!.lexiconEntry | truncate }}</span
+                      >
                     }
                   </h3>
-                  <span class="icon chevron"><span>{{ isExpanded(3) ? '▾' : '▸' }}</span></span>
+                  <span class="icon chevron"
+                    ><span>{{ isExpanded(3) ? '▾' : '▸' }}</span></span
+                  >
                 </header>
                 @if (isExpanded(3)) {
                   <div class="step-body mt-3">
@@ -214,7 +302,15 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                     <div class="field mt-3">
                       <label class="label is-small" for="step3-notes">Your notes</label>
                       <div class="control">
-                        <textarea class="textarea is-small" id="step3-notes" [value]="step3Notes()" (input)="onStep3NotesChange($event)" placeholder="What additional insight does the lexicon provide?" rows="2" data-testid="step3-notes"></textarea>
+                        <textarea
+                          class="textarea is-small"
+                          id="step3-notes"
+                          [value]="step3Notes()"
+                          (input)="onStep3NotesChange($event)"
+                          placeholder="What additional insight does the lexicon provide?"
+                          rows="2"
+                          data-testid="step3-notes"
+                        ></textarea>
                       </div>
                     </div>
                   </div>
@@ -225,23 +321,38 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
             <!-- Step 4: Cross-References -->
             @if ((maxStepReached() >= 4 && crossReferences()) || viewAll()) {
               <article class="box mb-4 step-card" [class.is-collapsed]="!isExpanded(4)">
-                <header class="step-header" (click)="toggleStep(4)" (keydown.enter)="toggleStep(4)" tabindex="0" role="button" [attr.aria-expanded]="isExpanded(4)">
+                <header
+                  class="step-header"
+                  (click)="toggleStep(4)"
+                  (keydown.enter)="toggleStep(4)"
+                  tabindex="0"
+                  role="button"
+                  [attr.aria-expanded]="isExpanded(4)"
+                >
                   <h3 class="subtitle is-5 mb-0">
                     <span class="tag is-info is-light mr-2">4</span>
                     Cross-References
                     @if (!isExpanded(4) && crossReferences()) {
-                      <span class="has-text-grey is-size-7 ml-2">— {{ crossReferences()!.length }} verse(s)</span>
+                      <span class="has-text-grey is-size-7 ml-2"
+                        >— {{ crossReferences()!.length }} verse(s)</span
+                      >
                     }
                   </h3>
-                  <span class="icon chevron"><span>{{ isExpanded(4) ? '▾' : '▸' }}</span></span>
+                  <span class="icon chevron"
+                    ><span>{{ isExpanded(4) ? '▾' : '▸' }}</span></span
+                  >
                 </header>
                 @if (isExpanded(4)) {
                   <div class="step-body mt-3">
                     @if (crossReferences(); as refs) {
                       @if (refs.length === 0) {
-                        <p class="has-text-grey" data-testid="no-cross-refs">No cross-references found for this Strong's number.</p>
+                        <p class="has-text-grey" data-testid="no-cross-refs">
+                          No cross-references found for this Strong's number.
+                        </p>
                       } @else {
-                        <p class="has-text-grey is-size-7 mb-3">{{ refs.length }} cross-reference(s) found. Click a verse to add notes.</p>
+                        <p class="has-text-grey is-size-7 mb-3">
+                          {{ refs.length }} cross-reference(s) found. Click a verse to add notes.
+                        </p>
                         <div class="cross-ref-list">
                           @for (ref of refs; track ref.reference; let i = $index) {
                             <div class="cross-ref-item" [attr.data-testid]="'cross-ref-' + i">
@@ -254,11 +365,15 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                                 [attr.aria-expanded]="isCrossRefExpanded(i)"
                               >
                                 <span class="cross-ref-num">{{ i + 1 }}</span>
-                                <strong class="is-size-7" data-testid="cross-ref-reference">{{ ref.reference }}</strong>
+                                <strong class="is-size-7" data-testid="cross-ref-reference">{{
+                                  ref.reference
+                                }}</strong>
                                 @if (ref.notes) {
                                   <span class="tag is-info is-light is-small ml-2">noted</span>
                                 }
-                                <span class="chevron-sm ml-auto">{{ isCrossRefExpanded(i) ? '▾' : '▸' }}</span>
+                                <span class="chevron-sm ml-auto">{{
+                                  isCrossRefExpanded(i) ? '▾' : '▸'
+                                }}</span>
                               </div>
                               @if (isCrossRefExpanded(i)) {
                                 <div class="cross-ref-body mt-2">
@@ -284,9 +399,16 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
             }
 
             <!-- Step 5: AI Summary -->
-            @if ((maxStepReached() >= 5) || viewAll()) {
+            @if (maxStepReached() >= 5 || viewAll()) {
               <article class="box mb-4 step-card" [class.is-collapsed]="!isExpanded(5)">
-                <header class="step-header" (click)="toggleStep(5)" (keydown.enter)="toggleStep(5)" tabindex="0" role="button" [attr.aria-expanded]="isExpanded(5)">
+                <header
+                  class="step-header"
+                  (click)="toggleStep(5)"
+                  (keydown.enter)="toggleStep(5)"
+                  tabindex="0"
+                  role="button"
+                  [attr.aria-expanded]="isExpanded(5)"
+                >
                   <h3 class="subtitle is-5 mb-0">
                     <span class="tag is-info is-light mr-2">5</span>
                     AI Summary
@@ -294,26 +416,58 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                       <span class="tag is-info is-light is-small ml-2">generated</span>
                     }
                   </h3>
-                  <span class="icon chevron"><span>{{ isExpanded(5) ? '▾' : '▸' }}</span></span>
+                  <span class="icon chevron"
+                    ><span>{{ isExpanded(5) ? '▾' : '▸' }}</span></span
+                  >
                 </header>
                 @if (isExpanded(5)) {
                   <div class="step-body mt-3">
                     @if (aiSummaryState() === 'loading') {
-                      <div class="has-text-centered py-3" aria-live="polite" aria-busy="true" data-testid="ai-summary-loading">
-                        <button class="button is-info is-loading is-small" disabled>Generating…</button>
+                      <div
+                        class="has-text-centered py-3"
+                        aria-live="polite"
+                        aria-busy="true"
+                        data-testid="ai-summary-loading"
+                      >
+                        <button class="button is-info is-loading is-small" disabled>
+                          Generating…
+                        </button>
                       </div>
                     } @else if (aiSummaryState() === 'error') {
-                      <div class="notification is-warning is-light" role="alert" data-testid="ai-summary-error">
+                      <div
+                        class="notification is-warning is-light"
+                        role="alert"
+                        data-testid="ai-summary-error"
+                      >
                         <p class="is-size-7">AI summary unavailable. Please try again later.</p>
                       </div>
-                      <button class="button is-info is-outlined is-small" (click)="onGenerateAiSummary()" data-testid="ai-summary-retry-button">Retry</button>
+                      <button
+                        class="button is-info is-outlined is-small"
+                        (click)="onGenerateAiSummary()"
+                        data-testid="ai-summary-retry-button"
+                      >
+                        Retry
+                      </button>
                     } @else if (aiSummaryState() === 'loaded' && aiSummary()) {
                       <div class="content" data-testid="ai-summary-content">
                         <blockquote class="is-size-7">{{ aiSummary() }}</blockquote>
                       </div>
-                      <button class="button is-info is-outlined is-small mt-2" (click)="onGenerateAiSummary()" data-testid="ai-summary-regenerate-button">Regenerate</button>
+                      <button
+                        class="button is-info is-outlined is-small mt-2"
+                        (click)="onGenerateAiSummary()"
+                        data-testid="ai-summary-regenerate-button"
+                      >
+                        Regenerate
+                      </button>
                     } @else {
-                      <button class="button is-info is-small" (click)="onGenerateAiSummary()" [disabled]="!strongsData()" data-testid="ai-summary-button">Generate AI Summary</button>
+                      <button
+                        class="button is-info is-small"
+                        (click)="onGenerateAiSummary()"
+                        [disabled]="!strongsData()"
+                        data-testid="ai-summary-button"
+                      >
+                        Generate AI Summary
+                      </button>
                     }
                   </div>
                 }
@@ -357,35 +511,129 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
         [disabled]="saveState() === 'saving'"
         (click)="onSaveStudy()"
         data-testid="save-button"
-      >{{ saveButtonLabel() }}</button>
+      >
+        {{ saveButtonLabel() }}
+      </button>
     </div>
   `,
   styles: `
-    .steps { display: flex; list-style: none; padding: 0; margin: 0; gap: 0.15rem; }
-    .steps-segment { display: flex; align-items: center; gap: 0.4rem; flex: 1; padding: 0.4rem; border-radius: 4px; opacity: 0.4; transition: opacity 0.15s; }
-    .steps-segment.is-active { background-color: var(--bulma-info-light); opacity: 1; }
-    .steps-segment.is-completed { opacity: 1; }
-    .steps-marker { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background-color: var(--bulma-border); font-weight: 600; font-size: 0.75rem; flex-shrink: 0; border: none; color: var(--bulma-text); }
-    .steps-marker.is-clickable { cursor: pointer; background-color: var(--bulma-info); color: var(--bulma-info-invert, #fff); }
-    .steps-marker.is-clickable:hover { opacity: 0.85; }
-    .steps-segment.is-active .steps-marker { background-color: var(--bulma-primary); color: var(--bulma-primary-invert, #fff); }
+    .steps {
+      display: flex;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      gap: 0.15rem;
+    }
+    .steps-segment {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex: 1;
+      padding: 0.4rem;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+    }
+    .steps-segment.is-active {
+      background-color: var(--bulma-info-light);
+      opacity: 1;
+    }
+    .steps-segment.is-completed {
+      opacity: 1;
+    }
+    .steps-marker {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 50%;
+      background-color: var(--bulma-border);
+      font-weight: 600;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+      border: none;
+      color: var(--bulma-text);
+    }
+    .steps-marker.is-clickable {
+      cursor: pointer;
+      background-color: var(--bulma-info);
+      color: var(--bulma-info-invert, #fff);
+    }
+    .steps-marker.is-clickable:hover {
+      opacity: 0.85;
+    }
+    .steps-segment.is-active .steps-marker {
+      background-color: var(--bulma-primary);
+      color: var(--bulma-primary-invert, #fff);
+    }
 
-    .step-card { transition: all 0.15s; }
-    .step-card.is-collapsed { padding: 0.75rem 1.25rem; }
-    .step-header { display: flex; align-items: center; cursor: pointer; user-select: none; }
-    .step-header:hover { opacity: 0.8; }
-    .chevron { margin-left: auto; font-size: 0.85rem; color: var(--bulma-text-weak); }
+    .step-card {
+      transition: all 0.15s;
+    }
+    .step-card.is-collapsed {
+      padding: 0.75rem 1.25rem;
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-header:hover {
+      opacity: 0.8;
+    }
+    .chevron {
+      margin-left: auto;
+      font-size: 0.85rem;
+      color: var(--bulma-text-weak);
+    }
 
-    .cross-ref-list { border: 1px solid var(--bulma-border); border-radius: 4px; }
-    .cross-ref-item { border-bottom: 1px solid var(--bulma-border); padding: 0.5rem 0.75rem; }
-    .cross-ref-item:last-child { border-bottom: none; }
-    .cross-ref-header { display: flex; align-items: center; cursor: pointer; gap: 0.5rem; }
-    .cross-ref-header:hover { background-color: var(--bulma-scheme-main-bis); border-radius: 4px; }
-    .cross-ref-num { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--bulma-border); font-size: 0.65rem; font-weight: 600; flex-shrink: 0; }
-    .chevron-sm { font-size: 0.75rem; color: var(--bulma-text-weak); }
-    .cross-ref-body { padding-left: 1.75rem; }
+    .cross-ref-list {
+      border: 1px solid var(--bulma-border);
+      border-radius: 4px;
+    }
+    .cross-ref-item {
+      border-bottom: 1px solid var(--bulma-border);
+      padding: 0.5rem 0.75rem;
+    }
+    .cross-ref-item:last-child {
+      border-bottom: none;
+    }
+    .cross-ref-header {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      gap: 0.5rem;
+    }
+    .cross-ref-header:hover {
+      background-color: var(--bulma-scheme-main-bis);
+      border-radius: 4px;
+    }
+    .cross-ref-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 50%;
+      background: var(--bulma-border);
+      font-size: 0.65rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .chevron-sm {
+      font-size: 0.75rem;
+      color: var(--bulma-text-weak);
+    }
+    .cross-ref-body {
+      padding-left: 1.75rem;
+    }
 
-    .sticky-sidebar { position: sticky; top: 1rem; }
+    .sticky-sidebar {
+      position: sticky;
+      top: 1rem;
+    }
   `,
 })
 export class StudyWorksheetComponent {
@@ -460,7 +708,7 @@ export class StudyWorksheetComponent {
     { number: 5, label: 'AI Summary' },
   ];
 
-  readonly saveButtonLabel = computed(() => this.studyId() ? 'Update Study' : 'Save Study');
+  readonly saveButtonLabel = computed(() => (this.studyId() ? 'Update Study' : 'Save Study'));
 
   readonly englishDefSummary = computed(() => {
     const result = this.englishDefinition();
@@ -534,21 +782,36 @@ export class StudyWorksheetComponent {
       this.strongsForm.markAllAsTouched();
       return;
     }
-    this.strongsNumberSubmitted.emit({ strongsNumber: this.strongsForm.getRawValue().strongsNumber });
+    this.strongsNumberSubmitted.emit({
+      strongsNumber: this.strongsForm.getRawValue().strongsNumber,
+    });
   }
 
   onCrossRefNoteChange(index: number, event: Event): void {
-    this.crossReferenceNoteChange.emit({ index, notes: (event.target as HTMLTextAreaElement).value });
+    this.crossReferenceNoteChange.emit({
+      index,
+      notes: (event.target as HTMLTextAreaElement).value,
+    });
   }
 
   onNotesChange(event: Event): void {
     this.notesChange.emit((event.target as HTMLTextAreaElement).value);
   }
 
-  onStep1NotesChange(event: Event): void { this.step1NotesChanged.emit((event.target as HTMLTextAreaElement).value); }
-  onStep2NotesChange(event: Event): void { this.step2NotesChanged.emit((event.target as HTMLTextAreaElement).value); }
-  onStep3NotesChange(event: Event): void { this.step3NotesChanged.emit((event.target as HTMLTextAreaElement).value); }
+  onStep1NotesChange(event: Event): void {
+    this.step1NotesChanged.emit((event.target as HTMLTextAreaElement).value);
+  }
+  onStep2NotesChange(event: Event): void {
+    this.step2NotesChanged.emit((event.target as HTMLTextAreaElement).value);
+  }
+  onStep3NotesChange(event: Event): void {
+    this.step3NotesChanged.emit((event.target as HTMLTextAreaElement).value);
+  }
 
-  onGenerateAiSummary(): void { this.generateAiSummary.emit(); }
-  onSaveStudy(): void { this.saveStudy.emit(); }
+  onGenerateAiSummary(): void {
+    this.generateAiSummary.emit();
+  }
+  onSaveStudy(): void {
+    this.saveStudy.emit();
+  }
 }

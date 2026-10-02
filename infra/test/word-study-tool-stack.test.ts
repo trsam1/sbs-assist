@@ -35,7 +35,15 @@ function synth(stage: Stage): Template {
   return Template.fromStack(stack);
 }
 
-type Resources = Record<string, { Type: string; Properties?: Record<string, unknown>; DeletionPolicy?: string; UpdateReplacePolicy?: string }>;
+type Resources = Record<
+  string,
+  {
+    Type: string;
+    Properties?: Record<string, unknown>;
+    DeletionPolicy?: string;
+    UpdateReplacePolicy?: string;
+  }
+>;
 
 function resourcesOfType(t: Template, type: string): Resources {
   return t.findResources(type) as Resources;
@@ -107,7 +115,9 @@ describe('WordStudyToolStack (prod)', () => {
     expect(tableByName(t, 'WordStudies').Properties?.['PointInTimeRecoverySpecification']).toEqual({
       PointInTimeRecoveryEnabled: true,
     });
-    expect(tableByName(t, 'StrongsData').Properties?.['PointInTimeRecoverySpecification']).toBeUndefined();
+    expect(
+      tableByName(t, 'StrongsData').Properties?.['PointInTimeRecoverySpecification'],
+    ).toBeUndefined();
   });
 
   it('keeps the prod physical names', () => {
@@ -153,7 +163,9 @@ describe('WordStudyToolStack (prod)', () => {
   it('allows only the prod site origin', () => {
     t.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'StudyCRUD',
-      Environment: { Variables: Match.objectLike({ ALLOWED_ORIGINS: 'https://wordstudy.teksnextdoor.com' }) },
+      Environment: {
+        Variables: Match.objectLike({ ALLOWED_ORIGINS: 'https://wordstudy.teksnextdoor.com' }),
+      },
     });
   });
 });
@@ -174,13 +186,18 @@ describe('WordStudyToolStack (dev)', () => {
   });
 
   it('sets PITR explicitly false on WordStudies-dev and true nowhere', () => {
-    expect(tableByName(t, 'WordStudies-dev').Properties?.['PointInTimeRecoverySpecification']).toEqual({
+    expect(
+      tableByName(t, 'WordStudies-dev').Properties?.['PointInTimeRecoverySpecification'],
+    ).toEqual({
       PointInTimeRecoveryEnabled: false,
     });
     for (const r of Object.values(resourcesOfType(t, 'AWS::DynamoDB::Table'))) {
       expect(
-        (r.Properties?.['PointInTimeRecoverySpecification'] as { PointInTimeRecoveryEnabled?: boolean } | undefined)
-          ?.PointInTimeRecoveryEnabled,
+        (
+          r.Properties?.['PointInTimeRecoverySpecification'] as
+            | { PointInTimeRecoveryEnabled?: boolean }
+            | undefined
+        )?.PointInTimeRecoveryEnabled,
       ).not.toBe(true);
     }
   });
@@ -193,7 +210,9 @@ describe('WordStudyToolStack (dev)', () => {
     }
     t.hasResourceProperties('AWS::Cognito::UserPool', { UserPoolName: 'WordStudyUserPool-dev' });
     t.hasResourceProperties('AWS::ApiGateway::RestApi', { Name: 'WordStudyApi-dev' });
-    t.hasResourceProperties('AWS::ApiGateway::UsagePlan', { UsagePlanName: 'WordStudyUsagePlan-dev' });
+    t.hasResourceProperties('AWS::ApiGateway::UsagePlan', {
+      UsagePlanName: 'WordStudyUsagePlan-dev',
+    });
     t.hasResourceProperties('AWS::ApiGateway::Stage', { StageName: 'dev' });
   });
 
@@ -245,6 +264,8 @@ describe('WordStudyToolStack (dev)', () => {
     t.hasResourceProperties('AWS::CertificateManager::Certificate', {
       DomainName: 'axiostools-dev.teksnextdoor.com',
     });
-    expect(Object.keys(t.toJSON().Resources).some((id) => id.startsWith('WildcardCert'))).toBe(false);
+    expect(Object.keys(t.toJSON().Resources).some((id) => id.startsWith('WildcardCert'))).toBe(
+      false,
+    );
   });
 });

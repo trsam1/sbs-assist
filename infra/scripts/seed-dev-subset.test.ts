@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
-import { BatchWriteCommand, DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  BatchWriteCommand,
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { assertDevTable, DevTableError, seedDevSubset, SENTINEL } from './seed-dev-subset';
 import { DEV_SUBSET_NUMBERS, FIXTURE_PATH } from './export-dev-subset';
 
@@ -8,7 +13,11 @@ const TABLE = 'StrongsData-dev';
 const noSleep = () => Promise.resolve();
 
 function makeItems(n: number) {
-  return Array.from({ length: n }, (_, i) => ({ PK: `STRONGS#G${i}`, SK: 'DEF', definition: `d${i}` }));
+  return Array.from({ length: n }, (_, i) => ({
+    PK: `STRONGS#G${i}`,
+    SK: 'DEF',
+    definition: `d${i}`,
+  }));
 }
 
 describe('assertDevTable', () => {
@@ -35,9 +44,9 @@ describe('seedDevSubset', () => {
 
   it('skips everything when the sentinel exists', async () => {
     send.mockResolvedValueOnce({ Item: { ...SENTINEL } });
-    await expect(seedDevSubset({ client, tableName: TABLE, items: makeItems(3), sleep: noSleep })).resolves.toBe(
-      'already seeded',
-    );
+    await expect(
+      seedDevSubset({ client, tableName: TABLE, items: makeItems(3), sleep: noSleep }),
+    ).resolves.toBe('already seeded');
     expect(send).toHaveBeenCalledTimes(1);
     const [get] = calls();
     expect(get).toBeInstanceOf(GetCommand);
@@ -46,9 +55,9 @@ describe('seedDevSubset', () => {
 
   it('writes 26 items in 2 batches, then the sentinel', async () => {
     send.mockResolvedValueOnce({}).mockResolvedValue({ UnprocessedItems: {} });
-    await expect(seedDevSubset({ client, tableName: TABLE, items: makeItems(26), sleep: noSleep })).resolves.toBe(
-      'seeded',
-    );
+    await expect(
+      seedDevSubset({ client, tableName: TABLE, items: makeItems(26), sleep: noSleep }),
+    ).resolves.toBe('seeded');
     const c = calls();
     expect(c).toHaveLength(4);
     expect(c[1]).toBeInstanceOf(BatchWriteCommand);
@@ -66,7 +75,9 @@ describe('seedDevSubset', () => {
     const items = makeItems(3);
     send
       .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ UnprocessedItems: { [TABLE]: [{ PutRequest: { Item: items[2] } }] } })
+      .mockResolvedValueOnce({
+        UnprocessedItems: { [TABLE]: [{ PutRequest: { Item: items[2] } }] },
+      })
       .mockResolvedValueOnce({ UnprocessedItems: {} })
       .mockResolvedValueOnce({});
     await expect(seedDevSubset({ client, tableName: TABLE, items, sleep })).resolves.toBe('seeded');
@@ -78,27 +89,34 @@ describe('seedDevSubset', () => {
 
   it('does not write the sentinel when a later batch exhausts its retries', async () => {
     const items = makeItems(30);
-    send.mockImplementation(async (cmd: { input: { RequestItems?: Record<string, unknown[]> } }) => {
-      if (cmd instanceof GetCommand) return {};
-      if (cmd instanceof BatchWriteCommand) {
-        const reqs = cmd.input.RequestItems![TABLE];
-        // Batch 1 (25 items) succeeds; batch 2 never drains.
-        return reqs.length === 25 ? { UnprocessedItems: {} } : { UnprocessedItems: { [TABLE]: reqs } };
-      }
-      throw new Error('unexpected command');
-    });
-    await expect(seedDevSubset({ client, tableName: TABLE, items, sleep: noSleep })).rejects.toThrow(
-      /unprocessed items after 5 tries \(batch 2\)/,
+    send.mockImplementation(
+      async (cmd: { input: { RequestItems?: Record<string, unknown[]> } }) => {
+        if (cmd instanceof GetCommand) return {};
+        if (cmd instanceof BatchWriteCommand) {
+          const reqs = cmd.input.RequestItems![TABLE];
+          // Batch 1 (25 items) succeeds; batch 2 never drains.
+          return reqs.length === 25
+            ? { UnprocessedItems: {} }
+            : { UnprocessedItems: { [TABLE]: reqs } };
+        }
+        throw new Error('unexpected command');
+      },
     );
+    await expect(
+      seedDevSubset({ client, tableName: TABLE, items, sleep: noSleep }),
+    ).rejects.toThrow(/unprocessed items after 5 tries \(batch 2\)/);
     expect(calls().some((c) => c instanceof PutCommand)).toBe(false);
     expect(calls().filter((c) => c instanceof BatchWriteCommand)).toHaveLength(1 + 5);
   });
 
   it('does not write the sentinel when a batch throws', async () => {
-    send.mockResolvedValueOnce({}).mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('throttled'));
-    await expect(seedDevSubset({ client, tableName: TABLE, items: makeItems(26), sleep: noSleep })).rejects.toThrow(
-      'throttled',
-    );
+    send
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('throttled'));
+    await expect(
+      seedDevSubset({ client, tableName: TABLE, items: makeItems(26), sleep: noSleep }),
+    ).rejects.toThrow('throttled');
     expect(calls().some((c) => c instanceof PutCommand)).toBe(false);
   });
 });
@@ -116,7 +134,11 @@ describe('committed fixture', () => {
 
   it('contains no typed DynamoDB JSON values', () => {
     const typed = (v: unknown) =>
-      !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 1 && ['S', 'N', 'M', 'L'].includes(Object.keys(v)[0]);
+      !!v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Object.keys(v).length === 1 &&
+      ['S', 'N', 'M', 'L'].includes(Object.keys(v)[0]);
     for (const item of items) {
       for (const value of Object.values(item)) expect(typed(value)).toBe(false);
     }
@@ -127,7 +149,7 @@ describe('committed fixture', () => {
     expect(defs.sort()).toEqual(DEV_SUBSET_NUMBERS.map((n) => `STRONGS#${n}`).sort());
   });
 
-  it("has a non-empty string definition for G25 (smoke check 4)", () => {
+  it('has a non-empty string definition for G25 (smoke check 4)', () => {
     const g25 = items.find((i) => i['PK'] === 'STRONGS#G25' && i['SK'] === 'DEF');
     expect(typeof g25?.['definition']).toBe('string');
     expect((g25?.['definition'] as string).length).toBeGreaterThan(0);

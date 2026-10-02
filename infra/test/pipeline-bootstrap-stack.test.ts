@@ -5,7 +5,13 @@ import { PipelineBootstrapStack } from '../lib/pipeline-bootstrap-stack';
 
 const ACCOUNT = '224670540244';
 
-type Statement = { Sid?: string; Action: string | string[]; Resource: unknown; Effect: string; Condition?: unknown };
+type Statement = {
+  Sid?: string;
+  Action: string | string[];
+  Resource: unknown;
+  Effect: string;
+  Condition?: unknown;
+};
 type Resource = { Type: string; Properties: Record<string, unknown> };
 
 const asArray = <T>(v: T | T[]): T[] => (Array.isArray(v) ? v : [v]);
@@ -37,13 +43,19 @@ describe('PipelineBootstrapStack', () => {
       .filter(
         (r) =>
           r.Type === 'AWS::IAM::Policy' &&
-          asArray(r.Properties['Roles'] as unknown[]).some((ref) => JSON.stringify(ref) === JSON.stringify({ Ref: id })),
+          asArray(r.Properties['Roles'] as unknown[]).some(
+            (ref) => JSON.stringify(ref) === JSON.stringify({ Ref: id }),
+          ),
       )
       .flatMap((p) => (p.Properties['PolicyDocument'] as { Statement: Statement[] }).Statement);
   }
 
   function trust(roleName: string) {
-    return (resources[roleId(roleName)].Properties['AssumeRolePolicyDocument'] as { Statement: Statement[] }).Statement;
+    return (
+      resources[roleId(roleName)].Properties['AssumeRolePolicyDocument'] as {
+        Statement: Statement[];
+      }
+    ).Statement;
   }
 
   it('creates the GitHub OIDC provider for sts.amazonaws.com', () => {
@@ -95,7 +107,11 @@ describe('PipelineBootstrapStack', () => {
 
   it('gives GitHubDeployRole exactly the §D9 statements', () => {
     const stmts = statementsFor('GitHubDeployRole');
-    expect(stmts.map((s) => s.Sid).sort()).toEqual(['AssumeCdkRoles', 'ReadProdTemplate', 'SeedDevStrongs']);
+    expect(stmts.map((s) => s.Sid).sort()).toEqual([
+      'AssumeCdkRoles',
+      'ReadProdTemplate',
+      'SeedDevStrongs',
+    ]);
     for (const s of stmts) expect(s.Effect).toBe('Allow');
 
     const assume = stmts.find((s) => s.Sid === 'AssumeCdkRoles')!;
@@ -108,11 +124,20 @@ describe('PipelineBootstrapStack', () => {
     );
 
     const read = stmts.find((s) => s.Sid === 'ReadProdTemplate')!;
-    expect(asArray(read.Action)).toEqual(['cloudformation:GetTemplate', 'cloudformation:DescribeStacks']);
-    expect(read.Resource).toBe(`arn:aws:cloudformation:us-east-1:${ACCOUNT}:stack/WordStudyToolStack/*`);
+    expect(asArray(read.Action)).toEqual([
+      'cloudformation:GetTemplate',
+      'cloudformation:DescribeStacks',
+    ]);
+    expect(read.Resource).toBe(
+      `arn:aws:cloudformation:us-east-1:${ACCOUNT}:stack/WordStudyToolStack/*`,
+    );
 
     const seed = stmts.find((s) => s.Sid === 'SeedDevStrongs')!;
-    expect(asArray(seed.Action)).toEqual(['dynamodb:GetItem', 'dynamodb:BatchWriteItem', 'dynamodb:PutItem']);
+    expect(asArray(seed.Action)).toEqual([
+      'dynamodb:GetItem',
+      'dynamodb:BatchWriteItem',
+      'dynamodb:PutItem',
+    ]);
     expect(seed.Resource).toBe(`arn:aws:dynamodb:us-east-1:${ACCOUNT}:table/StrongsData-dev`);
   });
 
@@ -141,7 +166,9 @@ describe('PipelineBootstrapStack', () => {
 
     const ssm = stmts.find((s) => s.Sid === 'ReadBootstrapVersion')!;
     expect(asArray(ssm.Action)).toEqual(['ssm:GetParameter']);
-    expect(ssm.Resource).toBe(`arn:aws:ssm:us-east-1:${ACCOUNT}:parameter/cdk-bootstrap/hnb659fds/version`);
+    expect(ssm.Resource).toBe(
+      `arn:aws:ssm:us-east-1:${ACCOUNT}:parameter/cdk-bootstrap/hnb659fds/version`,
+    );
   });
 
   it('gives GitHubDiffRole no sts:AssumeRole action', () => {

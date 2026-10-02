@@ -14,9 +14,7 @@ export class StrongsLookupService {
 
   /** Fetch Strong's definition, original word, transliteration, and lexicon entry. */
   getStrongsStudyData(strongsNumber: string): Observable<StrongsStudyResult> {
-    return this.http.get<StrongsStudyResult>(
-      `${this.baseUrl}/strongs/${strongsNumber}`,
-    );
+    return this.http.get<StrongsStudyResult>(`${this.baseUrl}/strongs/${strongsNumber}`);
   }
 
   /** Fetch all cross-reference verse locations for a Strong's number. */

@@ -10,7 +10,12 @@
  */
 import * as fs from 'fs';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  BatchWriteCommand,
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { FIXTURE_PATH } from './export-dev-subset';
 
 export const SENTINEL = { PK: 'SEED#dev-subset', SK: 'V1' } as const;
@@ -40,17 +45,25 @@ export async function seedDevSubset(opts: {
   const { client, tableName, items } = opts;
   const sleep = opts.sleep ?? defaultSleep;
 
-  const existing = await client.send(new GetCommand({ TableName: tableName, Key: { ...SENTINEL } }));
+  const existing = await client.send(
+    new GetCommand({ TableName: tableName, Key: { ...SENTINEL } }),
+  );
   if (existing.Item) return 'already seeded';
 
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
-    let pending: WriteRequest[] = items.slice(i, i + BATCH_SIZE).map((Item) => ({ PutRequest: { Item } }));
+    let pending: WriteRequest[] = items
+      .slice(i, i + BATCH_SIZE)
+      .map((Item) => ({ PutRequest: { Item } }));
     for (let attempt = 0; pending.length > 0; attempt++) {
       if (attempt >= MAX_TRIES) {
-        throw new Error(`${pending.length} unprocessed items after ${MAX_TRIES} tries (batch ${i / BATCH_SIZE + 1})`);
+        throw new Error(
+          `${pending.length} unprocessed items after ${MAX_TRIES} tries (batch ${i / BATCH_SIZE + 1})`,
+        );
       }
       if (attempt > 0) await sleep(100 * 2 ** attempt);
-      const res = await client.send(new BatchWriteCommand({ RequestItems: { [tableName]: pending } }));
+      const res = await client.send(
+        new BatchWriteCommand({ RequestItems: { [tableName]: pending } }),
+      );
       pending = (res.UnprocessedItems?.[tableName] as WriteRequest[] | undefined) ?? [];
     }
   }
@@ -70,7 +83,9 @@ export async function main(): Promise<number> {
     const items = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')) as Record<string, unknown>[];
     const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
     const result = await seedDevSubset({ client, tableName, items });
-    console.log(result === 'seeded' ? `Seeded ${items.length} items into ${tableName}` : 'already seeded');
+    console.log(
+      result === 'seeded' ? `Seeded ${items.length} items into ${tableName}` : 'already seeded',
+    );
     return 0;
   } catch (err) {
     console.error((err as Error).message);

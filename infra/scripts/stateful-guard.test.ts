@@ -4,7 +4,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { evaluate, evaluateDetailed, main, Template } from './stateful-guard';
 
-function table(overrides: Record<string, unknown> = {}, policies = { DeletionPolicy: 'Retain', UpdateReplacePolicy: 'Retain' }) {
+function table(
+  overrides: Record<string, unknown> = {},
+  policies = { DeletionPolicy: 'Retain', UpdateReplacePolicy: 'Retain' },
+) {
   return {
     Type: 'AWS::DynamoDB::Table',
     Properties: {
@@ -36,7 +39,12 @@ function userPool(overrides: Record<string, unknown> = {}) {
 function fn(runtime: string) {
   return {
     Type: 'AWS::Lambda::Function',
-    Properties: { FunctionName: 'StudyCRUD', Runtime: runtime, Handler: 'index.handler', Role: 'arn:aws:iam::1:role/r' },
+    Properties: {
+      FunctionName: 'StudyCRUD',
+      Runtime: runtime,
+      Handler: 'index.handler',
+      Role: 'arn:aws:iam::1:role/r',
+    },
   };
 }
 
@@ -81,13 +89,18 @@ describe('evaluate (AC8)', () => {
     delete synth.Resources!['PoolA'];
     synth.Resources!['PoolRenamed'] = userPool();
     const r = evaluateDetailed(base(), synth);
-    expect(r.violations).toEqual([{ logicalId: 'PoolA', type: 'AWS::Cognito::UserPool', reason: 'deleted' }]);
+    expect(r.violations).toEqual([
+      { logicalId: 'PoolA', type: 'AWS::Cognito::UserPool', reason: 'deleted' },
+    ]);
     expect(r.info.map((i) => i.logicalId)).toEqual(['PoolRenamed']);
   });
 
   it('fails when a protected resource is not retained', () => {
     const synth = base();
-    synth.Resources!['WordStudiesA'] = table({}, { DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete' });
+    synth.Resources!['WordStudiesA'] = table(
+      {},
+      { DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete' },
+    );
     const v = evaluate(base(), synth);
     expect(v).toEqual([
       {
@@ -106,16 +119,24 @@ describe('evaluate (AC8)', () => {
 
   it('passes on Delete → Retain and an added PITR spec (the real prod change)', () => {
     const deployed = base();
-    deployed.Resources!['WordStudiesA'] = table({}, { DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete' });
+    deployed.Resources!['WordStudiesA'] = table(
+      {},
+      { DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete' },
+    );
     const synth = base();
-    synth.Resources!['WordStudiesA'] = table({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } });
+    synth.Resources!['WordStudiesA'] = table({
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+    });
     expect(evaluate(deployed, synth)).toEqual([]);
   });
 
   it('fails when a protected resource changes type', () => {
     const synth = base();
     synth.Resources!['PoolA'] = { Type: 'AWS::DynamoDB::GlobalTable', Properties: {} } as never;
-    expect(evaluate(base(), synth)[0]).toMatchObject({ logicalId: 'PoolA', reason: 'type changed to AWS::DynamoDB::GlobalTable' });
+    expect(evaluate(base(), synth)[0]).toMatchObject({
+      logicalId: 'PoolA',
+      reason: 'type changed to AWS::DynamoDB::GlobalTable',
+    });
   });
 
   it('lists new protected resources as info, not violations', () => {
@@ -123,7 +144,9 @@ describe('evaluate (AC8)', () => {
     synth.Resources!['NewTable'] = table({ TableName: 'Other' });
     const r = evaluateDetailed(base(), synth);
     expect(r.violations).toEqual([]);
-    expect(r.info).toEqual([{ logicalId: 'NewTable', type: 'AWS::DynamoDB::Table', reason: 'new protected resource' }]);
+    expect(r.info).toEqual([
+      { logicalId: 'NewTable', type: 'AWS::DynamoDB::Table', reason: 'new protected resource' },
+    ]);
   });
 });
 
@@ -153,7 +176,9 @@ describe('main (CLI)', () => {
   it('returns 1 on a violation', () => {
     const synth = base();
     delete synth.Resources!['PoolA'];
-    expect(main(['--deployed', write('d1.json', base()), '--synth', write('s1.json', synth)])).toBe(1);
+    expect(main(['--deployed', write('d1.json', base()), '--synth', write('s1.json', synth)])).toBe(
+      1,
+    );
   });
 
   it('accepts a deployed template whose body is a JSON string', () => {
@@ -168,7 +193,9 @@ describe('main (CLI)', () => {
   });
 
   it('returns 2 when a file is not JSON at all', () => {
-    expect(main(['--deployed', write('bad.json', '{nope'), '--synth', write('s4.json', base())])).toBe(2);
+    expect(
+      main(['--deployed', write('bad.json', '{nope'), '--synth', write('s4.json', base())]),
+    ).toBe(2);
   });
 
   it('returns 2 on missing arguments', () => {
@@ -178,6 +205,13 @@ describe('main (CLI)', () => {
   });
 
   it('returns 2 on unreadable files', () => {
-    expect(main(['--deployed', path.join(dir, 'missing.json'), '--synth', path.join(dir, 'missing2.json')])).toBe(2);
+    expect(
+      main([
+        '--deployed',
+        path.join(dir, 'missing.json'),
+        '--synth',
+        path.join(dir, 'missing2.json'),
+      ]),
+    ).toBe(2);
   });
 });

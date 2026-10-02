@@ -1,8 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import {
-  HttpTestingController,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AiSummaryService } from './ai-summary.service';
@@ -16,14 +13,20 @@ describe('AiSummaryService', () => {
   const mockEntry: WordStudyEntry = {
     word: 'love',
     strongsNumber: 'G25',
-    englishDefinition: { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'an intense feeling of deep affection' }] }] },
+    englishDefinition: {
+      word: 'love',
+      meanings: [
+        {
+          partOfSpeech: 'noun',
+          definitions: [{ definition: 'an intense feeling of deep affection' }],
+        },
+      ],
+    },
     strongsDefinition: 'to love (in a social or moral sense)',
     originalWord: 'ἀγαπάω',
     transliteration: 'agapaō',
     lexiconEntry: 'From ἀγάπη; to love...',
-    crossReferences: [
-      { reference: 'Romans 5:8', notes: 'God demonstrates love' },
-    ],
+    crossReferences: [{ reference: 'Romans 5:8', notes: 'God demonstrates love' }],
     aiSummary: '',
     notes: 'Self-sacrificial love',
     definitionNotes: '',

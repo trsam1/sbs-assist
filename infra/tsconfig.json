@@ -2,9 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
-    "lib": [
-      "ES2022"
-    ],
+    "lib": ["ES2022"],
     "declaration": true,
     "strict": true,
     "noImplicitAny": true,
@@ -26,8 +24,5 @@
     "test/**/*.ts",
     "vitest.config.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "cdk.out"
-  ]
+  "exclude": ["node_modules", "cdk.out"]
 }

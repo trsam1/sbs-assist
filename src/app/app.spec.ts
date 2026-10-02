@@ -18,10 +18,7 @@ describe('App', () => {
 
     TestBed.configureTestingModule({
       imports: [App],
-      providers: [
-        provideRouter([]),
-        { provide: AuthService, useValue: mockAuth },
-      ],
+      providers: [provideRouter([]), { provide: AuthService, useValue: mockAuth }],
     });
   });
 

@@ -1,8 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import {
-  HttpTestingController,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EnglishDefinitionService, EnglishDictionaryResult } from './english-definition.service';
@@ -50,7 +47,10 @@ describe('EnglishDefinitionService', () => {
           {
             partOfSpeech: 'noun',
             definitions: [
-              { definition: 'an intense feeling of deep affection', example: 'babies fill parents with love' },
+              {
+                definition: 'an intense feeling of deep affection',
+                example: 'babies fill parents with love',
+              },
             ],
           },
         ],
@@ -64,7 +64,10 @@ describe('EnglishDefinitionService', () => {
         {
           partOfSpeech: 'noun',
           definitions: [
-            { definition: 'an intense feeling of deep affection', example: 'babies fill parents with love' },
+            {
+              definition: 'an intense feeling of deep affection',
+              example: 'babies fill parents with love',
+            },
           ],
         },
       ],
@@ -78,20 +81,29 @@ describe('EnglishDefinitionService', () => {
       {
         word: 'love',
         phonetics: [{}, { text: '/lʌv/' }],
-        meanings: [{ partOfSpeech: 'verb', definitions: [{ definition: 'feel deep affection for' }] }],
+        meanings: [
+          { partOfSpeech: 'verb', definitions: [{ definition: 'feel deep affection for' }] },
+        ],
       },
     ]);
 
     expect(result()).toEqual({
       word: 'love',
       phonetic: '/lʌv/',
-      meanings: [{ partOfSpeech: 'verb', definitions: [{ definition: 'feel deep affection for', example: undefined }] }],
+      meanings: [
+        {
+          partOfSpeech: 'verb',
+          definitions: [{ definition: 'feel deep affection for', example: undefined }],
+        },
+      ],
     });
   });
 
   it('returns the empty result on a 404', () => {
     const result = fetch('xyznotaword');
-    httpTesting.expectOne(`${API}/xyznotaword`).flush('Not Found', { status: 404, statusText: 'Not Found' });
+    httpTesting
+      .expectOne(`${API}/xyznotaword`)
+      .flush('Not Found', { status: 404, statusText: 'Not Found' });
     expect(result()).toEqual(EMPTY);
   });
 
@@ -143,7 +155,12 @@ describe('EnglishDefinitionService', () => {
   it('trims the input word before making the request', () => {
     const result = fetch('  love  ');
     httpTesting.expectOne(`${API}/love`).flush([
-      { word: 'love', meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'a feeling of affection' }] }] },
+      {
+        word: 'love',
+        meanings: [
+          { partOfSpeech: 'noun', definitions: [{ definition: 'a feeling of affection' }] },
+        ],
+      },
     ]);
     expect(result()?.meanings[0].definitions[0].definition).toBe('a feeling of affection');
   });

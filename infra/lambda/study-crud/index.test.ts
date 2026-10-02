@@ -146,7 +146,10 @@ describe('Study CRUD Lambda', () => {
       mockSend.mockResolvedValueOnce({});
       const res = await handler(makePostEvent(validBody({ userId: 'attacker' }), 'u1'));
       expect(res.statusCode).toBe(200);
-      const item = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'] as Record<string, unknown>;
+      const item = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
       expect(item['PK']).toBe('USER#u1');
       expect(item['GSI1PK']).toBe('USER#u1');
       expect(item['userId']).toBe('u1');
@@ -225,8 +228,8 @@ describe('Study CRUD Lambda', () => {
 
       const putInput = mockSend.mock.calls[0][0].input as Record<string, unknown>;
       const item = putInput['Item'] as Record<string, unknown>;
-      expect(item['createdAt'] as string >= before).toBe(true);
-      expect(item['createdAt'] as string <= after).toBe(true);
+      expect((item['createdAt'] as string) >= before).toBe(true);
+      expect((item['createdAt'] as string) <= after).toBe(true);
     });
 
     it('sends correct PutCommand with PK, SK, GSI1PK, GSI1SK fields', async () => {
@@ -376,9 +379,15 @@ describe('Study CRUD Lambda', () => {
     });
 
     it('echoes an allowed request Origin and falls back for an unknown one', async () => {
-      const allowed = await handler({ ...makeListEvent(null), headers: { origin: 'https://example.cloudfront.net' } });
+      const allowed = await handler({
+        ...makeListEvent(null),
+        headers: { origin: 'https://example.cloudfront.net' },
+      });
       expect(allowed.headers['Access-Control-Allow-Origin']).toBe('https://example.cloudfront.net');
-      const unknown = await handler({ ...makeListEvent(null), headers: { Origin: 'https://evil.example' } });
+      const unknown = await handler({
+        ...makeListEvent(null),
+        headers: { Origin: 'https://evil.example' },
+      });
       expect(unknown.headers['Access-Control-Allow-Origin']).toBe('https://example.cloudfront.net');
     });
   });

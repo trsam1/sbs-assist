@@ -23,18 +23,12 @@ interface StrongsStudyResult {
   lexiconEntry: string;
 }
 
-async function getStrongsStudyData(
-  strongsNumber: string,
-): Promise<StrongsStudyResult> {
+async function getStrongsStudyData(strongsNumber: string): Promise<StrongsStudyResult> {
   const pk = `STRONGS#${strongsNumber}`;
 
   const [defResult, lexResult] = await Promise.all([
-    docClient.send(
-      new GetCommand({ TableName: tableName, Key: { PK: pk, SK: 'DEF' } }),
-    ),
-    docClient.send(
-      new GetCommand({ TableName: tableName, Key: { PK: pk, SK: 'LEXICON' } }),
-    ),
+    docClient.send(new GetCommand({ TableName: tableName, Key: { PK: pk, SK: 'DEF' } })),
+    docClient.send(new GetCommand({ TableName: tableName, Key: { PK: pk, SK: 'LEXICON' } })),
   ]);
 
   return {
@@ -42,14 +36,11 @@ async function getStrongsStudyData(
     definition: defResult.Item?.['definition'] ?? 'Definition not available',
     originalWord: defResult.Item?.['originalWord'] ?? '',
     transliteration: defResult.Item?.['transliteration'] ?? '',
-    lexiconEntry:
-      lexResult.Item?.['lexiconEntry'] ?? 'Lexicon entry not available',
+    lexiconEntry: lexResult.Item?.['lexiconEntry'] ?? 'Lexicon entry not available',
   };
 }
 
-async function getCrossReferences(
-  strongsNumber: string,
-): Promise<CrossReference[]> {
+async function getCrossReferences(strongsNumber: string): Promise<CrossReference[]> {
   const result = await docClient.send(
     new QueryCommand({
       TableName: tableName,
@@ -76,9 +67,13 @@ export const handler = async (event: APIGatewayEvent) => {
   const strongsNumber = event.pathParameters?.['strongsNumber'];
 
   if (!strongsNumber || !validateStrongsNumber(strongsNumber)) {
-    return corsResponse(400, {
-      message: 'Invalid Strong\'s number. Expected format: G25 or H157',
-    }, origin);
+    return corsResponse(
+      400,
+      {
+        message: "Invalid Strong's number. Expected format: G25 or H157",
+      },
+      origin,
+    );
   }
 
   try {
@@ -90,8 +85,7 @@ export const handler = async (event: APIGatewayEvent) => {
     const data = await getStrongsStudyData(strongsNumber);
     return corsResponse(200, data, origin);
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : 'Internal server error';
+    const message = err instanceof Error ? err.message : 'Internal server error';
     return corsResponse(500, { message }, origin);
   }
 };

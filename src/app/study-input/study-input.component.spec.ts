@@ -25,14 +25,18 @@ describe('StudyInputComponent', () => {
   });
 
   it('should have a disabled submit button when word is empty', () => {
-    const button = fixture.nativeElement.querySelector('button[type="submit"]') as HTMLButtonElement;
+    const button = fixture.nativeElement.querySelector(
+      'button[type="submit"]',
+    ) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
 
   it('should enable submit button when word is entered', () => {
     component.form.controls.word.setValue('love');
     fixture.detectChanges();
-    const button = fixture.nativeElement.querySelector('button[type="submit"]') as HTMLButtonElement;
+    const button = fixture.nativeElement.querySelector(
+      'button[type="submit"]',
+    ) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
   });
 
@@ -55,7 +59,7 @@ describe('StudyInputComponent', () => {
     expect(error.textContent).toContain('Please enter a word to study');
   });
 
-  it('should not have a Strong\'s number input', () => {
+  it("should not have a Strong's number input", () => {
     const strongsInput = fixture.nativeElement.querySelector('#strongs-input');
     expect(strongsInput).toBeNull();
   });

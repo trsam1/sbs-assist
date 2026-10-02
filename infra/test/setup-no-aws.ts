@@ -3,7 +3,12 @@
  * drop any real credential sources and point the SDK at a dead local endpoint, so an
  * unmocked call fails fast with "connection refused" instead of using real keys.
  */
-for (const name of ['AWS_PROFILE', 'AWS_SESSION_TOKEN', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_ROLE_ARN']) {
+for (const name of [
+  'AWS_PROFILE',
+  'AWS_SESSION_TOKEN',
+  'AWS_WEB_IDENTITY_TOKEN_FILE',
+  'AWS_ROLE_ARN',
+]) {
   delete process.env[name];
 }
 process.env['AWS_ACCESS_KEY_ID'] = 'test-not-real';

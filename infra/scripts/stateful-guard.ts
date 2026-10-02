@@ -57,7 +57,8 @@ export function evaluateDetailed(deployed: Template, synthesized: Template): Gua
     if (!isProtected(r.Type)) continue;
     const next = after[logicalId];
     if (!next) violations.push({ logicalId, type: r.Type, reason: 'deleted' });
-    else if (next.Type !== r.Type) violations.push({ logicalId, type: r.Type, reason: `type changed to ${next.Type}` });
+    else if (next.Type !== r.Type)
+      violations.push({ logicalId, type: r.Type, reason: `type changed to ${next.Type}` });
   }
 
   // Rule 2: no replacement / destroy / orphan impact on a protected resource.
@@ -69,7 +70,11 @@ export function evaluateDetailed(deployed: Template, synthesized: Template): Gua
     if (BLOCKING_IMPACTS.has(impact)) {
       const props: string[] = [];
       change.forEachDifference((_kind, name) => props.push(name));
-      violations.push({ logicalId, type: type!, reason: `${impact} (${props.join(', ') || 'no property detail'})` });
+      violations.push({
+        logicalId,
+        type: type!,
+        reason: `${impact} (${props.join(', ') || 'no property detail'})`,
+      });
     }
   });
 
@@ -83,7 +88,8 @@ export function evaluateDetailed(deployed: Template, synthesized: Template): Gua
         reason: `not retained (DeletionPolicy=${r.DeletionPolicy ?? 'unset'}, UpdateReplacePolicy=${r.UpdateReplacePolicy ?? 'unset'})`,
       });
     }
-    if (!before[logicalId]) info.push({ logicalId, type: r.Type, reason: 'new protected resource' });
+    if (!before[logicalId])
+      info.push({ logicalId, type: r.Type, reason: 'new protected resource' });
   }
   return { violations, info };
 }
@@ -93,7 +99,8 @@ export function evaluate(deployed: Template, synthesized: Template): Violation[]
   return evaluateDetailed(deployed, synthesized).violations;
 }
 
-const USAGE = 'Usage: stateful-guard --deployed <deployed-template.json> --synth <synth-template.json>';
+const USAGE =
+  'Usage: stateful-guard --deployed <deployed-template.json> --synth <synth-template.json>';
 
 class UsageError extends Error {}
 
@@ -114,7 +121,9 @@ function readJson(file: string, label: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    throw new UsageError(`${label === 'deployed' ? 'Deployed' : 'Synthesized'} template is not JSON`);
+    throw new UsageError(
+      `${label === 'deployed' ? 'Deployed' : 'Synthesized'} template is not JSON`,
+    );
   }
 }
 
@@ -128,17 +137,25 @@ function toTemplate(value: unknown, label: string): Template {
     try {
       v = JSON.parse(v);
     } catch {
-      throw new UsageError(`${label === 'deployed' ? 'Deployed' : 'Synthesized'} template is not JSON`);
+      throw new UsageError(
+        `${label === 'deployed' ? 'Deployed' : 'Synthesized'} template is not JSON`,
+      );
     }
   }
   if (!v || typeof v !== 'object' || Array.isArray(v)) {
-    throw new UsageError(`${label === 'deployed' ? 'Deployed' : 'Synthesized'} template is not JSON`);
+    throw new UsageError(
+      `${label === 'deployed' ? 'Deployed' : 'Synthesized'} template is not JSON`,
+    );
   }
   return v as Template;
 }
 
 function table(rows: Violation[]): string {
-  return ['| Logical ID | Type | Reason |', '|---|---|---|', ...rows.map((r) => `| ${r.logicalId} | ${r.type} | ${r.reason} |`)].join('\n');
+  return [
+    '| Logical ID | Type | Reason |',
+    '|---|---|---|',
+    ...rows.map((r) => `| ${r.logicalId} | ${r.type} | ${r.reason} |`),
+  ].join('\n');
 }
 
 /** CLI entry. Returns the exit code; never calls process.exit. */

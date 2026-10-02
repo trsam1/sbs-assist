@@ -44,23 +44,19 @@ export class StudyCrudService {
 
   /** Fetch a single saved study by studyId. User scoping is handled by the HTTP interceptor. */
   getStudy(studyId: string): Observable<StudyWorksheet> {
-    return this.http.get<StudyRecord>(
-      `${this.baseUrl}/studies/${studyId}`,
-    ).pipe(map(toWorksheet));
+    return this.http.get<StudyRecord>(`${this.baseUrl}/studies/${studyId}`).pipe(map(toWorksheet));
   }
 
   /** List all saved studies for the current user, sorted by most recently updated. */
   listStudies(): Observable<StudyWorksheet[]> {
-    return this.http.get<StudyRecord[]>(
-      `${this.baseUrl}/studies`,
-    ).pipe(map((records) => records.map(toWorksheet)));
+    return this.http
+      .get<StudyRecord[]>(`${this.baseUrl}/studies`)
+      .pipe(map((records) => records.map(toWorksheet)));
   }
 
   /** Delete a saved study by studyId. User scoping is handled by the HTTP interceptor. */
   deleteStudy(studyId: string): Observable<void> {
-    return this.http.delete<void>(
-      `${this.baseUrl}/studies/${studyId}`,
-    );
+    return this.http.delete<void>(`${this.baseUrl}/studies/${studyId}`);
   }
 
   /** Save (create or update) a word study worksheet. Returns the studyId. */

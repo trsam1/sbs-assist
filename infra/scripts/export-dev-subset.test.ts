@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { mockSend, writeFileSync } = vi.hoisted(() => ({ mockSend: vi.fn(), writeFileSync: vi.fn() }));
+const { mockSend, writeFileSync } = vi.hoisted(() => ({
+  mockSend: vi.fn(),
+  writeFileSync: vi.fn(),
+}));
 
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: { from: () => ({ send: mockSend }) },
@@ -32,9 +35,11 @@ function partition(num: string, xrefs: number, lexicon = true): Item[] {
 }
 
 function serve(partitions: Record<string, Item[]>) {
-  mockSend.mockImplementation(async (cmd: { input: { ExpressionAttributeValues: Record<string, string> } }) => ({
-    Items: partitions[cmd.input.ExpressionAttributeValues[':pk']] ?? [],
-  }));
+  mockSend.mockImplementation(
+    async (cmd: { input: { ExpressionAttributeValues: Record<string, string> } }) => ({
+      Items: partitions[cmd.input.ExpressionAttributeValues[':pk']] ?? [],
+    }),
+  );
 }
 
 const client = { send: mockSend } as unknown as DynamoDBDocumentClient;
@@ -50,7 +55,8 @@ describe('parseXrefCap', () => {
     expect(parseXrefCap('50')).toBe(50);
   });
   it('rejects 0, 51, and non-integers', () => {
-    for (const bad of ['0', '51', 'abc', '2.5', '-1']) expect(() => parseXrefCap(bad)).toThrow(/XREF_CAP/);
+    for (const bad of ['0', '51', 'abc', '2.5', '-1'])
+      expect(() => parseXrefCap(bad)).toThrow(/XREF_CAP/);
   });
 });
 
@@ -61,7 +67,12 @@ describe('exportDevSubset', () => {
 
   it('applies the XREF cap per number, keeping the first by SK, and sorts by PK then SK', async () => {
     serve({ 'STRONGS#G26': partition('G26', 5), 'STRONGS#G25': partition('G25', 5) });
-    const items = await exportDevSubset({ client, tableName: 'StrongsData', numbers: ['G26', 'G25'], xrefCap: 2 });
+    const items = await exportDevSubset({
+      client,
+      tableName: 'StrongsData',
+      numbers: ['G26', 'G25'],
+      xrefCap: 2,
+    });
     expect(items.map((i) => `${i['PK']} ${i['SK']}`)).toEqual([
       'STRONGS#G25 DEF',
       'STRONGS#G25 LEXICON',
@@ -77,29 +88,38 @@ describe('exportDevSubset', () => {
   it('queries the source table read-only with no -dev restriction', async () => {
     serve({ 'STRONGS#G25': partition('G25', 0) });
     await exportDevSubset({ client, tableName: 'StrongsData', numbers: ['G25'], xrefCap: 50 });
-    expect(mockSend.mock.calls[0][0].input).toMatchObject({ TableName: 'StrongsData', KeyConditionExpression: 'PK = :pk' });
+    expect(mockSend.mock.calls[0][0].input).toMatchObject({
+      TableName: 'StrongsData',
+      KeyConditionExpression: 'PK = :pk',
+    });
   });
 
   it('logs and allows a missing LEXICON', async () => {
     serve({ 'STRONGS#H157': partition('H157', 1, false) });
     const log = vi.fn();
-    const items = await exportDevSubset({ client, tableName: 'StrongsData', numbers: ['H157'], xrefCap: 50, log });
+    const items = await exportDevSubset({
+      client,
+      tableName: 'StrongsData',
+      numbers: ['H157'],
+      xrefCap: 50,
+      log,
+    });
     expect(log).toHaveBeenCalledWith('LEXICON missing for H157');
     expect(items.map((i) => i['SK'])).toEqual(['DEF', 'XREF#001']);
   });
 
   it('throws when a DEF is missing', async () => {
     serve({ 'STRONGS#G25': partition('G25', 2).filter((i) => i['SK'] !== 'DEF') });
-    await expect(exportDevSubset({ client, tableName: 'StrongsData', numbers: ['G25'], xrefCap: 50 })).rejects.toThrow(
-      'DEF missing for G25',
-    );
+    await expect(
+      exportDevSubset({ client, tableName: 'StrongsData', numbers: ['G25'], xrefCap: 50 }),
+    ).rejects.toThrow('DEF missing for G25');
   });
 
   it('throws when an item lacks a string PK/SK', async () => {
     serve({ 'STRONGS#G25': [...partition('G25', 1), { PK: 'STRONGS#G25', SK: 7 }] });
-    await expect(exportDevSubset({ client, tableName: 'StrongsData', numbers: ['G25'], xrefCap: 50 })).rejects.toThrow(
-      /string PK\/SK/,
-    );
+    await expect(
+      exportDevSubset({ client, tableName: 'StrongsData', numbers: ['G25'], xrefCap: 50 }),
+    ).rejects.toThrow(/string PK\/SK/);
   });
 });
 

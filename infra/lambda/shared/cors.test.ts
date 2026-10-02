@@ -23,7 +23,9 @@ describe('cors', () => {
 
   it('returns the first allowed origin for an unknown origin', () => {
     vi.stubEnv('ALLOWED_ORIGINS', `${SITE},${LOCAL}`);
-    expect(corsResponse(200, {}, 'https://evil.example').headers['Access-Control-Allow-Origin']).toBe(SITE);
+    expect(
+      corsResponse(200, {}, 'https://evil.example').headers['Access-Control-Allow-Origin'],
+    ).toBe(SITE);
   });
 
   it('returns the first allowed origin when the origin is missing', () => {

@@ -1,8 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import {
-  HttpTestingController,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { StrongsLookupService } from './strongs-lookup.service';
@@ -22,7 +19,7 @@ describe('StrongsLookupService', () => {
   });
 
   describe('getStrongsStudyData', () => {
-    it('should fetch Strong\'s data for a given number', () => {
+    it("should fetch Strong's data for a given number", () => {
       const mockResult: StrongsStudyResult = {
         strongsNumber: 'G25',
         definition: 'to love',
@@ -50,7 +47,7 @@ describe('StrongsLookupService', () => {
   });
 
   describe('getCrossReferences', () => {
-    it('should fetch cross-references for a given Strong\'s number', () => {
+    it("should fetch cross-references for a given Strong's number", () => {
       const mockRefs: CrossReference[] = [
         { reference: 'Romans 5:8', notes: '' },
         { reference: 'John 3:16', notes: '' },

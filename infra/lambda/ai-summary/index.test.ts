@@ -38,7 +38,10 @@ function makeEntry(overrides: Partial<WordStudyEntry> = {}): WordStudyEntry {
     englishDefinition: {
       word: 'love',
       meanings: [
-        { partOfSpeech: 'noun', definitions: [{ definition: 'an intense feeling of deep affection' }] },
+        {
+          partOfSpeech: 'noun',
+          definitions: [{ definition: 'an intense feeling of deep affection' }],
+        },
       ],
     },
     originalWord: 'ἀγαπάω',
@@ -57,15 +60,15 @@ function makeEntry(overrides: Partial<WordStudyEntry> = {}): WordStudyEntry {
 /** Returns the prompt text sent in the n-th Bedrock call. */
 function promptOf(callIndex = 0): string {
   const invokeInput = mockSend.mock.calls[callIndex][0].input as Record<string, unknown>;
-  const body = JSON.parse(invokeInput['body'] as string) as { messages: Array<{ content: string }> };
+  const body = JSON.parse(invokeInput['body'] as string) as {
+    messages: Array<{ content: string }>;
+  };
   return body.messages[0].content;
 }
 
 function bedrockResponse(text: string): { body: Uint8Array } {
   return {
-    body: new TextEncoder().encode(
-      JSON.stringify({ content: [{ type: 'text', text }] }),
-    ),
+    body: new TextEncoder().encode(JSON.stringify({ content: [{ type: 'text', text }] })),
   };
 }
 
@@ -94,9 +97,7 @@ describe('AI Summary Lambda', () => {
     });
 
     it('returns fallback message when Bedrock returns empty content', async () => {
-      mockSend.mockResolvedValueOnce(
-        bedrockResponse(''),
-      );
+      mockSend.mockResolvedValueOnce(bedrockResponse(''));
 
       const result = await generateStudySummary(makeEntry());
       expect(result).toBe('AI summary unavailable. Please try again later.');
@@ -214,28 +215,37 @@ describe('AI Summary Lambda', () => {
             { partOfSpeech: 'noun', definitions: 'oops' },
             null,
             'str',
-            { partOfSpeech: 'verb', definitions: [{ definition: 'c' }, { definition: '' }, { nope: 1 }, null] },
+            {
+              partOfSpeech: 'verb',
+              definitions: [{ definition: 'c' }, { definition: '' }, { nope: 1 }, null],
+            },
           ],
         }),
       ).toBe('(verb) c');
     });
 
     it('omits the prefix when part of speech is empty', () => {
-      expect(flattenEnglishDef({ meanings: [{ partOfSpeech: '', definitions: [{ definition: 'x' }] }] })).toBe('x');
+      expect(
+        flattenEnglishDef({ meanings: [{ partOfSpeech: '', definitions: [{ definition: 'x' }] }] }),
+      ).toBe('x');
     });
   });
 
   describe('prompt English Definition line', () => {
     it('uses a legacy string definition verbatim', async () => {
       mockSend.mockResolvedValueOnce(bedrockResponse('ok'));
-      await generateStudySummary(makeEntry({ englishDefinition: 'an intense feeling of deep affection' }));
+      await generateStudySummary(
+        makeEntry({ englishDefinition: 'an intense feeling of deep affection' }),
+      );
       expect(promptOf()).toContain('English Definition: an intense feeling of deep affection');
     });
 
     it('flattens an object definition with part of speech', async () => {
       mockSend.mockResolvedValueOnce(bedrockResponse('ok'));
       await generateStudySummary(makeEntry());
-      expect(promptOf()).toContain('English Definition: (noun) an intense feeling of deep affection');
+      expect(promptOf()).toContain(
+        'English Definition: (noun) an intense feeling of deep affection',
+      );
     });
   });
 

@@ -176,9 +176,7 @@ export class WordStudyToolStack extends cdk.Stack {
       new route53.ARecord(this, recordId, {
         zone: hostedZone,
         recordName,
-        target: route53.RecordTarget.fromAlias(
-          new targets.CloudFrontTarget(this.distribution),
-        ),
+        target: route53.RecordTarget.fromAlias(new targets.CloudFrontTarget(this.distribution)),
       });
     }
 
@@ -337,9 +335,7 @@ export class WordStudyToolStack extends cdk.Stack {
     const strongsLookupIntegration = new apigateway.LambdaIntegration(this.strongsLookupFn);
 
     // GET /strongs/{strongsNumber}
-    const strongsResource = this.api.root
-      .addResource('strongs')
-      .addResource('{strongsNumber}');
+    const strongsResource = this.api.root.addResource('strongs').addResource('{strongsNumber}');
     strongsResource.addMethod('GET', strongsLookupIntegration);
 
     // GET /strongs/{strongsNumber}/cross-references
