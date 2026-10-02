@@ -17,7 +17,7 @@ vi.mock('@aws-sdk/client-bedrock-runtime', () => {
 });
 
 // Set env vars before importing handler
-vi.stubEnv('ALLOWED_ORIGIN', 'https://example.cloudfront.net');
+vi.stubEnv('ALLOWED_ORIGINS', 'https://example.cloudfront.net');
 
 import { handler, generateStudySummary, flattenEnglishDef } from './index';
 import type { WordStudyEntry } from '../shared/models';

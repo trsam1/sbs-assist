@@ -27,7 +27,7 @@ vi.mock('@aws-sdk/lib-dynamodb', () => {
 
 // Set env vars before importing handler
 vi.stubEnv('STRONGS_TABLE_NAME', 'StrongsData');
-vi.stubEnv('ALLOWED_ORIGIN', 'https://example.cloudfront.net');
+vi.stubEnv('ALLOWED_ORIGINS', 'https://example.cloudfront.net');
 
 import { handler } from './index';
 

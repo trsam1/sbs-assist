@@ -1,7 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import type { CrossReference } from '../shared/models';
-import { corsResponse } from '../shared/cors';
+import { corsResponse, getRequestOrigin } from '../shared/cors';
 import { validateStrongsNumber } from '../shared/validation';
 
 const client = new DynamoDBClient({});
@@ -12,6 +12,7 @@ interface APIGatewayEvent {
   httpMethod: string;
   resource: string;
   pathParameters?: Record<string, string> | null;
+  headers?: Record<string, string | undefined> | null;
 }
 
 interface StrongsStudyResult {
@@ -71,25 +72,26 @@ async function getCrossReferences(
 }
 
 export const handler = async (event: APIGatewayEvent) => {
+  const origin = getRequestOrigin(event.headers);
   const strongsNumber = event.pathParameters?.['strongsNumber'];
 
   if (!strongsNumber || !validateStrongsNumber(strongsNumber)) {
     return corsResponse(400, {
       message: 'Invalid Strong\'s number. Expected format: G25 or H157',
-    });
+    }, origin);
   }
 
   try {
     if (event.resource.endsWith('/cross-references')) {
       const data = await getCrossReferences(strongsNumber);
-      return corsResponse(200, data);
+      return corsResponse(200, data, origin);
     }
 
     const data = await getStrongsStudyData(strongsNumber);
-    return corsResponse(200, data);
+    return corsResponse(200, data, origin);
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : 'Internal server error';
-    return corsResponse(500, { message });
+    return corsResponse(500, { message }, origin);
   }
 };

@@ -37,7 +37,7 @@ vi.mock('node:crypto', () => ({
 
 // Set env vars before importing handler
 vi.stubEnv('WORD_STUDIES_TABLE_NAME', 'WordStudies');
-vi.stubEnv('ALLOWED_ORIGIN', 'https://example.cloudfront.net');
+vi.stubEnv('ALLOWED_ORIGINS', 'https://example.cloudfront.net');
 
 import { handler } from './index';
 
@@ -373,6 +373,13 @@ describe('Study CRUD Lambda', () => {
       const res = await handler(makePostEvent(null));
       expect(res.headers).toHaveProperty('Access-Control-Allow-Origin');
       expect(res.headers).toHaveProperty('Access-Control-Allow-Methods');
+    });
+
+    it('echoes an allowed request Origin and falls back for an unknown one', async () => {
+      const allowed = await handler({ ...makeListEvent(null), headers: { origin: 'https://example.cloudfront.net' } });
+      expect(allowed.headers['Access-Control-Allow-Origin']).toBe('https://example.cloudfront.net');
+      const unknown = await handler({ ...makeListEvent(null), headers: { Origin: 'https://evil.example' } });
+      expect(unknown.headers['Access-Control-Allow-Origin']).toBe('https://example.cloudfront.net');
     });
   });
 

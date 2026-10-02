@@ -3,7 +3,7 @@ import {
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
 import type { WordStudyEntry } from '../shared/models';
-import { corsResponse } from '../shared/cors';
+import { corsResponse, getRequestOrigin } from '../shared/cors';
 
 const bedrockClient = new BedrockRuntimeClient({});
 const MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
@@ -12,6 +12,7 @@ interface APIGatewayEvent {
   httpMethod: string;
   resource: string;
   body?: string | null;
+  headers?: Record<string, string | undefined> | null;
 }
 
 interface BedrockResponseBody {
@@ -101,24 +102,25 @@ export async function generateStudySummary(
 }
 
 export const handler = async (event: APIGatewayEvent) => {
+  const origin = getRequestOrigin(event.headers);
   if (!event.body) {
-    return corsResponse(400, { message: 'Request body is required' });
+    return corsResponse(400, { message: 'Request body is required' }, origin);
   }
 
   let entry: WordStudyEntry;
   try {
     entry = JSON.parse(event.body) as WordStudyEntry;
   } catch {
-    return corsResponse(400, { message: 'Invalid JSON in request body' });
+    return corsResponse(400, { message: 'Invalid JSON in request body' }, origin);
   }
 
   if (!entry.word || !entry.strongsNumber || !entry.strongsDefinition) {
     return corsResponse(400, {
       message:
         'Missing required fields: word, strongsNumber, and strongsDefinition are required',
-    });
+    }, origin);
   }
 
   const summary = await generateStudySummary(entry);
-  return corsResponse(200, { summary });
+  return corsResponse(200, { summary }, origin);
 };
