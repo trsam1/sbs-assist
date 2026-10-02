@@ -1,11 +1,23 @@
-/** Application environment configuration. */
-export const environment = {
+/** Runtime configuration served by each stage at /config.json (written by CDK). */
+export interface RuntimeConfig {
   /** Base URL for the API Gateway endpoint (no trailing slash). */
-  apiUrl: 'https://66fak264yg.execute-api.us-east-1.amazonaws.com/prod',
+  apiUrl: string;
   /** Cognito User Pool ID. */
-  cognitoUserPoolId: 'us-east-1_o55GzxUuv',
+  cognitoUserPoolId: string;
   /** Cognito User Pool Client ID. */
-  cognitoUserPoolClientId: '24en5ru7dd9h998os5dp0skg1d',
+  cognitoUserPoolClientId: string;
   /** AWS region for Cognito. */
-  cognitoRegion: 'us-east-1',
+  cognitoRegion: string;
+}
+
+/**
+ * Populated at startup from /config.json (see runtime-config.ts). Empty until then.
+ * Local dev: copy public/config.example.json to public/config.json (gitignored) and fill
+ * in the dev stack outputs.
+ */
+export const environment: RuntimeConfig = {
+  apiUrl: '',
+  cognitoUserPoolId: '',
+  cognitoUserPoolClientId: '',
+  cognitoRegion: '',
 };

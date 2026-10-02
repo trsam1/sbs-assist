@@ -8,7 +8,9 @@ import { environment } from './environment';
 @Injectable({ providedIn: 'root' })
 export class StrongsLookupService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = environment.apiUrl;
+  private get baseUrl(): string {
+    return environment.apiUrl;
+  }
 
   /** Fetch Strong's definition, original word, transliteration, and lexicon entry. */
   getStrongsStudyData(strongsNumber: string): Observable<StrongsStudyResult> {

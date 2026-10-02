@@ -38,7 +38,9 @@ function toWorksheet(record: StudyRecord): StudyWorksheet {
 @Injectable({ providedIn: 'root' })
 export class StudyCrudService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = environment.apiUrl;
+  private get baseUrl(): string {
+    return environment.apiUrl;
+  }
 
   /** Fetch a single saved study by studyId. User scoping is handled by the HTTP interceptor. */
   getStudy(studyId: string): Observable<StudyWorksheet> {
