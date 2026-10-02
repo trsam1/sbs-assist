@@ -18,10 +18,29 @@ interface BedrockResponseBody {
   content?: Array<{ type: string; text?: string }>;
 }
 
-function flattenEnglishDef(def: WordStudyEntry['englishDefinition']): string {
-  if (!def || def.meanings.length === 0) return '';
-  return def.meanings
-    .map((m) => `(${m.partOfSpeech}) ${m.definitions.map((d) => d.definition).join('; ')}`)
+/**
+ * Flattens an English definition into one prompt line. Accepts the structured
+ * object, the legacy plain string, null/undefined, or malformed data. Never throws.
+ */
+export function flattenEnglishDef(def: unknown): string {
+  if (typeof def === 'string') return def.trim();
+  if (!def || typeof def !== 'object') return '';
+  const meanings = (def as { meanings?: unknown }).meanings;
+  if (!Array.isArray(meanings)) return '';
+  return meanings
+    .map((m: unknown) => {
+      if (!m || typeof m !== 'object') return '';
+      const { partOfSpeech, definitions } = m as { partOfSpeech?: unknown; definitions?: unknown };
+      if (!Array.isArray(definitions)) return '';
+      const text = definitions
+        .map((d: unknown) => (d && typeof d === 'object' ? (d as { definition?: unknown }).definition : undefined))
+        .filter((d): d is string => typeof d === 'string' && d.length > 0)
+        .join('; ');
+      if (!text) return '';
+      const prefix = typeof partOfSpeech === 'string' && partOfSpeech.length > 0 ? `(${partOfSpeech}) ` : '';
+      return `${prefix}${text}`;
+    })
+    .filter((s) => s.length > 0)
     .join(' | ');
 }
 
