@@ -7,20 +7,31 @@
     "cdk": "cdk",
     "seed-strongs": "ts-node scripts/seed-strongs-data.ts",
     "seed-xrefs": "ts-node scripts/seed-cross-references.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "synth": "cdk synth --all --quiet",
+    "guard": "ts-node scripts/stateful-guard.ts",
+    "seed-dev": "ts-node scripts/seed-dev-subset.ts",
+    "export-dev-subset": "ts-node scripts/export-dev-subset.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1037.0",
-    "@aws-sdk/client-dynamodb": "^3.700.0",
-    "@aws-sdk/lib-dynamodb": "^3.700.0",
-    "aws-cdk-lib": "^2.200.0",
-    "constructs": "^10.4.2"
+    "@aws-sdk/client-bedrock-runtime": "3.1037.0",
+    "@aws-sdk/client-dynamodb": "3.1037.0",
+    "@aws-sdk/lib-dynamodb": "3.1037.0",
+    "aws-cdk-lib": "2.250.0",
+    "constructs": "10.6.0"
   },
   "devDependencies": {
-    "aws-cdk": "^2.200.0",
-    "fast-check": "^4.7.0",
-    "ts-node": "^10.9.2",
-    "typescript": "~5.9.2",
-    "vitest": "^4.1.5"
+    "@aws-cdk/cloudformation-diff": "2.187.5",
+    "@aws-sdk/client-cloudformation": "3.1037.0",
+    "aws-cdk": "2.1119.0",
+    "esbuild": "0.28.2",
+    "fast-check": "4.7.0",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.5"
+  },
+  "engines": {
+    "node": ">=22 <23"
   }
 }

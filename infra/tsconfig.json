@@ -2,7 +2,9 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "declaration": true,
     "strict": true,
     "noImplicitAny": true,
@@ -16,6 +18,16 @@
     "outDir": "./cdk.out",
     "rootDir": "."
   },
-  "include": ["bin/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "lambda/**/*.ts"],
-  "exclude": ["node_modules", "cdk.out"]
+  "include": [
+    "bin/**/*.ts",
+    "lib/**/*.ts",
+    "scripts/**/*.ts",
+    "lambda/**/*.ts",
+    "test/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "cdk.out"
+  ]
 }
