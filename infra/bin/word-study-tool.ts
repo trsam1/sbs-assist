@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WordStudyToolStack } from '../lib/word-study-tool-stack';
 import { STAGES } from '../lib/stage-config';
+import { PipelineBootstrapStack } from '../lib/pipeline-bootstrap-stack';
 
 // Hardcoded (not secret; already in cdk.context.json). CI verify has no credentials, so
 // CDK_DEFAULT_ACCOUNT would be undefined and the hosted-zone lookup would fail.
@@ -27,3 +28,5 @@ const siteDir = frontendAssetPath();
 // Prod: stack ID frozen.
 new WordStudyToolStack(app, STAGES.prod.stackId, { env, config: STAGES.prod, frontendAssetPath: siteDir });
 new WordStudyToolStack(app, STAGES.dev.stackId, { env, config: STAGES.dev, frontendAssetPath: siteDir });
+// Deployed only by the user, locally. Never by CI.
+new PipelineBootstrapStack(app, 'PipelineBootstrapStack', { env });
