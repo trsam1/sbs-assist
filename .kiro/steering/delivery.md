@@ -100,3 +100,33 @@ A human files a GitHub issue (the `.github/ISSUE_TEMPLATE/agent-task.yml` form, 
 - "work the queue": `gh issue list --label agent-ready --json number,title`, then one `run_workflow` run per issue (same `workflowPath` + inputs), at most 2 concurrently. Skip any issue already labeled `agent-in-progress`.
 - Writing a good agent issue: one outcome; a verifiable acceptance checklist (`- [ ]` lines); set Area; check the risk boxes honestly — a checked box (data/user-pool/DNS/prod config, or needs a design decision) means a human weighs in first and the agent will refuse. Keep scope small.
 - Cost: each issue run consumes Kiro credits, so keep issues small and focused. The recipe never touches AWS and CI never calls Bedrock; docs/config-only PRs skip deploys, so AWS cost is ≈ $0 for those.
+
+## Spec stage (enhancing a request into a spec)
+
+Some work arrives already well-specified; some arrives as a thin idea. There are two entry paths, and the only difference is whether a spec gets drafted and reviewed first.
+
+- **Well-specified work** → the `agent-task.yml` form → label `agent-ready` → the `agent-issue` build recipe implements it and opens a CI-gated PR. This is the existing path and is unchanged.
+- **Underspecified feature** → the `feature-request.yml` form → label `needs-spec` → the `spec-draft` recipe drafts a reviewed spec and opens a spec PR → the user reviews and merges the spec PR (this merge is the design-approval gate) → the user relabels the issue `agent-ready` → the `agent-issue` build recipe implements the committed spec. No app code is written until the spec PR is merged.
+
+The spec PR changes only `.kiro/specs/**`, so CI's `ci-ok` passes or skips; the spec-draft recipe does not drive CI, and the issue stays open (the spec PR uses `Refs #`, not `Closes #`) so it can move on to the build phase.
+
+### Label lifecycle (spec stage)
+
+`scripts/agent-labels.sh` creates these alongside the agent-* labels (idempotent):
+
+- `needs-spec` (a feature request queued for a spec) → `spec-in-progress` (the spec-draft recipe is drafting) → `spec-pr-open` (spec PR awaiting the user's review/merge).
+- After the user merges the spec PR, the user relabels the issue `agent-ready` and it rejoins the normal `agent-ready` → `agent-in-progress` → `agent-pr-open` build lifecycle.
+- The spec-draft recipe also tolerates an issue re-pointed here while carrying `agent-blocked` or `needs-human`: intake removes those when it takes the issue.
+
+### Running the spec stage
+
+- "draft a spec for issue N" / an issue labeled `needs-spec`: run the recipe — `run_workflow` with `workflowPath` = `/home/timothy/Code/sbs-assist/.kiro/workflows/spec-draft.workflow.json` and inputs `{"issue_number": N}`. One run per issue.
+- When to use it: features and anything underspecified where the acceptance criteria and approach are not yet pinned down. Skip it for small fixes and one-liners — those go straight to `agent-ready` and the build recipe.
+
+### How the build recipe reads a merged spec
+
+When an issue references a committed spec under `.kiro/specs/<slug>/`, the `agent-issue` build recipe reads `requirements.md` for the acceptance criteria and `design.md` for the approach. An issue that references a **merged** spec dir therefore satisfies the build recipe's "verifiable acceptance criteria" requirement — intake does not refuse it for missing criteria.
+
+### Cost
+
+Consistent with the section above: the spec-draft recipe is docs-only (it writes only `.kiro/specs/**`), never touches AWS, and never calls Bedrock, so its AWS cost is ≈ $0. It does consume Kiro credits for the draft/review loop, so reserve it for features that genuinely need a spec rather than small fixes.
