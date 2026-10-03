@@ -103,6 +103,41 @@ export interface ScrollStudyRecord {
   GSI1SK: string; // "UPDATED#<updatedAt>"
 }
 
+/** A user-owned container that organizes study work by a book of the Bible. */
+export interface BookStudy {
+  id: string; // server-generated UUID
+  userId: string; // Cognito sub
+  book: string; // one of the 66 canonical book names
+  title: string; // optional display title; '' when unset
+  notes: string; // optional free text; '' when unset
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+  // Reserved for a later increment that links word studies; not populated yet.
+  // wordStudyIds?: string[];
+}
+
+/** Create payload from the form (server sets id/userId/timestamps). */
+export interface BookStudyInput {
+  book: string;
+  title?: string;
+  notes?: string;
+}
+
+/** DynamoDB record shape for the BookStudies table. */
+export interface BookStudyRecord {
+  PK: string; // "USER#<userId>"
+  SK: string; // "BOOKSTUDY#<bookStudyId>"
+  bookStudyId: string;
+  userId: string;
+  book: string;
+  title: string;
+  notes: string;
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+  GSI1PK: string; // "USER#<userId>"
+  GSI1SK: string; // "UPDATED#<updatedAt>" — sort by most recent
+}
+
 /** DynamoDB record shape for the StrongsData table. */
 export interface StrongsRecord {
   PK: string;

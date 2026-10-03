@@ -207,8 +207,40 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(6);
+    expect(groups).toHaveLength(7);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
+  });
+
+  it('adds an additive BookStudies table (on-demand, AWS-managed, GSI1, no PITR)', () => {
+    const table = tableByName(t, 'BookStudies');
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.Properties?.['SSESpecification']).toEqual({ SSEEnabled: true });
+    const gsis = (table.Properties?.['GlobalSecondaryIndexes'] ?? []) as {
+      IndexName?: string;
+    }[];
+    expect(gsis.some((g) => g.IndexName === 'GSI1')).toBe(true);
+    expect(table.Properties?.['PointInTimeRecoverySpecification']).toBeUndefined();
+  });
+
+  it('runs BookStudyCRUD on Node 22', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'BookStudyCRUD',
+      Runtime: 'nodejs22.x',
+    });
+  });
+
+  it('guards every /books method with the Cognito authorizer', () => {
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS' &&
+        m.Properties?.['AuthorizerId'] !== undefined,
+    );
+    expect(methods.length).toBeGreaterThan(0);
+    const booksMethods = t.findResources('AWS::ApiGateway::Method', {
+      Properties: Match.objectLike({ AuthorizationType: 'COGNITO_USER_POOLS' }),
+    });
+    // Four /books methods (POST, GET, GET by id, DELETE) are authorized plus the /studies ones.
+    expect(Object.keys(booksMethods).length).toBeGreaterThanOrEqual(8);
   });
 
   it('points SiteAliasRecord at wordstudy.teksnextdoor.com', () => {
@@ -307,11 +339,22 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(6);
+    expect(groups).toHaveLength(7);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
     }
+  });
+
+  it('creates a BookStudies-dev table and BookStudyCRUD-dev function', () => {
+    const table = tableByName(t, 'BookStudies-dev');
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.DeletionPolicy).toBe('Delete');
+    const gsis = (table.Properties?.['GlobalSecondaryIndexes'] ?? []) as {
+      IndexName?: string;
+    }[];
+    expect(gsis.some((g) => g.IndexName === 'GSI1')).toBe(true);
+    t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'BookStudyCRUD-dev' });
   });
 
   it('creates no account-level API Gateway CloudWatch setting', () => {

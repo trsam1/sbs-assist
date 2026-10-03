@@ -51,6 +51,7 @@ import { AuthComponent } from './auth/auth.component';
             <a class="navbar-item" routerLink="/scroll/new" routerLinkActive="is-active"
               >New Scroll Study</a
             >
+            <a class="navbar-item" routerLink="/books" routerLinkActive="is-active">Book Studies</a>
           </div>
           <div class="navbar-end">
             <div class="navbar-item">

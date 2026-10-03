@@ -31,4 +31,21 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./scroll-view/scroll-view.component').then((m) => m.ScrollViewComponent),
   },
+  {
+    path: 'books',
+    loadComponent: () =>
+      import('./book-study-list/book-study-list.component').then((m) => m.BookStudyListComponent),
+  },
+  {
+    path: 'books/new',
+    loadComponent: () =>
+      import('./book-study-form/book-study-form.component').then((m) => m.BookStudyFormComponent),
+  },
+  {
+    path: 'books/:bookStudyId',
+    loadComponent: () =>
+      import('./book-study-detail/book-study-detail.component').then(
+        (m) => m.BookStudyDetailComponent,
+      ),
+  },
 ];
