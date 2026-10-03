@@ -39,4 +39,16 @@ describe('App', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('test@example.com');
   });
+
+  it('should show both word-study and scroll-study navbar links', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    const links = Array.from(
+      fixture.nativeElement.querySelectorAll('.navbar-start .navbar-item'),
+    ).map((el) => (el as HTMLElement).textContent?.trim());
+    expect(links).toContain('Word Studies');
+    expect(links).toContain('New Word Study');
+    expect(links).toContain('Scroll Studies');
+    expect(links).toContain('New Scroll Study');
+  });
 });

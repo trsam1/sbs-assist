@@ -74,6 +74,64 @@ describe.each(['prod', 'dev'] as const)('WordStudyToolStack (%s) — shared', (s
     }
   });
 
+  it('defines the ScrollStudies table with PK/SK + GSI1', () => {
+    const table = tableByName(t, `ScrollStudies${stage === 'prod' ? '' : '-dev'}`);
+    expect(table.Properties?.['KeySchema']).toEqual([
+      { AttributeName: 'PK', KeyType: 'HASH' },
+      { AttributeName: 'SK', KeyType: 'RANGE' },
+    ]);
+    const gsis = table.Properties?.['GlobalSecondaryIndexes'] as Array<Record<string, unknown>>;
+    expect(gsis).toHaveLength(1);
+    expect(gsis[0]['IndexName']).toBe('GSI1');
+  });
+
+  it('defines the uploads bucket: block-public, 7-day expiry, PUT CORS, auto-delete', () => {
+    const buckets = Object.entries(resourcesOfType(t, 'AWS::S3::Bucket')).filter(([id]) =>
+      id.startsWith('UploadsBucket'),
+    );
+    expect(buckets, 'uploads bucket').toHaveLength(1);
+    const [, bucket] = buckets[0];
+
+    expect(bucket.Properties?.['PublicAccessBlockConfiguration']).toEqual({
+      BlockPublicAcls: true,
+      BlockPublicPolicy: true,
+      IgnorePublicAcls: true,
+      RestrictPublicBuckets: true,
+    });
+
+    const lifecycle = bucket.Properties?.['LifecycleConfiguration'] as {
+      Rules: Array<Record<string, unknown>>;
+    };
+    expect(lifecycle.Rules.some((r) => r['ExpirationInDays'] === 7)).toBe(true);
+
+    const cors = bucket.Properties?.['CorsConfiguration'] as {
+      CorsRules: Array<Record<string, unknown>>;
+    };
+    expect((cors.CorsRules[0]['AllowedMethods'] as string[]).includes('PUT')).toBe(true);
+
+    // Transient data: DESTROY + auto-delete in every stage.
+    expect(bucket.DeletionPolicy).toBe('Delete');
+  });
+
+  it('triggers ExtractText on S3 ObjectCreated and authorizes the four scroll routes', () => {
+    // S3 → Lambda notification wiring exists (custom resource configures bucket notifications).
+    t.resourceCountIs('Custom::S3BucketNotifications', 1);
+
+    // The two new Lambdas exist on Node 22.
+    for (const name of ['ScrollStudy', 'ExtractText']) {
+      t.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${name}${stage === 'prod' ? '' : '-dev'}`,
+        Runtime: 'nodejs22.x',
+      });
+    }
+
+    // Four /scroll-studies methods, all Cognito-authorized (OPTIONS preflight excluded).
+    const scrollMethods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) => (m.Properties?.['AuthorizationType'] as string) === 'COGNITO_USER_POOLS',
+    );
+    expect(scrollMethods.length).toBeGreaterThanOrEqual(4);
+  });
+
   it('writes config.json and serves the shell with no-cache, invalidating /*', () => {
     t.hasResourceProperties('Custom::CDKBucketDeployment', {
       SystemMetadata: { 'cache-control': 'no-cache' },
@@ -149,7 +207,7 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(4);
+    expect(groups).toHaveLength(6);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
   });
 
@@ -249,7 +307,7 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(4);
+    expect(groups).toHaveLength(6);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
