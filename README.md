@@ -55,6 +55,13 @@ There is no browser e2e suite and no `e2e` target. `src/app/e2e-integration.spec
 - `npm start` needs a local `public/config.json` (copy `public/config.example.json` and fill in the dev stack outputs).
 - Deploys happen only through GitHub Actions: PR → merge → dev → prod (with approval). See [.kiro/steering/delivery.md](.kiro/steering/delivery.md) for the flow, dev deploy/destroy, costs, and one-time setup, and [docs/domain-cutover.md](docs/domain-cutover.md) for the planned `axiostools.teksnextdoor.com` move.
 
+## Working with agents
+
+Some work is handled by AI agents. A human files a GitHub issue using the `agent-task` issue form and labels it `agent-ready`; an agent then picks it up, implements it on an `agent/*` branch, and opens a CI-gated PR that goes through the same checks as any other change.
+
+- To queue agent work: open an issue with the `agent-task` form and add the `agent-ready` label.
+- For the full flow, labels, and CI gating, see [.kiro/steering/delivery.md](.kiro/steering/delivery.md).
+
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
