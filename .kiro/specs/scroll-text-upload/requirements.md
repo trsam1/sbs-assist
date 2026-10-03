@@ -41,10 +41,12 @@ the Bible so that I can observe its text as a continuous scroll in later steps.
 2. WHEN the student selects a file whose extension is not `.pdf`, `.docx`, or `.txt` THEN the
    system SHALL reject it with an inline message and SHALL NOT request an upload URL.
 3. WHEN the student selects a file larger than 10 MB THEN the system SHALL reject it with an
-   inline message and SHALL NOT request an upload URL.
+   inline message and SHALL NOT request an upload URL. (This client-side check is the primary
+   size gate; the server-side bound is enforced during extraction — see Requirement 2 AC 6.)
 4. WHEN the student submits a valid file THEN the system SHALL request a short-lived upload
    target from the API and upload the file bytes directly to S3 (the API SHALL NOT receive
-   the file bytes).
+   the file bytes). The client does NOT send any status update after the upload; extraction
+   advances the status (see Requirement 2).
 5. IF the upload URL request or the S3 upload fails THEN the system SHALL display an error and
    allow the student to retry without losing the entered book name.
 6. The book-name input SHALL be required and limited to 100 characters.
@@ -64,8 +66,10 @@ As a Bible student, I want the text of my uploaded document extracted automatica
 do not have to retype or copy-paste the book.
 
 ### Acceptance Criteria
-1. WHEN a file finishes uploading to S3 THEN the system SHALL extract its plain text:
-   `.txt` read as UTF-8, `.pdf` via a PDF text extractor, `.docx` via a Word extractor.
+1. WHEN a file finishes uploading to S3 THEN the system SHALL move the Scroll Study from
+   `uploading` to `extracting` and extract its plain text: `.txt` read as UTF-8, `.pdf` via a
+   PDF text extractor, `.docx` via a Word extractor. The extraction worker (not the client)
+   SHALL be the only writer of the `extracting`, `ready`, and `failed` statuses.
 2. WHEN extraction succeeds THEN the system SHALL store the extracted text on the Scroll Study
    record and set its status to `ready`.
 3. WHEN the extracted text exceeds the per-record storage limit (see design) THEN the system
@@ -75,6 +79,13 @@ do not have to retype or copy-paste the book.
    result) THEN the system SHALL set the study status to `failed` with a human-readable reason
    and SHALL NOT leave the study stuck in `extracting`.
 5. The extraction result SHALL be plain UTF-8 text with no HTML markup.
+6. WHEN the uploaded object's size exceeds 10 MB THEN the extraction worker SHALL set status to
+   `failed` with reason "file too large" and SHALL NOT attempt extraction. (The presigned
+   `PUT` URL does not bind content length, so this is the authoritative server-side size gate;
+   see design "Validation rules".)
+7. WHEN an S3 object-created event carries a key that does not match the expected
+   `uploads/<userId>/<scrollStudyId>.<ext>` shape THEN the extraction worker SHALL log and
+   ignore it (there is no record to update), so it never errors on an unexpected key.
 
 ### Correctness Properties
 - Property: `extractText` never throws for any `Buffer` input of a supported type; it returns
@@ -110,13 +121,17 @@ extracted text later and delete studies I no longer need.
 ### Acceptance Criteria
 1. WHEN a Scroll Study is created THEN it SHALL be stored in DynamoDB keyed by the
    authenticated Cognito user (`sub`), the same scoping the word-study tool uses.
-2. WHEN the student opens their study list THEN Scroll Studies SHALL appear with book name,
-   created date, and status, sorted most-recently-updated first.
-3. WHEN the student re-opens a `ready` Scroll Study THEN the system SHALL display the stored
+2. WHEN the student opens their study list THEN the list SHALL show both word studies and
+   Scroll Studies in one table, merged and sorted most-recently-updated first, each row tagged
+   with its type; a Scroll Study row SHALL show its book name as the title and its status, and
+   a word-study row SHALL continue to show its word and Strong's number.
+3. WHEN the student opens a row THEN the system SHALL route to the correct tool by type: a word
+   study to `/study/:id` and a Scroll Study to `/scroll/:id`.
+4. WHEN the student re-opens a `ready` Scroll Study THEN the system SHALL display the stored
    book name and extracted scroll text.
-4. WHEN the student deletes a Scroll Study THEN the system SHALL delete the DynamoDB record and
+5. WHEN the student deletes a Scroll Study THEN the system SHALL delete the DynamoDB record and
    the associated uploaded S3 object.
-5. A student SHALL only ever be able to read, list, or delete their own Scroll Studies; a
+6. A student SHALL only ever be able to read, list, or delete their own Scroll Studies; a
    request for another user's `scrollStudyId` SHALL return 404.
 
 ### Correctness Properties
