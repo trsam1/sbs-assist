@@ -90,3 +90,13 @@ inclusion: always
     aws logs put-retention-policy --log-group-name "/aws/lambda/$fn" --retention-in-days 90
   done
   ```
+
+## Agent intake
+
+A human files a GitHub issue (the `.github/ISSUE_TEMPLATE/agent-task.yml` form, phone-friendly) and labels it `agent-ready`. The orchestrator later runs one `agent-issue` recipe per issue, which implements it on an `agent/*` branch and opens a CI-gated PR. The intake form, labels, PR template, and recipe are config + docs only; agent runs go through the same CI/PR/dev-deploy flow as any other change.
+
+- Labels (`scripts/agent-labels.sh` creates them, idempotent): `agent-ready` (queued) → `agent-in-progress` (an agent is working it) → `agent-pr-open` (a PR is open). Off-ramps: `agent-blocked` (agent stopped, needs a human answer — see the issue comment) and `needs-human` (out of agent scope, a human must decide first).
+- "work issue N": run the recipe for one issue — `run_workflow` with `workflowPath` = `/home/timothy/Code/sbs-assist/.kiro/workflows/agent-issue.workflow.json` and inputs `{"issue_number": N}`.
+- "work the queue": `gh issue list --label agent-ready --json number,title`, then one `run_workflow` run per issue (same `workflowPath` + inputs), at most 2 concurrently. Skip any issue already labeled `agent-in-progress`.
+- Writing a good agent issue: one outcome; a verifiable acceptance checklist (`- [ ]` lines); set Area; check the risk boxes honestly — a checked box (data/user-pool/DNS/prod config, or needs a design decision) means a human weighs in first and the agent will refuse. Keep scope small.
+- Cost: each issue run consumes Kiro credits, so keep issues small and focused. The recipe never touches AWS and CI never calls Bedrock; docs/config-only PRs skip deploys, so AWS cost is ≈ $0 for those.

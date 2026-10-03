@@ -1,0 +1,65 @@
+# Agent task issue form. Filed by a human, picked up by an agent once labeled agent-ready.
+name: Agent task
+description: Describe one outcome for an agent to implement end-to-end.
+title: '[agent] '
+labels: [agent-ready]
+body:
+  - type: markdown
+    attributes:
+      value: 'An agent will pick this up once it is labeled `agent-ready`. Keep it to one clear outcome with verifiable acceptance criteria.'
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: 'One sentence: what should be true when this is done.'
+      placeholder: Add a "Working with agents" section to README.md.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: A checklist of verifiable items, one `- [ ]` per line. The agent treats these as the definition of done.
+      placeholder: |
+        - [ ] README has a "Working with agents" section
+        - [ ] The section links .kiro/steering/delivery.md
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where the change lives.
+      options:
+        - frontend
+        - lambda-api
+        - infra-cdk
+        - tests
+        - docs
+        - multiple
+    validations:
+      required: true
+  - type: textarea
+    id: hints
+    attributes:
+      label: 'Hints: files or prior art'
+      description: Point at files, patterns, or similar past work.
+    validations:
+      required: false
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Anything the agent should explicitly not touch.
+    validations:
+      required: false
+  - type: checkboxes
+    id: risk
+    attributes:
+      label: Risk check
+      description: Checking either box means the agent must stop and wait for a human.
+      options:
+        - label: This touches data tables / user pool / DNS / prod config
+        - label: This needs a design decision
+    validations:
+      required: false

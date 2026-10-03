@@ -1,0 +1,70 @@
+{
+  "name": "agent-issue",
+  "description": "Implement one agent-ready GitHub issue end-to-end: intake and triage, plan, build-and-review loop, open a CI-gated PR to main, drive CI green, and report. Never merges. One run per issue.",
+  "inputs": {
+    "issue_number": "string"
+  },
+  "root": {
+    "type": "sequence",
+    "id": "agent-issue-root",
+    "steps": [
+      {
+        "type": "step",
+        "id": "intake",
+        "agent": "wf-coder",
+        "prompt": "You are the intake/triage step for GitHub issue #{{issue_number}} in the repo trsam1/sbs-assist. The main workspace is /home/timothy/Code/sbs-assist. Use absolute paths everywhere. Do NOT touch AWS, do NOT run cdk or aws, do NOT request credentials.\n\n1. Run `gh issue view {{issue_number}} --json title,body,labels,comments` and read it.\n2. REFUSE the issue (do all of: comment on the issue with `gh issue comment {{issue_number}}` explaining exactly why; add label `needs-human` if out of agent scope or `agent-blocked` if just under-specified via `gh issue edit {{issue_number}} --add-label <label>`; remove `agent-in-progress` if present via `--remove-label agent-in-progress`; then call send_message with severity error and STOP) if ANY of these hold:\n   - Acceptance criteria are missing, empty, or not verifiable.\n   - A risk checkbox is checked (touches data tables / user pool / DNS / prod config, OR needs a design decision).\n   - The work needs AWS access, PipelineBootstrapStack changes, editing prod values in infra/lib/stage-config.ts, or renaming stateful construct IDs or physical names (tables, user pool, records).\n3. Otherwise proceed:\n   - Swap labels: `gh issue edit {{issue_number}} --remove-label agent-ready --add-label agent-in-progress`.\n   - Comment `Agent started` on the issue.\n   - `git -C /home/timothy/Code/sbs-assist fetch origin`.\n   - Pick a short kebab-case slug from the title. Create a worktree: `git -C /home/timothy/Code/sbs-assist worktree add -b agent/{{issue_number}}-<short-slug> /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} origin/main`.\n   - In that worktree run `npm ci` and `npm ci --prefix infra`.\n   - Write /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/context.md containing: the full issue title and body text, the chosen branch name `agent/{{issue_number}}-<short-slug>`, and the worktree path /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}}.\n\nDelivery rules you must honor and must relay to later steps: run `npm run verify` before pushing and it must pass; never push to main (branch + PR only); never touch AWS or request credentials (CI is the only thing that touches AWS); PR body = Summary / Tests run / Risks; never rename stateful resources or edit prod values in infra/lib/stage-config.ts without an explicit user request; Node 22, install with `npm ci && npm ci --prefix infra`.\n\nOn success, call send_message with severity success summarizing the branch and worktree you created. Your final message is the step output."
+      },
+      {
+        "type": "step",
+        "id": "plan",
+        "agent": "wf-planner",
+        "prompt": "You are the planning step for GitHub issue #{{issue_number}} (repo trsam1/sbs-assist). Use absolute paths. Do NOT touch AWS, do NOT run cdk or aws, do NOT request credentials.\n\n1. Read /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/context.md for the full issue text, the branch name, and the worktree path.\n2. Read the relevant code in the issue worktree /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}}.\n3. Write /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/plan.md with: the implementation steps, the exact files to change, the tests to add or update, and for each acceptance criterion from the issue, how it will be verified.\n\nIf you find an unresolvable ambiguity that blocks planning, do NOT guess: comment the specific question on the issue (`gh issue comment {{issue_number}}`), add label `agent-blocked` (`gh issue edit {{issue_number}} --add-label agent-blocked`), and call send_message with severity warning stating what you need. Otherwise call send_message with severity success.\n\nDelivery rules to carry into the plan: run `npm run verify` before pushing (must pass); never push to main; never touch AWS; PR body = Summary / Tests run / Risks; never rename stateful resources or edit prod values in infra/lib/stage-config.ts; Node 22, install with `npm ci && npm ci --prefix infra`."
+      },
+      {
+        "type": "repeat",
+        "id": "build-loop",
+        "maxIterations": 4,
+        "onMaxIterations": "pause",
+        "stopCondition": {
+          "fileCheck": {
+            "path": "/home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/review.json",
+            "jsonPath": "verdict",
+            "value": "APPROVED"
+          }
+        },
+        "steps": [
+          {
+            "type": "step",
+            "id": "build",
+            "agent": "wf-coder",
+            "prompt": "You are the implementation step for GitHub issue #{{issue_number}} (repo trsam1/sbs-assist). Work only in the worktree /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} on the branch recorded in /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/context.md. Use absolute paths and `git -C /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}}` for all git. Do NOT touch AWS, do NOT run cdk or aws, do NOT request credentials, do NOT push, do NOT open a PR here.\n\n1. Read /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/plan.md and context.md.\n2. If /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/review.json exists and its verdict is CHANGES_REQUESTED, read it and /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/review.md and fix EVERY finding. Otherwise this is the first pass: implement the plan.\n3. Add or update tests as the plan specifies.\n4. Run `npm run verify` in the worktree; it MUST pass. Record what you ran.\n5. Commit on the agent branch with a Conventional Commit message that notes what you ran (`npm run verify` passed).\n\nIf the ONLY way to satisfy a finding is to change product behavior (what the user sees or how the system behaves), do NOT make the change: call send_message with severity warning describing the finding, the change it would require, and what the user would notice, then wait. Otherwise, when the pass is done, call send_message with severity success summarizing the commit.\n\nDelivery rules: run `npm run verify` before pushing (must pass); never push to main (branch + PR only); never touch AWS or request credentials; PR body = Summary / Tests run / Risks; never rename stateful construct IDs/physical names or edit prod values in infra/lib/stage-config.ts without an explicit user request; Node 22, install with `npm ci && npm ci --prefix infra`."
+          },
+          {
+            "type": "step",
+            "id": "review",
+            "agent": "semantic_reviewer",
+            "prompt": "You are the review step for GitHub issue #{{issue_number}} (repo trsam1/sbs-assist). The code is in the worktree /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} on the agent branch recorded in /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/context.md. Use absolute paths. Do NOT touch AWS, do NOT run cdk or aws, do NOT request credentials.\n\n1. Read /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/context.md (issue + acceptance criteria) and plan.md.\n2. Review the branch diff vs origin/main: `git -C /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} fetch origin` then `git -C /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} diff origin/main...HEAD`. Judge it against the issue's acceptance criteria and the delivery rules (verify must pass; no push to main; no AWS; PR body = Summary / Tests run / Risks; no renaming stateful resources or editing prod values in infra/lib/stage-config.ts).\n3. Do NOT re-run the test/build suites the coder already ran — read the diff plus the coder's recorded evidence (commit message / plan). You MAY do at most one narrow spot-check.\n4. Write /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/review.md with your findings first.\n5. Then write /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/review.json with exactly {\"verdict\": \"APPROVED\" | \"CHANGES_REQUESTED\", \"findings\": [...]}. APPROVED only if every acceptance criterion is met and no delivery rule is violated.\n\nConvey your verdict ONLY by writing review.json. ALWAYS call send_message with severity success regardless of the verdict (severity error or warning would abort or pause the loop and must not be used here)."
+          }
+        ]
+      },
+      {
+        "type": "step",
+        "id": "submit",
+        "agent": "wf-pr-submitter",
+        "prompt": "You are the PR submission step for GitHub issue #{{issue_number}} (repo trsam1/sbs-assist). The approved code is in the worktree /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} on the agent branch recorded in /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/context.md. Use absolute paths and `git -C /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}}`. Do NOT touch AWS, do NOT run cdk or aws, do NOT request credentials. Do NOT merge.\n\n1. Confirm `npm run verify` has passed on this branch (it must before pushing); if unsure, run it in the worktree.\n2. Push the agent branch: `git -C /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} push -u origin HEAD`. Push to the agent branch only, NEVER to main.\n3. Open the PR to main: `gh pr create --base main --head <branch> --title ... --body ...`. The body MUST have three sections `## Summary`, `## Tests run`, `## Risks`, and a line `Closes #{{issue_number}}`.\n4. Swap labels: `gh issue edit {{issue_number}} --remove-label agent-in-progress --add-label agent-pr-open`.\n5. Comment the PR link on the issue: `gh issue comment {{issue_number}} --body \"PR: <url>\"`.\n6. Write /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/pr.json with {\"number\": <pr-number>, \"url\": \"<pr-url>\"}.\n\nCall send_message with severity success including the PR number and URL."
+      },
+      {
+        "type": "step",
+        "id": "ci-follow-up",
+        "agent": "wf-pr-responder",
+        "prompt": "You are the CI follow-up step for GitHub issue #{{issue_number}} (repo trsam1/sbs-assist). Read /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/pr.json for the PR number and url, and context.md for the branch and the worktree /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}}. Use absolute paths. Do NOT touch AWS, do NOT run cdk or aws, do NOT request credentials. Do NOT merge.\n\nDrive CI green, bounded to at most 3 fix rounds:\n1. Wait for checks: `gh pr checks <pr-number> --watch` (apply a sensible timeout).\n2. If the required check `ci-ok` is GREEN, stop: call send_message severity success noting CI is green.\n3. If `ci-ok` FAILS: read the failing logs, fix the cause in the worktree, run `npm run verify` (must pass), commit on the agent branch, and `git -C /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} push`. Repeat at most 3 times.\n4. After 3 failed rounds: comment the situation on the PR (`gh pr comment <pr-number>`), add label `agent-blocked` to the issue (`gh issue edit {{issue_number}} --add-label agent-blocked`), and call send_message severity warning. Stop.\n5. If the cdk-diff PR comment shows any `[-]` or a replace/`may be replaced` marker on WordStudyToolStack: do NOT try to 'fix' the guard. Comment a warning on the PR, add label `needs-human` to the issue, and call send_message severity warning. Stop.\n\nDelivery rules: run `npm run verify` before pushing (must pass); never push to main; never touch AWS; PR body = Summary / Tests run / Risks; never rename stateful resources or edit prod values in infra/lib/stage-config.ts."
+      },
+      {
+        "type": "step",
+        "id": "final",
+        "agent": "wf-pr-responder",
+        "prompt": "You are the final reporting step for GitHub issue #{{issue_number}} (repo trsam1/sbs-assist). Read /home/timothy/Code/sbs-assist/.agents/tasks/issue-{{issue_number}}/pr.json for the PR url and number. Do NOT touch AWS. Do NOT merge.\n\nCheck current CI status with `gh pr checks <pr-number>`. Then call send_message to the parent with severity success containing: the PR URL, the current CI status (ci-ok green/failing/pending), and a note that the worktree /home/timothy/Code/sbs-assist-worktrees/issue-{{issue_number}} can be removed after the PR is merged. NEVER merge the PR; a human merges it. Your final message is the step output."
+      }
+    ]
+  }
+}

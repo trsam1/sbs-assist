@@ -1,0 +1,2 @@
+# Issue template chooser config. Blank issues stay enabled so quick notes still work.
+blank_issues_enabled: true

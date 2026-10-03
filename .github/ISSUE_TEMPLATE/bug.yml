@@ -1,0 +1,54 @@
+# Bug report form. Add the agent-ready label manually to have an agent work it.
+name: Bug report
+description: Report a defect.
+title: '[agent] '
+labels: [agent-ready, bug]
+body:
+  - type: markdown
+    attributes:
+      value: 'Describe the defect. Add the `agent-ready` label when you want an agent to pick it up.'
+  - type: textarea
+    id: broken
+    attributes:
+      label: What's broken
+      description: What goes wrong, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that triggers it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs actual
+      description: What you expected and what happened instead.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where the defect lives.
+      options:
+        - frontend
+        - lambda-api
+        - infra-cdk
+        - tests
+        - docs
+        - multiple
+    validations:
+      required: true
+  - type: checkboxes
+    id: risk
+    attributes:
+      label: Risk check
+      description: Checking either box means the agent must stop and wait for a human.
+      options:
+        - label: This touches data tables / user pool / DNS / prod config
+        - label: This needs a design decision
+    validations:
+      required: false

@@ -20,12 +20,18 @@ Two packages: the Angular app at the repo root and the CDK app plus Lambdas in `
 │   ├── scripts/              # Seeds (prod one-offs, dev subset), stateful guard, export
 │   │   └── fixtures/         # Committed dev Strong's subset (generated; never hand-edit or reformat)
 │   └── test/                 # CDK assertion tests, no-AWS test setup, fixture site
-├── scripts/ci/               # Bash helpers for workflows (smoke test, PR comment)
-├── .github/workflows/        # verify, pr, deploy, deploy-stage, deploy-dev, destroy-dev
+├── scripts/
+│   ├── ci/                   # Bash helpers for workflows (smoke test, PR comment)
+│   └── agent-labels.sh       # Idempotent agent-intake label bootstrap (run from repo root)
+├── .github/
+│   ├── workflows/            # verify, pr, deploy, deploy-stage, deploy-dev, destroy-dev
+│   ├── ISSUE_TEMPLATE/       # agent-task + bug issue forms, config
+│   └── pull_request_template.md  # Summary / Tests run / Risks + Closes #
 ├── docs/                     # Runbooks (domain cutover)
 ├── .kiro/
 │   ├── specs/                # Feature and bugfix specs
-│   └── steering/             # Steering rules for AI assistance
+│   ├── steering/             # Steering rules for AI assistance
+│   └── workflows/            # agent-issue recipe (one labeled issue → PR)
 └── .agents/                  # Agent scratch (gitignored)
 ```
 
