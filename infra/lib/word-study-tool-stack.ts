@@ -51,6 +51,12 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Study CRUD */
   public readonly studyCrudFn: nodejs.NodejsFunction;
 
+  /** DynamoDB table for user book studies */
+  public readonly bookStudiesTable: dynamodb.Table;
+
+  /** Lambda: Book Study CRUD */
+  public readonly bookStudyCrudFn: nodejs.NodejsFunction;
+
   /** Lambda: AI Summary */
   public readonly aiSummaryFn: nodejs.NodejsFunction;
 
@@ -120,6 +126,24 @@ export class WordStudyToolStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    // Book studies: same layout as WordStudies, but no PITR (small, easily recreated
+    // containers; omitting it keeps "PITR on WordStudies only" true and adds no StageConfig field).
+    this.bookStudiesTable = new dynamodb.Table(this, 'BookStudies', {
+      tableName: n('BookStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    this.bookStudiesTable.addGlobalSecondaryIndex({
+      indexName: 'GSI1',
+      partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     // -------------------------------------------------------
@@ -302,6 +326,21 @@ export class WordStudyToolStack extends cdk.Stack {
 
     this.wordStudiesTable.grantReadWriteData(this.studyCrudFn);
 
+    // --- Book Study CRUD Lambda ---
+    this.bookStudyCrudFn = new nodejs.NodejsFunction(this, 'BookStudyCrudFn', {
+      ...commonLambdaProps,
+      functionName: n('BookStudyCRUD'),
+      logGroup: fnLogs('BookStudyCrudFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'book-study-crud', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        BOOK_STUDIES_TABLE_NAME: this.bookStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.bookStudiesTable.grantReadWriteData(this.bookStudyCrudFn);
+
     // --- AI Summary Lambda ---
     this.aiSummaryFn = new nodejs.NodejsFunction(this, 'AISummaryFn', {
       ...commonLambdaProps,
@@ -360,6 +399,25 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // DELETE /studies/{studyId}
     studyByIdResource.addMethod('DELETE', studyCrudIntegration, authMethodOptions);
+
+    // --- Book Study CRUD routes ---
+    const bookStudyCrudIntegration = new apigateway.LambdaIntegration(this.bookStudyCrudFn);
+
+    const booksResource = this.api.root.addResource('books');
+
+    // POST /books
+    booksResource.addMethod('POST', bookStudyCrudIntegration, authMethodOptions);
+
+    // GET /books
+    booksResource.addMethod('GET', bookStudyCrudIntegration, authMethodOptions);
+
+    const bookByIdResource = booksResource.addResource('{bookStudyId}');
+
+    // GET /books/{bookStudyId}
+    bookByIdResource.addMethod('GET', bookStudyCrudIntegration, authMethodOptions);
+
+    // DELETE /books/{bookStudyId}
+    bookByIdResource.addMethod('DELETE', bookStudyCrudIntegration, authMethodOptions);
 
     // --- AI Summary route ---
     const aiSummaryIntegration = new apigateway.LambdaIntegration(this.aiSummaryFn);

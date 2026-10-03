@@ -45,6 +45,7 @@ import { AuthComponent } from './auth/auth.component';
             <a class="navbar-item" routerLink="/study/new" routerLinkActive="is-active"
               >New Study</a
             >
+            <a class="navbar-item" routerLink="/books" routerLinkActive="is-active">Book Studies</a>
           </div>
           <div class="navbar-end">
             <div class="navbar-item">

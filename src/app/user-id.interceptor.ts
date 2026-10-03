@@ -8,7 +8,7 @@ export const userIdInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
 
   // Only add auth header to our API calls, not external APIs (e.g. dictionary)
-  if (!req.url.includes('/studies') && !req.url.includes('/ai/')) {
+  if (!req.url.includes('/studies') && !req.url.includes('/ai/') && !req.url.includes('/books')) {
     return next(req);
   }
 
