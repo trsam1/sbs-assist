@@ -47,6 +47,16 @@ describe('userIdInterceptor', () => {
     sub.unsubscribe();
   });
 
+  it('should add Authorization header to /books requests', async () => {
+    const sub = http.get('/api/books').subscribe();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const req = httpTesting.expectOne('/api/books');
+    expect(req.request.headers.get('Authorization')).toBe('mock-jwt-token');
+    req.flush([]);
+    sub.unsubscribe();
+  });
+
   it('should NOT add Authorization header to external API requests', () => {
     http.get('https://api.dictionaryapi.dev/api/v2/entries/en/love').subscribe();
 
