@@ -34,7 +34,7 @@ graph TD
     subgraph Frontend ["Frontend (Angular 21 + Bulma)"]
         SU[Scroll Upload Component]
         SV[Scroll View Component]
-        SL[Study List - adds Scroll Studies]
+        SL[Scroll List Component<br/>own route, scroll studies only]
     end
 
     subgraph AWS ["AWS Cloud"]
@@ -111,44 +111,58 @@ New components under `src/app/`, lazily routed like the existing `study-page`:
   `overflow-y: auto`, plus an optional truncation notice;
   `failed` → `is-danger` notification with the reason and a re-upload button). Uses signals
   and polls via the service while status is non-terminal.
-- **`study-list` (existing, `src/app/study-list/study-list.component.ts`)**: today this
-  component is word-specific — fixed columns `Word` / `Strong's #` / `Last Updated`, helpers
-  `firstWord()`/`firstStrongsNumber()` that read `study.wordStudies[0]`, an `openStudy()` that
-  routes to `/study/:id`, and a delete modal that interpolates the word. Rather than branch
-  this template on a raw `StudyWorksheet | ScrollStudy` union, the component is refactored to
-  render a normalized **row model** that both services map into:
+- **`scroll-list` component** (`src/app/scroll-list/scroll-list.component.ts`): a **new,
+  separate** list surface for Scroll Studies, distinct from the existing `study-list` word
+  surface. Per the PR #17 owner decision, the two kinds are **not** merged into one table — the
+  scroll list loads and renders only Scroll Studies from `ScrollStudyService`, and the existing
+  `study-list` is left **unchanged** (it keeps its `My Word Studies` heading, its
+  `Word`/`Strong's #`/`Last Updated` columns, its `firstWord()`/`firstStrongsNumber()` helpers,
+  its `/study/:id` routing, its word-interpolating delete modal, and all its existing
+  `data-testid`s). No `ListRow` union, no `forkJoin`, and no combined "My Studies" heading are
+  introduced.
 
-  ```typescript
-  type ListRow = {
-    kind: 'word' | 'scroll';
-    id: string;
-    title: string;        // word (word study) | bookName (scroll study)
-    subtitle: string;     // Strong's # (word) | '' (scroll)
-    status?: 'uploading' | 'extracting' | 'ready' | 'failed'; // scroll only
-    updatedAt: string;
-  };
-  ```
+  `scroll-list` mirrors `study-list`'s structure and accessibility (the same signal-based
+  `state` machine — `idle`/`loading`/`loaded`/`error` — the same empty-state box, the same
+  retry button, and the same delete-confirmation modal pattern) so the two lists stay visually
+  and behaviourally consistent while remaining separate components. `loadScrollStudies()` calls
+  **only** `ScrollStudyService.listScrollStudies()` and sorts the result by `updatedAt`
+  descending; on error it shows the error state with a retry button.
 
-  `loadStudies()` calls both `StudyCrudService.listStudies()` and
-  `ScrollStudyService.listScrollStudies()` (via `forkJoin`), maps each result to `ListRow`
-  (word: `title=firstWord`, `subtitle=firstStrongsNumber`, no `status`; scroll:
-  `title=bookName`, `subtitle=''`, `status` set), concatenates, and sorts by `updatedAt`
-  descending. If either list call errors the component shows the existing error state and
-  retry.
+  Table columns: **Book** (the book name, primary column), **Status** (a Bulma `tag`:
+  `uploading`/`extracting` → `is-warning`, `ready` → `is-success`, `failed` → `is-danger`),
+  **Last Updated**, and an actions column. `openScrollStudy(study)` routes to `/scroll/:id`.
+  The delete modal references the book name and calls `ScrollStudyService.deleteScrollStudy`.
+  Its own `data-testid`s are namespaced to avoid colliding with the word list's specs:
+  `scroll-row`, `scroll-book`, `scroll-status`, `open-scroll-button`, `delete-scroll-button`,
+  `scroll-delete-modal`, etc. The empty state reads "No scroll studies yet. Upload a document
+  to start one."
 
-  Table columns become: **Type** (a Bulma `tag` — `is-info` "Word" / `is-link` "Scroll"),
-  **Title** (the single primary column; word or book name), **Status** (shown only for scroll
-  rows — a Bulma `tag`: `uploading`/`extracting` → `is-warning`, `ready` → `is-success`,
-  `failed` → `is-danger`; blank for word rows), and **Last Updated**. `openStudy(row)`
-  dispatches on `row.kind`: `/study/:id` for word, `/scroll/:id` for scroll. The delete modal
-  references `row.title` and calls `StudyCrudService.deleteStudy` or
-  `ScrollStudyService.deleteScrollStudy` by `row.kind`. The heading changes from
-  "My Word Studies" to **"My Studies"** since it now lists both tools. The `data-testid`s on
-  existing rows/buttons are preserved and new ones (`study-type`, `study-status`) are added so
-  the existing list specs keep working with minimal edits.
+New routes in `app.routes.ts` (additive): `scrolls` → `scroll-list` (the Scroll Studies list),
+`scroll/new` → `scroll-upload`, `scroll/:scrollStudyId` → `scroll-view`. The existing `''` →
+`study-list` and `study/new`/`study/:studyId` routes are untouched.
 
-New routes in `app.routes.ts` (additive): `scroll/new` → `scroll-upload`,
-`scroll/:scrollStudyId` → `scroll-view`.
+### Navigation (how the student reaches the separate scroll list)
+
+Because the combined "My Studies" table is gone, the Scroll Studies list needs its own way in.
+The root `App` component (`src/app/app.ts`) already renders a Bulma `navbar` whose `navbar-start`
+holds the word-study entries. **Decision (reasonable and reversible):** add two sibling
+`navbar-item` links in that same `navbar-start`, alongside the existing ones, rather than
+introduce a dropdown or a tool-switcher landing page — the suite has exactly two list surfaces
+today, so two flat links are the simplest fit for the existing pattern and trivially revisited
+if more tools are added later:
+
+- **"Scroll Studies"** → `routerLink="/scrolls"` with `routerLinkActive="is-active"` (the new
+  `scroll-list`).
+- **"New Scroll Study"** → `routerLink="/scroll/new"` with `routerLinkActive="is-active"` (the
+  existing `scroll-upload`).
+
+The existing word-study links are kept and only their **label** is clarified so the two tools
+read as peers: the current `My Studies` link (route `/`, which renders the word list whose own
+heading is already `My Word Studies`) is relabeled **"Word Studies"**, and `New Study` becomes
+**"New Word Study"**. These are text/`routerLink` changes to the existing navbar markup — no new
+component, no routing-guard, no change to the word-study list component itself — so the change is
+easily reversed. (A nested `navbar-dropdown` grouping each tool's list/new links was considered
+but rejected as premature for two tools; it can be adopted later without reworking the routes.)
 
 **`ScrollStudyService`** (`src/app/scroll-study.service.ts`), mirroring `StudyCrudService`:
 
@@ -416,9 +430,12 @@ Frontend (Angular + vitest):
   name.
 - `scroll-view`: renders processing/ready/failed states; the `ready` text region wraps
   (`pre-wrap`) and scrolls; polling stops on terminal status and after the bounded timeout.
-- `study-list`: maps word and scroll results into `ListRow`, merges and sorts both types by
-  `updatedAt` descending, shows a status tag only for scroll rows, and `open`/`delete` dispatch
-  to the correct route/service by `kind`; a failure of either list call shows the error state.
+- `scroll-list`: lists **only** Scroll Studies from `ScrollStudyService.listScrollStudies()`,
+  sorted by `updatedAt` descending; renders the status tag per status; `open` routes to
+  `/scroll/:id` and `delete` calls `deleteScrollStudy`; the empty state and the list-load error
+  state (with retry) render. A regression assertion confirms the scroll list issues **no** call
+  to `StudyCrudService` (the two lists stay separate). The existing `study-list` specs are
+  **unchanged** — the word list is not modified, so its tests keep passing as-is.
 
 CDK assertion tests (`infra/test/`): the `ScrollStudies` table (keys + GSI), the uploads bucket
 (block-public-access, lifecycle expiry, CORS), the four authorized routes
@@ -498,12 +515,11 @@ the real codebase and addressed.
    before downloading. Added Requirement 2 AC 6 and updated the Validation-rules bullet and the
    error-handling table. The presigned-POST alternative is noted and rejected with reasoning.
 
-4. **MEDIUM — Underspecified `study-list` merge.** Addressed. The `study-list` component
-   section now defines a concrete `ListRow` union, the `forkJoin` of both services, the mapping
-   per type, the exact columns (Type tag, single Title column, Status shown only for scroll
-   rows, Last Updated), `open`/`delete` dispatch by `kind`, the heading change to "My Studies",
-   and preservation of existing `data-testid`s. Requirement 4 AC 2–3 capture the merged list
-   and type-based routing.
+4. **MEDIUM — Underspecified `study-list` merge.** Originally addressed by merging both kinds
+   into one `study-list` table via a `ListRow` union + `forkJoin`. **This was subsequently
+   reversed — see the PR #17 reversal below.** The two kinds are now presented as separate
+   lists, which also removes the merge-underspecification entirely (there is no shared table to
+   underspecify).
 
 5. **NIT — Unenumerated runtime deps.** Addressed. The Text-extraction section now lists all
    four new `infra` dependencies — `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`
@@ -518,3 +534,30 @@ the real codebase and addressed.
    key not matching `uploads/<sub>/<scrollStudyId>.<ext>` (no record to update), making it a
    total function over events. Added Requirement 2 AC 7, the `extract-text` component
    description, the error-handling table, and the Validation-rules bullet.
+
+### PR #17 owner decision — keep the two lists separate (list-presentation reversal)
+
+On the spec PR (#17), the repo owner (`trsam1`) commented: *"Design decision, do not conflate
+the word study and scroll lists in the same table. Keep them separate."* This overrides the
+earlier Finding-4 resolution, which had merged word studies and Scroll Studies into one
+`study-list` table. The spec is revised so the two kinds are **separate list surfaces**:
+
+- The existing `study-list` word-study list is left **unchanged** (its own route `/`, its own
+  heading, columns, routing, delete modal, and `data-testid`s).
+- A **new `scroll-list` component** (own route `/scrolls`) lists **only** Scroll Studies from
+  `ScrollStudyService`. No `ListRow` union, no `forkJoin`, and no combined "My Studies" heading
+  are introduced; each list loads only its own kind from its own service.
+- Navigation: two new navbar links ("Scroll Studies" → `/scrolls`, "New Scroll Study" →
+  `/scroll/new`) are added alongside the existing word-study links, whose labels are clarified
+  to "Word Studies" / "New Word Study". This is a reversible navbar-markup change (flat links
+  rather than a dropdown, appropriate for two tools).
+
+Updated to match: Requirement 4 AC 2–3; the architecture diagram's frontend subgraph; the
+Components section (new "Navigation" subsection + the `scroll-list` description replacing the
+merged `study-list` refactor); the `app.routes.ts` additions (`scrolls` route added); and the
+Testing-strategy `scroll-list` bullet (plus a regression assertion that the scroll list never
+calls `StudyCrudService`). Everything else already approved — the create+upload flow, presigned
+`PUT` with the client ≤10 MB gate + `extract-text` `HeadObject` size check, `extract-text` as
+sole status writer, the `ScrollStudies` table, the transient uploads bucket (7-day lifecycle +
+DESTROY), the two Lambdas, `pdf-parse`/`mammoth`, the 4→6 log-group test-count note, and the
+infra dep pins — is unchanged.

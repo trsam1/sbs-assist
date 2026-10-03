@@ -115,18 +115,22 @@ read the extracted text so that I can confirm the right book was captured.
 ## Requirement 4: Persist, list, re-open, and delete Scroll Studies
 
 ### User Story
-As a Bible student, I want my Scroll Studies saved to my library so that I can re-open the
-extracted text later and delete studies I no longer need.
+As a Bible student, I want my Scroll Studies saved to my library on their own list so that I
+can re-open the extracted text later and delete studies I no longer need, without them being
+mixed in with my word studies.
 
 ### Acceptance Criteria
 1. WHEN a Scroll Study is created THEN it SHALL be stored in DynamoDB keyed by the
    authenticated Cognito user (`sub`), the same scoping the word-study tool uses.
-2. WHEN the student opens their study list THEN the list SHALL show both word studies and
-   Scroll Studies in one table, merged and sorted most-recently-updated first, each row tagged
-   with its type; a Scroll Study row SHALL show its book name as the title and its status, and
-   a word-study row SHALL continue to show its word and Strong's number.
-3. WHEN the student opens a row THEN the system SHALL route to the correct tool by type: a word
-   study to `/study/:id` and a Scroll Study to `/scroll/:id`.
+2. WHEN the student opens the **Scroll Studies list** (its own route/section, separate from the
+   word-study list at `/`) THEN the list SHALL show **only** that student's Scroll Studies,
+   sorted most-recently-updated first; each row SHALL show the book name as its title and the
+   study status, and the list SHALL NOT contain any word-study rows. The existing word-study
+   list is unchanged and continues to show only word studies.
+3. WHEN the student opens a Scroll Study row THEN the system SHALL route to `/scroll/:id`; the
+   word-study list continues to route its rows to `/study/:id`. Navigation to the Scroll
+   Studies list is provided by a dedicated navbar entry alongside the existing word-study
+   entries (see design).
 4. WHEN the student re-opens a `ready` Scroll Study THEN the system SHALL display the stored
    book name and extracted scroll text.
 5. WHEN the student deletes a Scroll Study THEN the system SHALL delete the DynamoDB record and
