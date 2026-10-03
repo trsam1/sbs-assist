@@ -13,7 +13,8 @@ the data model reserves room for it so the later increment is additive.
 The feature fits the existing architecture exactly. The frontend mirrors the structure of
 the current word-study feature: standalone components with signals and Bulma, lazy-loaded
 routes, a thin `HttpClient` service, and the existing `userIdInterceptor` that attaches the
-Cognito bearer token. The backend mirrors `study-crud`: a single `NodejsFunction` behind the
+Cognito ID token in the `Authorization` header (the raw `getIdToken()` value, no `Bearer`
+prefix). The backend mirrors `study-crud`: a single `NodejsFunction` behind the
 API Gateway Cognito authorizer, reading the user from the `sub` claim and using the shared
 `corsResponse` helper. Persistence follows the same `PK`/`SK` + `GSI1` single-table pattern
 already used by `WordStudies`.
@@ -49,10 +50,11 @@ graph TD
     BFn --> DDB
 ```
 
-The `userIdInterceptor` already attaches the `Authorization` bearer token to any request
-whose URL contains `/studies` or `/ai/`. This design extends that predicate to also match
-`/books` so the new service's calls are authenticated the same way (see Components → Frontend
-wiring). No new auth mechanism is introduced.
+The `userIdInterceptor` already attaches the Cognito ID token in the `Authorization` header
+(the raw `getIdToken()` value, no `Bearer` prefix) to any request whose URL contains
+`/studies` or `/ai/`. This design extends that predicate to also match `/books` so the new
+service's calls are authenticated the same way (see Components → Frontend wiring). No new auth
+mechanism is introduced.
 
 ## Decisions
 
@@ -66,6 +68,21 @@ effectively zero under on-demand billing (consistent with the delivery cost mode
 table reuses the identical `PK`/`SK` + `GSI1` layout so the `study-crud` patterns transfer
 directly. This is additive — no change to `WordStudies` construct ID, physical name, schema,
 or PITR setting.
+
+**PITR on the new table.** The two existing tables disagree, and there is no shared PITR
+field in `stage-config.ts`: `WordStudies` toggles PITR via `config.wordStudiesPitr` (true in
+prod), while `StrongsData` omits PITR entirely. The prod assertion test `enables PITR on
+WordStudies only` requires PITR to be enabled on `WordStudies` and `undefined` on every other
+table, and the dev test `sets PITR explicitly false on WordStudies-dev and true nowhere`
+requires PITR to be `true` on no table in dev. We therefore choose **no PITR on
+`BookStudies`**: omit `pointInTimeRecoverySpecification` entirely (like `StrongsData`), rather
+than reuse `wordStudiesPitr`. This is the lowest-cost, test-compatible choice — reusing
+`wordStudiesPitr` would enable a second PITR table in prod, failing the "PITR on WordStudies
+only" test and raising prod cost against the cost model. No new `StageConfig` field is added,
+so `stage-config.ts` (including its frozen prod values) is unchanged. Book Studies are small,
+easily recreated containers whose loss is low-impact; PITR can be added later behind a new
+`StageConfig` field if the deferred word-study-linking increment makes the data more valuable
+(that increment would also rewrite the "PITR on WordStudies only" test).
 
 **One Lambda per domain.** We add a single `BookStudyCrudFn` handling all four `/books`
 methods, mirroring how `study-crud` handles all `/studies` methods in one function. This
@@ -123,7 +140,12 @@ All three components follow the existing conventions: `ChangeDetectionStrategy.O
   create(input: BookStudyInput): Observable<string> // POST /books -> bookStudyId
   delete(id: string): Observable<void>            // DELETE /books/{id}
   ```
-  `baseUrl` comes from `environment.apiUrl`, as in the existing services.
+  `baseUrl` comes from `environment.apiUrl`, as in the existing services. The service builds
+  URLs with the same `${baseUrl}/books`-style concatenation the existing services use
+  (`StudyCrudService`, etc.). Note that although `environment.apiUrl` is documented as having
+  no trailing slash, `this.api.url` ends in `/` at runtime; the existing services concatenate
+  this way and work, so the new service mirrors that exact pattern — an implementer should not
+  try to "fix" the slash handling.
 
 - **Routes** (`src/app/app.routes.ts`): add three lazy `loadComponent` routes — `books`,
   `books/new`, `books/:bookStudyId` — matching the existing lazy-route style. The more
@@ -145,8 +167,17 @@ All three components follow the existing conventions: `ChangeDetectionStrategy.O
   `study-crud/index.ts`: resolves `origin` via `getRequestOrigin`, reads `userId` via
   `event.requestContext.authorizer.claims.sub`, dispatches on `httpMethod` + `resource`, and
   returns via `corsResponse`. Handlers: `POST /books`, `GET /books`, `GET /books/{bookStudyId}`,
-  `DELETE /books/{bookStudyId}`. The table name comes from a `BOOK_STUDIES_TABLE_NAME`
-  environment variable.
+  `DELETE /books/{bookStudyId}`. The handler reads two environment variables, exactly matching
+  `study-crud`'s pattern:
+  `const tableName = process.env['BOOK_STUDIES_TABLE_NAME'] ?? '';` (the `?? ''` fallback
+  mirrors `study-crud`'s `WORD_STUDIES_TABLE_NAME ?? ''`), and `ALLOWED_ORIGINS`, which the
+  shared `corsResponse` / `getRequestOrigin` helper reads to echo an allowed origin. Both are
+  set by CDK (see Data Model → CDK wiring); without `ALLOWED_ORIGINS` the CORS helper would
+  return an empty `Access-Control-Allow-Origin`.
+- The handler imports the `BookStudyRecord` DynamoDB shape (below) from
+  `infra/lambda/shared/models.ts` — added there next to `WordStudyRecord` — rather than
+  redefining it inline, the same way `study-crud` imports `WordStudyRecord` from the shared
+  models module.
 
 ## Data Model
 
@@ -180,7 +211,11 @@ export interface BookStudyInput {
 
 A new CDK `dynamodb.Table` in `WordStudyToolStack`, named `n('BookStudies')` (stage suffix,
 so prod is `BookStudies` and dev is `BookStudies-dev`), with the same key layout, billing,
-encryption, removal policy, and `GSI1` as `WordStudies`:
+encryption, removal policy, and `GSI1` as `WordStudies`.
+
+The DynamoDB item shape, `BookStudyRecord`, is added to `infra/lambda/shared/models.ts` next
+to `WordStudyRecord` and imported by `BookStudyCrudFn` (not redefined inline). It is shown
+here for reference:
 
 ```typescript
 interface BookStudyRecord {
@@ -198,6 +233,14 @@ interface BookStudyRecord {
 }
 ```
 
+On create, the handler sets `updatedAt` equal to `createdAt` (both to the same
+`new Date().toISOString()` value). Because this increment has no edit path (edit is
+deferred — see Decisions and Out of Scope), `updatedAt` always equals `createdAt`, so the
+`GSI1SK = UPDATED#<updatedAt>` sort orders Book Studies by **creation time** in this
+increment. The sort only begins to diverge from creation order once the deferred edit path
+lands and starts refreshing `updatedAt`; the field and index are shaped now so that change is
+additive.
+
 **Access patterns**
 - Create / update: `PutCommand` with `PK = USER#<userId>`, `SK = BOOKSTUDY#<id>`.
 - Get one: `GetCommand` on `PK`/`SK`; a result with a non-matching `userId` is impossible
@@ -210,9 +253,25 @@ interface BookStudyRecord {
 log-group/grants; `this.bookStudiesTable.grantReadWriteData(bookStudyCrudFn)`; new
 `NodejsFunction` with `functionName: n('BookStudyCRUD')`; `/books` resources on
 `this.api.root` with `authMethodOptions` on every method, exactly as `/studies`. No existing
-construct id or physical name changes. `removalPolicy` and PITR follow the per-stage
-`StageConfig` values already used for the other tables (no change to `stage-config.ts` prod
-values).
+construct id or physical name changes.
+
+- **Removal policy:** the new table uses `removalPolicy: config.statefulRemovalPolicy` — the
+  same per-stage value the other tables use (`RETAIN` in prod, `DESTROY` in dev). This keeps
+  it `Retain` in prod, so the stateful guard reports it as an additive resource (info), not a
+  violation, and the dev test's `DeletionPolicy === 'Delete'` expectation holds.
+- **PITR:** the new table omits `pointInTimeRecoverySpecification` entirely (as `StrongsData`
+  does); it does **not** reuse `wordStudiesPitr`. See the "PITR on the new table" decision
+  above — this keeps the prod "PITR on WordStudies only" and dev "true nowhere" tests green
+  and adds no `StageConfig` field, so `stage-config.ts` prod values are unchanged.
+- **Lambda environment:** the new function's `environment` block is
+  `{ BOOK_STUDIES_TABLE_NAME: this.bookStudiesTable.tableName, ALLOWED_ORIGINS: allowedOriginsEnv }`,
+  mirroring how `StudyCrudFn` receives `{ WORD_STUDIES_TABLE_NAME, ALLOWED_ORIGINS }`
+  (`allowedOriginsEnv` is the existing `allowedOrigins.join(',')` string). `ALLOWED_ORIGINS`
+  is required for `corsResponse` to echo an allowed origin.
+- **Log group:** the function gets its own explicit log group via the existing `fnLogs(...)`
+  helper, with `logRetention` and `removalPolicy` from `StageConfig` like the other
+  functions. This raises the stack's log-group count from 4 to 5 (see Testing Strategy — the
+  two existing count assertions change from `4` to `5`).
 
 ### Canonical book list
 
@@ -302,14 +361,28 @@ that preserves entered values.
 - For any string in `BIBLE_BOOKS`, `isValidBook` is `true`; for any string not in the set,
   `false`.
 - For any valid `BookStudyInput`, the Lambda `POST` → `GET` round-trip returns a record whose
-  `book`/`title`/`notes` match the input and whose `createdAt` is preserved while `updatedAt`
-  is refreshed (parallels the `saveWordStudy` property).
+  `book`/`title`/`notes` match the input and whose `createdAt` equals `updatedAt` (on create
+  the two are set to the same timestamp — see Data Model), paralleling the `saveWordStudy`
+  round-trip property.
 
-### CDK assertion tests (`infra/test/`)
-- The template contains a `BookStudies` table with `PAY_PER_REQUEST`, AWS-managed encryption,
-  and a `GSI1`; a `BookStudyCRUD` function; and `/books` methods guarded by the Cognito
-  authorizer. The stateful-guard test (existing) continues to pass because the new table is
-  additive and uses the stage removal policy — no existing stateful resource is replaced or
+### CDK assertion tests (`infra/test/word-study-tool-stack.test.ts`)
+- **New assertions:** the template contains a `BookStudies` table with `PAY_PER_REQUEST`,
+  AWS-managed encryption, and a `GSI1`; a `BookStudyCRUD` function (prod) / `BookStudyCRUD-dev`
+  (dev); and `/books` methods guarded by the Cognito authorizer.
+- **Existing assertions that MUST change (adding the function's log group makes the stack's
+  log-group count 5, not 4):**
+  - `keeps 90-day log retention` (prod): `expect(groups).toHaveLength(4)` → `toHaveLength(5)`;
+    the per-group `RetentionInDays === 90` loop is unchanged (the new group uses the stage
+    `logRetention`).
+  - `keeps 7-day log retention` (dev): `expect(groups).toHaveLength(4)` → `toHaveLength(5)`;
+    the per-group `RetentionInDays === 7` and `DeletionPolicy === 'Delete'` loops are
+    unchanged — the new group satisfies `Delete` via `config.statefulRemovalPolicy` in dev.
+  - `uses on-demand billing for every table`, the prod `enables PITR on WordStudies only`, and
+    the dev `sets PITR explicitly false on WordStudies-dev and true nowhere` tests already
+    iterate all tables and continue to pass: `BookStudies` is `PAY_PER_REQUEST` and omits
+    PITR, so it is neither billed per-provisioned nor PITR-enabled.
+- The stateful-guard check continues to pass because the new table is additive and uses the
+  stage removal policy (`Retain` in prod) — no existing stateful resource is replaced or
   deleted.
 
 ## Risks
@@ -334,4 +407,38 @@ that preserves entered values.
 - Sharing, export, or collaboration.
 - Any change to the `WordStudies` table, `/studies`, or `/ai/study-summary`.
 - The `wordstudy.* → axiostools.*` domain cutover.
-```
+
+## Design Review Responses
+
+Responses to the review in `design-review.md` / `design-review.json` (verdict
+CHANGES_REQUESTED). All seven findings are addressed in the body above.
+
+1. **HIGH — existing CDK log-group count assertions will fail.** Addressed. Data Model → CDK
+   wiring now states the new function gets its own `fnLogs(...)` group, raising the count from
+   4 to 5; Testing Strategy → CDK assertion tests now explicitly changes
+   `keeps 90-day log retention` and `keeps 7-day log retention` from `toHaveLength(4)` to
+   `toHaveLength(5)` and notes the new group satisfies the dev `DeletionPolicy === 'Delete'`
+   check via `config.statefulRemovalPolicy`.
+2. **HIGH — PITR unspecified / conflicting.** Addressed by an explicit decision: **no PITR on
+   `BookStudies`** (omit `pointInTimeRecoverySpecification`, like `StrongsData`), not reusing
+   `wordStudiesPitr`. Documented in Decisions ("PITR on the new table") and Data Model → CDK
+   wiring. This keeps the prod "PITR on WordStudies only" and dev "true nowhere" tests green,
+   adds no `StageConfig` field, and leaves `stage-config.ts` prod values unchanged.
+3. **MEDIUM — new Lambda env vars.** Addressed. Backend Lambda and Data Model → CDK wiring now
+   specify the function's `environment` block as
+   `{ BOOK_STUDIES_TABLE_NAME: this.bookStudiesTable.tableName, ALLOWED_ORIGINS: allowedOriginsEnv }`
+   and the handler's `process.env['BOOK_STUDIES_TABLE_NAME'] ?? ''` fallback, matching
+   `study-crud`.
+4. **MEDIUM — `updatedAt` vs. create-only scope.** Addressed. Data Model now states that on
+   create `updatedAt` is set equal to `createdAt`, so the `GSI1SK` sort orders by creation
+   time this increment and only diverges when the deferred edit path lands; the property test
+   wording was corrected to `createdAt === updatedAt`.
+5. **MEDIUM — `BookStudyRecord` placement.** Addressed. The design now states
+   `BookStudyRecord` is added to `infra/lambda/shared/models.ts` next to `WordStudyRecord` and
+   imported by the Lambda (shown inline only for reference).
+6. **NIT — "Bearer token" wording.** Addressed. Overview and Architecture prose now say the
+   interceptor attaches the Cognito ID token in the `Authorization` header (raw `getIdToken()`
+   value, no `Bearer` prefix).
+7. **NIT — API base-URL trailing slash.** Addressed. The `BookStudyService` description now
+   notes it mirrors the existing services' `${baseUrl}/books`-style URL building and that an
+   implementer should not "fix" the trailing-slash behavior.
