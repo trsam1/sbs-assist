@@ -1,0 +1,39 @@
+# Lightweight feature request. An agent drafts a spec (requirements + design) for your review
+# before any code is written. Use agent-task.yml instead when the work is already well-specified.
+name: Feature request
+description: Propose a feature. An agent will draft a spec for your review before any code is written.
+title: '[feature] '
+labels: [needs-spec]
+body:
+  - type: markdown
+    attributes:
+      value: 'Describe the idea at a high level — intent, not full acceptance criteria. Once this is labeled `needs-spec`, an agent drafts a `requirements.md` + `design.md` spec and opens a PR for you to review and merge. No code is written until you merge that spec and relabel the issue `agent-ready`.'
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal / problem
+      description: What should become possible, or what problem this solves. Describe the intent, not a full checklist.
+      placeholder: Add a pronoun-study worksheet so students can resolve antecedents and referents in a passage.
+    validations:
+      required: true
+  - type: textarea
+    id: audience
+    attributes:
+      label: "Who it's for / context"
+      description: Who benefits and any background that helps frame the spec.
+    validations:
+      required: false
+  - type: textarea
+    id: ideas
+    attributes:
+      label: Rough ideas or constraints
+      description: Any early thoughts on approach, must-haves, or constraints. The spec can refine or replace these.
+    validations:
+      required: false
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Anything this feature should explicitly not try to do.
+    validations:
+      required: false

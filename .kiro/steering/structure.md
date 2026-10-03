@@ -25,13 +25,13 @@ Two packages: the Angular app at the repo root and the CDK app plus Lambdas in `
 │   └── agent-labels.sh       # Idempotent agent-intake label bootstrap (run from repo root)
 ├── .github/
 │   ├── workflows/            # verify, pr, deploy, deploy-stage, deploy-dev, destroy-dev
-│   ├── ISSUE_TEMPLATE/       # agent-task + bug issue forms, config
+│   ├── ISSUE_TEMPLATE/       # agent-task + feature-request + bug issue forms, config
 │   └── pull_request_template.md  # Summary / Tests run / Risks + Closes #
 ├── docs/                     # Runbooks (domain cutover)
 ├── .kiro/
 │   ├── specs/                # Feature and bugfix specs
 │   ├── steering/             # Steering rules for AI assistance
-│   └── workflows/            # agent-issue recipe (one labeled issue → PR)
+│   └── workflows/            # agent-issue (build recipe) + spec-draft (feature → reviewed spec PR) recipes
 └── .agents/                  # Agent scratch (gitignored)
 ```
 
