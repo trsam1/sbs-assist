@@ -76,6 +76,33 @@ export interface WordStudyRecord {
   GSI1SK: string;
 }
 
+/** Status progression for a Scroll Study (Step 4 — Observe the Text as a Scroll). */
+export type ScrollStatus = 'uploading' | 'extracting' | 'ready' | 'failed';
+
+/**
+ * Maximum number of bytes of extracted text stored inline on a Scroll Study record.
+ * DynamoDB caps an item at 400 KB; 350,000 leaves headroom for the other attributes.
+ */
+export const SCROLL_TEXT_LIMIT = 350_000;
+
+/** DynamoDB record shape for the ScrollStudies table. */
+export interface ScrollStudyRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "SCROLL#<scrollStudyId>"
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  bookName: string; // <=100 chars
+  objectKey: string; // "uploads/<sub>/<scrollStudyId>.<ext>"
+  status: ScrollStatus;
+  scrollText: string; // '' until ready
+  truncated: boolean;
+  failureReason: string; // '' unless failed
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+  GSI1PK: string; // "USER#<sub>"
+  GSI1SK: string; // "UPDATED#<updatedAt>"
+}
+
 /** A user-owned container that organizes study work by a book of the Bible. */
 export interface BookStudy {
   id: string; // server-generated UUID

@@ -13,6 +13,7 @@ import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import { S3EventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as path from 'path';
 import { Construct } from 'constructs';
 import { HOSTED_ZONE, StageConfig } from './stage-config';
@@ -35,6 +36,12 @@ export class WordStudyToolStack extends cdk.Stack {
 
   /** DynamoDB table for pre-loaded Strong's concordance data */
   public readonly strongsDataTable: dynamodb.Table;
+
+  /** DynamoDB table for user scroll studies (Step 4) */
+  public readonly scrollStudiesTable: dynamodb.Table;
+
+  /** S3 bucket for direct document uploads (transient; extracted text lives in DynamoDB) */
+  public readonly uploadsBucket: s3.Bucket;
 
   /** REST API Gateway */
   public readonly api: apigateway.RestApi;
@@ -59,6 +66,12 @@ export class WordStudyToolStack extends cdk.Stack {
 
   /** Lambda: AI Summary */
   public readonly aiSummaryFn: nodejs.NodejsFunction;
+
+  /** Lambda: Scroll Study CRUD + presigned upload URL */
+  public readonly scrollStudyFn: nodejs.NodejsFunction;
+
+  /** Lambda: Extract Text (S3-triggered) */
+  public readonly extractTextFn: nodejs.NodejsFunction;
 
   /** Cognito User Pool */
   public readonly userPool: cognito.UserPool;
@@ -128,6 +141,23 @@ export class WordStudyToolStack extends cdk.Stack {
       removalPolicy: config.statefulRemovalPolicy,
     });
 
+    // Scroll studies (Step 4). Same key shape + GSI as WordStudies so CRUD mirrors it.
+    this.scrollStudiesTable = new dynamodb.Table(this, 'ScrollStudies', {
+      tableName: n('ScrollStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    this.scrollStudiesTable.addGlobalSecondaryIndex({
+      indexName: 'GSI1',
+      partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // Book studies: same layout as WordStudies, but no PITR (small, easily recreated
     // containers; omitting it keeps "PITR on WordStudies only" true and adds no StageConfig field).
     this.bookStudiesTable = new dynamodb.Table(this, 'BookStudies', {
@@ -155,6 +185,29 @@ export class WordStudyToolStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
+    // -------------------------------------------------------
+    // S3 Bucket for direct document uploads (scroll studies)
+    // -------------------------------------------------------
+
+    // Transient: a source file is only needed until extraction completes (the extracted
+    // text lives in DynamoDB), so DESTROY + auto-delete in every stage and a 7-day expiry.
+    this.uploadsBucket = new s3.Bucket(this, 'UploadsBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.HEAD],
+          allowedOrigins,
+          allowedHeaders: ['*'],
+          maxAge: 3000,
+        },
+      ],
+      lifecycleRules: [{ expiration: cdk.Duration.days(7) }],
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
@@ -367,6 +420,53 @@ export class WordStudyToolStack extends cdk.Stack {
       }),
     );
 
+    // --- Scroll Study Lambda (CRUD + presigned upload URL) ---
+    this.scrollStudyFn = new nodejs.NodejsFunction(this, 'ScrollStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('ScrollStudy'),
+      logGroup: fnLogs('ScrollStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'scroll-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        SCROLL_STUDIES_TABLE_NAME: this.scrollStudiesTable.tableName,
+        UPLOADS_BUCKET_NAME: this.uploadsBucket.bucketName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.scrollStudiesTable.grantReadWriteData(this.scrollStudyFn);
+    this.scrollStudyFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['s3:PutObject', 's3:DeleteObject'],
+        resources: [this.uploadsBucket.arnForObjects('uploads/*')],
+      }),
+    );
+
+    // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
+    // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
+    this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
+      ...commonLambdaProps,
+      functionName: n('ExtractText'),
+      logGroup: fnLogs('ExtractTextFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'extract-text', 'index.ts'),
+      handler: 'handler',
+      memorySize: 512,
+      timeout: cdk.Duration.seconds(60),
+      environment: {
+        SCROLL_STUDIES_TABLE_NAME: this.scrollStudiesTable.tableName,
+      },
+    });
+
+    this.scrollStudiesTable.grantReadWriteData(this.extractTextFn);
+    this.uploadsBucket.grantRead(this.extractTextFn);
+
+    this.extractTextFn.addEventSource(
+      new S3EventSource(this.uploadsBucket, {
+        events: [s3.EventType.OBJECT_CREATED],
+      }),
+    );
+
     // -------------------------------------------------------
     // API Gateway Routes
     // -------------------------------------------------------
@@ -427,6 +527,25 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // POST /ai/study-summary
     studySummaryResource.addMethod('POST', aiSummaryIntegration, authMethodOptions);
+
+    // --- Scroll Study routes ---
+    const scrollStudyIntegration = new apigateway.LambdaIntegration(this.scrollStudyFn);
+
+    const scrollStudiesResource = this.api.root.addResource('scroll-studies');
+
+    // POST /scroll-studies
+    scrollStudiesResource.addMethod('POST', scrollStudyIntegration, authMethodOptions);
+
+    // GET /scroll-studies
+    scrollStudiesResource.addMethod('GET', scrollStudyIntegration, authMethodOptions);
+
+    const scrollStudyByIdResource = scrollStudiesResource.addResource('{scrollStudyId}');
+
+    // GET /scroll-studies/{scrollStudyId}
+    scrollStudyByIdResource.addMethod('GET', scrollStudyIntegration, authMethodOptions);
+
+    // DELETE /scroll-studies/{scrollStudyId}
+    scrollStudyByIdResource.addMethod('DELETE', scrollStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json

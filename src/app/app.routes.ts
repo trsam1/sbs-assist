@@ -17,6 +17,21 @@ export const routes: Routes = [
       import('./study-page/study-page.component').then((m) => m.StudyPageComponent),
   },
   {
+    path: 'scrolls',
+    loadComponent: () =>
+      import('./scroll-list/scroll-list.component').then((m) => m.ScrollListComponent),
+  },
+  {
+    path: 'scroll/new',
+    loadComponent: () =>
+      import('./scroll-upload/scroll-upload.component').then((m) => m.ScrollUploadComponent),
+  },
+  {
+    path: 'scroll/:scrollStudyId',
+    loadComponent: () =>
+      import('./scroll-view/scroll-view.component').then((m) => m.ScrollViewComponent),
+  },
+  {
     path: 'books',
     loadComponent: () =>
       import('./book-study-list/book-study-list.component').then((m) => m.BookStudyListComponent),

@@ -47,6 +47,16 @@ describe('userIdInterceptor', () => {
     sub.unsubscribe();
   });
 
+  it('should add Authorization header to /scroll-studies requests', async () => {
+    const sub = http.get('/api/scroll-studies').subscribe();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const req = httpTesting.expectOne('/api/scroll-studies');
+    expect(req.request.headers.get('Authorization')).toBe('mock-jwt-token');
+    req.flush([]);
+    sub.unsubscribe();
+  });
+
   it('should add Authorization header to /books requests', async () => {
     const sub = http.get('/api/books').subscribe();
     await new Promise((r) => setTimeout(r, 0));
@@ -63,5 +73,15 @@ describe('userIdInterceptor', () => {
     const req = httpTesting.expectOne('https://api.dictionaryapi.dev/api/v2/entries/en/love');
     expect(req.request.headers.has('Authorization')).toBe(false);
     req.flush([]);
+  });
+
+  it('should NOT add Authorization header to the presigned S3 upload URL', () => {
+    http.put('https://my-bucket.s3.amazonaws.com/uploads/u1/s1.pdf?sig=abc', 'bytes').subscribe();
+
+    const req = httpTesting.expectOne(
+      'https://my-bucket.s3.amazonaws.com/uploads/u1/s1.pdf?sig=abc',
+    );
+    expect(req.request.headers.has('Authorization')).toBe(false);
+    req.flush(null);
   });
 });

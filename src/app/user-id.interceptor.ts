@@ -7,8 +7,14 @@ import { AuthService } from './auth.service';
 export const userIdInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
 
-  // Only add auth header to our API calls, not external APIs (e.g. dictionary)
-  if (!req.url.includes('/studies') && !req.url.includes('/ai/') && !req.url.includes('/books')) {
+  // Only add auth header to our API calls, not external APIs (e.g. dictionary) and not the
+  // presigned S3 upload (key prefix `uploads/`, which is self-authenticating).
+  const isApiCall =
+    req.url.includes('/studies') ||
+    req.url.includes('/ai/') ||
+    req.url.includes('/scroll-studies') ||
+    req.url.includes('/books');
+  if (!isApiCall) {
     return next(req);
   }
 

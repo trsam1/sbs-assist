@@ -40,10 +40,16 @@ import { AuthComponent } from './auth/auth.component';
               routerLink="/"
               routerLinkActive="is-active"
               [routerLinkActiveOptions]="{ exact: true }"
-              >My Studies</a
+              >Word Studies</a
             >
             <a class="navbar-item" routerLink="/study/new" routerLinkActive="is-active"
-              >New Study</a
+              >New Word Study</a
+            >
+            <a class="navbar-item" routerLink="/scrolls" routerLinkActive="is-active"
+              >Scroll Studies</a
+            >
+            <a class="navbar-item" routerLink="/scroll/new" routerLinkActive="is-active"
+              >New Scroll Study</a
             >
             <a class="navbar-item" routerLink="/books" routerLinkActive="is-active">Book Studies</a>
           </div>
