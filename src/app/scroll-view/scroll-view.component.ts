@@ -6,7 +6,7 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { ScrollStudy, ScrollStudyService, ScrollStatus } from '../scroll-study.service';
 
@@ -18,6 +18,7 @@ const MAX_POLLS = 20;
 
 @Component({
   selector: 'app-scroll-view',
+  imports: [RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Scroll study">
@@ -51,6 +52,13 @@ const MAX_POLLS = 20;
             <div class="box scroll-text-box" data-testid="scroll-text">
               <pre class="scroll-text">{{ study()?.scrollText }}</pre>
             </div>
+            <a
+              [routerLink]="['/scroll', scrollStudyId, 'pronouns']"
+              class="button is-link is-outlined mt-2"
+              data-testid="find-pronouns-link"
+            >
+              Find pronouns (Step 6)
+            </a>
           }
           @case ('failed') {
             <div class="notification is-danger" role="alert" data-testid="failed">
@@ -114,7 +122,7 @@ export class ScrollViewComponent implements OnInit, OnDestroy {
   readonly state = signal<ViewState>('loading');
   readonly study = signal<ScrollStudy | null>(null);
 
-  private scrollStudyId = '';
+  scrollStudyId = '';
   private polls = 0;
   private pollSub?: Subscription;
 

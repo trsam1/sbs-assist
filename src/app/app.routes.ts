@@ -32,6 +32,11 @@ export const routes: Routes = [
       import('./scroll-view/scroll-view.component').then((m) => m.ScrollViewComponent),
   },
   {
+    path: 'scroll/:scrollStudyId/pronouns',
+    loadComponent: () =>
+      import('./pronoun-view/pronoun-view.component').then((m) => m.PronounViewComponent),
+  },
+  {
     path: 'books',
     loadComponent: () =>
       import('./book-study-list/book-study-list.component').then((m) => m.BookStudyListComponent),
