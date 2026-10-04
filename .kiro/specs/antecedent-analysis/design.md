@@ -34,7 +34,7 @@ graph TD
     subgraph Frontend ["Frontend (Angular 21 + Bulma)"]
         AV[antecedent-view Component<br/>worklist + per-pronoun dropdown]
         PP[pronoun-parse.ts #20<br/>parsePronouns]
-        PD[pronoun-dictionary.ts #20<br/>PRONOUN_DICTIONARY set]
+        PD[pronoun-dictionary.ts #20<br/>exported ReadonlySet of pronoun forms]
         AS[antecedent-suggest.ts<br/>pure candidate extractor]
         SS[ScrollStudyService<br/>existing]
         ASVC[AntecedentStudyService<br/>new CRUD client]
@@ -164,8 +164,8 @@ input.
 #20 is a read-only parse/worklist surface that persists nothing, while this feature adds editing and
 persistence; keeping them separate avoids complicating #20's component and specs (the same reasoning
 #20 used to stay separate from `scroll-view`). `antecedent-view` *reuses* #20's pure `parsePronouns`
-(`pronoun-parse.ts`) and `PRONOUN_DICTIONARY` (`pronoun-dictionary.ts`) and the scroll service, but
-does not modify #20's component.
+(`pronoun-parse.ts`) and the exported pronoun set (`pronoun-dictionary.ts`) and the scroll service,
+but does not modify #20's component.
 
 ### Routing and navigation
 
@@ -230,20 +230,32 @@ authoritative parsing; the student edits freely. It never throws; `suggestAntece
 
 **Single-source dependency on #20's dictionary (hard coupling).** The "exclude pronoun-dictionary
 words" rule (Requirement 2 criterion 3) MUST consume the **exact same** pronoun set #20 owns — not
-a private copy. `antecedent-suggest.ts` therefore imports it directly from #20's dictionary module:
+a private copy. `antecedent-suggest.ts` therefore imports it directly from #20's dictionary module.
+
+**The export symbol name is #20's to decide, not this spec's.** #20's design
+(`.kiro/specs/parse-scroll-for-pronouns/design.md`, "Pronoun dictionary" section) commits only to
+"a fixed, exported constant: a `ReadonlySet<string>` of lower-cased pronoun and possessive-adjective
+forms" in `src/app/pronoun-dictionary.ts`; it does **not** name the exported identifier. This spec
+does not own that name, so it does not assert one. The build agent imports the single exported
+`ReadonlySet<string>` of lower-cased pronoun forms from `./pronoun-dictionary`, binding to **whatever
+identifier #20 actually ships**:
 
 ```typescript
+// Import the single exported ReadonlySet<string> of lower-cased pronoun forms that
+// #20 ships in src/app/pronoun-dictionary.ts. #20's design does not fix the export name,
+// so bind to whatever identifier that file exports (shown here as PRONOUN_DICTIONARY for
+// readability only — if #20 exports it under a different name, update this import to match;
+// never re-declare the set).
 import { PRONOUN_DICTIONARY } from './pronoun-dictionary';
-// (the single ReadonlySet<string> of lower-cased pronoun forms #20 exports from
-//  src/app/pronoun-dictionary.ts; use whatever exact symbol name #20 ships from that file.)
 ```
 
-`suggestAntecedents` lower-cases each candidate token and skips it when
-`PRONOUN_DICTIONARY.has(lowerToken)`. It MUST NOT declare its own pronoun list or re-derive one;
-this preserves the invariant that there is exactly one pronoun definition in the code (shared with
-`parsePronouns`). Because `pronoun-dictionary.ts` does not exist until #20 merges, this helper
-cannot be implemented or tested until then — this is the frontend half of the H1 build-ordering
-rule above.
+`suggestAntecedents` lower-cases each candidate token and skips it when the imported set
+`.has(lowerToken)`. It MUST NOT declare its own pronoun list or re-derive one; this preserves the
+invariant that there is exactly one pronoun definition in the code (shared with `parsePronouns`).
+Because `pronoun-dictionary.ts` does not exist until #20 merges, this helper cannot be implemented
+or tested until then — this is the frontend half of the build-ordering rule above, and the exact
+export name becomes knowable only once #20 is merged (the build agent reads it from the shipped
+file, not from this spec).
 
 **Why a heuristic, not AI.** AI suggestion was rejected: it would add a Bedrock call (cost + the
 copyright constraint that AI prompts contain no copyrighted text — the scroll text is the student's
@@ -259,9 +271,15 @@ A new `@Injectable({ providedIn: 'root' })` service mirroring `BookStudyService`
 `toBookStudy`/`toScrollStudy` do.
 
 The frontend domain interfaces `AntecedentStudy` and `AntecedentAssignment` are declared **once**
-in `src/app/models.ts` (beside `BookStudy`/`ScrollStudy`) and **imported** by the service and the
-component — matching the repo convention that `book-study.service.ts` imports `BookStudy` from
-`./models` (they are not re-declared inline in the service). See Data model for their shape.
+in `src/app/models.ts` (beside `BookStudy`) and **imported** by the service and the component. Note
+the repo is **mixed** on where domain interfaces live: `BookStudy` is declared in `models.ts` and
+imported by `book-study.service.ts`, but `ScrollStudy`/`ScrollStudyRecord` are declared **inline** in
+`scroll-study.service.ts`. This is a genuine 50/50 split, not a settled convention — so, although
+this feature mirrors `scroll-study` for its backend and component structure, it deliberately follows
+the **`BookStudy` placement** for the interface home (declare in `models.ts`, import where used)
+rather than the inline `ScrollStudy` pattern. `models.ts` is the better pattern (one authoritative
+declaration), and stating the choice explicitly removes any ambiguity about which precedent wins. See
+Data model for their shape.
 
 ```typescript
 import { AntecedentStudy, AntecedentAssignment } from './models';
@@ -379,7 +397,9 @@ interface AntecedentAssignment {
   `infra/lambda/shared/models.ts`, beside the existing `ScrollStudyRecord`/`BookStudyRecord`; the
   `antecedent-study` Lambda imports them from `../shared/models`.
 - Frontend: `AntecedentStudy` and `AntecedentAssignment` are added to `src/app/models.ts`, beside
-  `BookStudy`/`ScrollStudy`; the `AntecedentStudyService` and `antecedent-view` component import
+  `BookStudy` (the frontend repo is mixed — `BookStudy` lives in `models.ts` while `ScrollStudy` is
+  inline in `scroll-study.service.ts`; this feature deliberately follows the `BookStudy` placement,
+  see the client-service section); the `AntecedentStudyService` and `antecedent-view` component import
   them from `./models`. The service's `get` maps the record to `AntecedentStudy` (dropping the
   `PK`/`SK`), exactly as `toBookStudy`/`toScrollStudy` do.
 
@@ -447,8 +467,8 @@ chars" invariant is owned by the Lambda `PUT` validation (authoritative — it r
 with 400, never truncates), with the client `maxlength=200` enforcing the same for UX. The
 "`createdAt` preserved across updates" invariant is owned by the Lambda's read-before-write `PUT`
 (the single mechanism; see the upsert pseudocode above). The "a pronoun worklist unit maps to the
-#20 parse" invariant is owned by reusing #20's `parsePronouns` (`pronoun-parse.ts`) and
-`PRONOUN_DICTIONARY` (`pronoun-dictionary.ts`) unchanged, never a copy — there is exactly one pronoun
+#20 parse" invariant is owned by reusing #20's `parsePronouns` (`pronoun-parse.ts`) and the exported
+pronoun set (`pronoun-dictionary.ts`) unchanged, never a copy — there is exactly one pronoun
 definition in the code.
 
 ## Testing strategy
@@ -504,8 +524,9 @@ is renamed. This is consistent with the "add constructs, never rename" rule.
   dropdown is user-editable: the student types anything the suggestions miss (Requirement 3), and the
   suggestions are a convenience, not an authority.
 - **Hard dependency on a merged #20 (build-ordering rule).** The frontend half imports
-  `parsePronouns` (`src/app/pronoun-parse.ts`) and `PRONOUN_DICTIONARY` (`src/app/pronoun-dictionary.ts`)
-  — files that only exist once #20 is merged. Per the **Build ordering rule** in the Architecture
+  `parsePronouns` (`src/app/pronoun-parse.ts`) and the exported pronoun `ReadonlySet<string>`
+  (`src/app/pronoun-dictionary.ts`, under whatever name #20 ships) — files that only exist once #20
+  is merged. Per the **Build ordering rule** in the Architecture
   section, #23 MUST be built on a merged #20; if #20 is not merged the build agent stops and marks
   the issue `agent-blocked` rather than re-creating the parser/dictionary (which would break the
   single-pronoun-definition invariant). The CRUD/table/Lambda half is independent of #20 and fully
@@ -535,8 +556,10 @@ is renamed. This is consistent with the "add constructs, never rename" rule.
 
 ## Responses to design review (CHANGES_REQUESTED)
 
-Revision pass addressing every finding in `design-review.json` / `design-review.md`. All were
-addressed; none backlogged or ignored.
+### Round 1 (prior pass)
+
+Revision pass addressing every finding from the first review. All were addressed; none backlogged or
+ignored.
 
 - **H1 (frontend depends on unimplemented #20; no decision rule) — addressed.** Added an explicit
   **Build ordering rule** (Architecture): #23 MUST be built on a merged #20, else the build agent
@@ -557,12 +580,12 @@ addressed; none backlogged or ignored.
   save" paragraph: a `PUT` with zero non-empty assignments idempotently upserts `assignments: []`
   (no delete route, no stale prior set). Covered in the save correctness property, the Lambda test,
   and a component test.
-- **M3 (`suggestAntecedents` dictionary coupling named wrong / not enforced) — addressed.** The
-  suggestion-helper section now names the exact import
-  (`import { PRONOUN_DICTIONARY } from './pronoun-dictionary'`, the single `ReadonlySet<string>` #20
-  exports from `src/app/pronoun-dictionary.ts`), requires consuming that one set never a copy, and
-  ties the file's absence to the H1 build gate. Architecture diagram and prose updated to show both
-  `pronoun-parse.ts` and `pronoun-dictionary.ts`.
+- **M3 (`suggestAntecedents` dictionary coupling not enforced) — addressed.** The suggestion-helper
+  section requires consuming #20's single exported pronoun `ReadonlySet<string>` from
+  `src/app/pronoun-dictionary.ts`, never a copy, and ties the file's absence to the H1 build gate.
+  Architecture diagram and prose updated to show both `pronoun-parse.ts` and `pronoun-dictionary.ts`.
+  (The exact import *symbol name* is further corrected in Round 2 M1 below — round 1 named it
+  literally, which round 2 found #20 never actually commits to.)
 - **N1 (interface home inconsistent) — addressed.** Interfaces are now declared once:
   `AntecedentStudyRecord` + backend `AntecedentAssignment` in `infra/lambda/shared/models.ts`;
   frontend `AntecedentStudy` + `AntecedentAssignment` in `src/app/models.ts`. The service and
@@ -570,3 +593,33 @@ addressed; none backlogged or ignored.
 - **N2 (`PROD_LOGICAL_IDS` "updated additively" misleading) — addressed.** The CDK testing paragraph
   now states `PROD_LOGICAL_IDS` needs no edit (it is a `toContain` subset check) and that the real
   required change is the two hardcoded log-group counts `toHaveLength(7) → 8`.
+
+### Round 2 (this pass)
+
+Addressing every finding in `design-review.json` / `design-review.md` (2 MEDIUM). Both addressed;
+none backlogged or ignored.
+
+- **M1 (design assumes an exact dictionary symbol name #20 never commits to) — addressed.** I
+  re-read #20's design (`.kiro/specs/parse-scroll-for-pronouns/design.md`, "Pronoun dictionary"
+  section): it commits only to "a fixed, exported constant: a `ReadonlySet<string>` of lower-cased
+  pronoun and possessive-adjective forms" and never names the export. I took the review's option
+  (a): this spec no longer asserts a name it does not control. The suggestion-helper section now
+  states "import the single exported `ReadonlySet<string>` of lower-cased pronoun forms from
+  `./pronoun-dictionary`, binding to whatever identifier #20 ships; if it differs, the build agent
+  updates this import to match (never re-declares the set)." The literal `PRONOUN_DICTIONARY` remains
+  only as an explicitly-labelled readability placeholder in the code comment and import line, with
+  the surrounding prose making clear it is not normative and the real name becomes knowable only once
+  #20 is merged. The architecture diagram node, the component/reuse prose, the invariant-ownership
+  line, and the Risks dependency bullet were all changed from the literal name to "the exported
+  pronoun set." I chose (a) over (b) (fixing the name in #20's spec as a cross-spec contract) because
+  this is #23's spec and editing another issue's committed spec to satisfy this one would couple the
+  two specs the wrong way; #20 remains the single owner of its export name, and this spec defers to
+  whatever it ships.
+- **M2 ("interface home" cited as a settled convention but only half true) — addressed.** Verified
+  the review's claim: `models.ts` holds `BookStudy` and `book-study.service.ts` imports it, but
+  `ScrollStudy` (and `ScrollStudyRecord`) are declared **inline** in `scroll-study.service.ts`, so
+  the repo is genuinely a 50/50 split. I kept the `models.ts` placement decision (it matches
+  `BookStudy` and is the better pattern) but corrected the premise in the client-service and
+  data-model sections: they now state plainly that the repo is mixed and that this feature
+  deliberately follows the `BookStudy` placement, rather than calling it "the convention," so there
+  is no conflict with the "mirror `scroll-study`" guidance elsewhere.
