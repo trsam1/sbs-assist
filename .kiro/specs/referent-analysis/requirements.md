@@ -60,16 +60,25 @@ list for a given Book Study, so that I can document the referents I find while w
    entry.
 4. WHEN the student submits the add-entry form with the phrase OR the refers-to empty (after trim)
    THEN the system SHALL show an inline validation message and SHALL NOT append an entry.
-5. The phrase and refers-to inputs SHALL each be limited to 200 characters; the notes and
-   scroll-text-reference inputs SHALL each be limited to 1000 characters; input beyond a limit SHALL
-   be prevented or rejected with an inline message, and SHALL NOT be persisted.
-6. The referent list SHALL preserve the order in which entries were added.
+5. The phrase and refers-to inputs SHALL each be limited to 200 characters and the notes and
+   scroll-text-reference inputs SHALL each be limited to 1000 characters, where the limit is applied
+   to the raw string and the limit value itself is allowed (a value is rejected only when its raw
+   length is strictly greater than the limit). The client SHALL cap input with `maxlength` and the
+   server SHALL reject an over-limit value with a 400; an over-limit value SHALL NOT be persisted.
+6. The referent list SHALL preserve the order in which entries were added, and appending a new entry
+   SHALL leave every existing entry in its current position.
+7. WHEN the student edits the phrase or refers-to of an existing entry THEN the system SHALL update
+   that entry **in place**, preserving its position in the list (it SHALL NOT move the entry to the
+   end); IF such an edit would leave the phrase or refers-to empty after trim THEN the system SHALL
+   show an inline validation message and SHALL NOT apply the blanking edit.
 
 ### Correctness Properties
 - Property: For any form submission where `phrase.trim()` or `refersTo.trim()` is empty,
   `addReferent` is not called and the list length is unchanged.
 - Property: For any valid add, the new entry appears last in the list and every other entry is
   unchanged.
+- Property: For any in-place edit of an existing entry's phrase or refers-to to a non-empty value,
+  the entry's index is unchanged and the list length is unchanged.
 
 ---
 
@@ -86,8 +95,9 @@ the scroll the phrase occurs, so that I can capture my reasoning and find the ph
    held in the study's working state and persisted on the next save (Requirement 3).
 3. The notes and scroll-text-reference fields SHALL accept empty values and SHALL default to the
    empty string when not provided.
-4. All per-entry fields SHALL support the same 200/1000-character limits defined in Requirement 1
-   criterion 5.
+4. All per-entry fields SHALL enforce the same raw-string limits defined in Requirement 1 criterion 5
+   (phrase/refers-to ≤200, notes/scroll-text reference ≤1000, limit value allowed), whether the field
+   is set on add or edited in place later.
 
 ### Correctness Properties
 - Property: An entry created without notes or a scroll-text reference has `notes === ''` and
@@ -141,8 +151,10 @@ need.
 4. **Accessibility.** The Referents UI SHALL be keyboard operable and screen-reader labeled, matching
    the ARIA patterns the app already uses (`aria-label`, `role="alert"`, `aria-live`, labeled form
    controls, Bulma components).
-5. **Cost.** Persisting the list reuses the existing single `PUT`/`GET` on `BookStudies`; no new
-   per-request compute or storage is introduced.
+5. **Cost.** Persisting the list reuses the existing `BookStudies` reads/writes. Because `createdAt`
+   preservation is server-owned, an **update** performs one extra single-item `GetCommand` before the
+   `PutCommand` (a create remains a single `Put`); this extra on-demand read is negligible and no new
+   table, index, or per-request storage is introduced.
 
 ---
 
@@ -158,6 +170,6 @@ need.
 - A dedicated top-level "Referents" navbar surface or a cross-study referent view; referents are
   edited within a Book Study.
 - Changes to the Word Study tool, the Scroll Study tool, or the pronoun worklist (#20).
-- An in-place edit of a referent's **phrase/refers-to** after it is added beyond what the per-entry
-  fields allow is a design detail, not a separate requirement; see the design for the chosen edit
-  model.
+- Bulk operations on referents (reordering by drag, multi-select delete, import/export); entries are
+  added, edited in place, and removed one at a time. (In-place editing of a referent's phrase and
+  refers-to **is** in scope — see Requirement 1 criterion 7.)

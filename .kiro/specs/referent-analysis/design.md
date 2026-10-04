@@ -93,12 +93,17 @@ Behaviour:
   validation flag and returns without mutating the list (Requirement 1 criteria 3–4); otherwise it
   appends `{ phrase, refersTo, notes, scrollRef }` (notes/scrollRef default `''`) to a new array and
   clears the draft.
-- **Edit per-entry notes / scroll-ref**: bound to the entry via `update()` producing a new array
-  (immutability for `OnPush`); phrase/refers-to are shown read-only on an added entry — editing them
-  is done by removing and re-adding, which keeps the add/edit model simple and is called out in the
-  requirements' Out of Scope note. (Alternative considered: fully inline-editable phrase/refers-to
-  per row. Rejected for this increment to keep the component and its specs small; the entry shape
-  already supports it, so an inline edit can be added later without a data change.)
+- **Edit per-entry — all four fields are editable in place.** Each row binds `phrase`, `refersTo`,
+  `notes`, and `scrollRef` to the entry via `update()` producing a new array (immutability for
+  `OnPush`). The `Referent` shape already supports this, so correcting a typo in a phrase edits that
+  row **in place** — it does not remove and re-append, so the entry keeps its position and the list
+  is never silently reordered (resolving the MEDIUM review finding; see Requirement 1 criterion 7).
+  In-place `phrase`/`refersTo` edits must stay non-empty after trim: a per-row edit that would blank
+  a required field is rejected with the same inline message as the add form (the row keeps its last
+  valid value), so the "phrase and refers-to are non-empty" invariant holds for existing rows as
+  well as new ones. (Alternative considered: keep phrase/refers-to read-only after add and correct
+  by remove-and-re-add. Rejected because a re-added entry appends to the end, silently reordering the
+  student's list on a typo fix — a usability trap the shape does not force on us.)
 - **Remove**: `removeReferent(index)` filters the entry out into a new array.
 - **Save**: `saveReferents()` sets `saveState='saving'` and calls `BookStudyService.save(...)` with
   the current `bookStudy()` fields plus `referents()`; on success sets `saved` and updates the
@@ -108,8 +113,12 @@ Behaviour:
 `data-testid`s are namespaced to this section: `referents-section`, `referent-row`,
 `referent-phrase`, `referent-refersto`, `referent-notes`, `referent-scrollref`,
 `add-referent-form`, `add-referent-phrase`, `add-referent-refersto`, `add-referent-notes`,
-`add-referent-scrollref`, `add-referent-button`, `remove-referent-button`, `save-referents-button`,
-`referents-empty`, `referents-save-error`. The section uses Bulma `field`/`control`/`input`/
+`add-referent-scrollref`, `add-referent-button`, `add-referent-error` (the add-form inline
+"phrase/refers-to required" message), `remove-referent-button`, `save-referents-button`,
+`referents-empty`, `referents-save-error`. The in-place per-row edit reuses `referent-phrase` /
+`referent-refersto` / `referent-notes` / `referent-scrollref` as editable controls, and a blanked
+required field surfaces the same `add-referent-error` message pattern on the row. The section uses
+Bulma `field`/`control`/`input`/
 `textarea`/`table` and labeled controls, matching the existing form and detail markup.
 
 **Decision — edit on the detail page, not a new route.** The Referents section lives on the
@@ -170,16 +179,45 @@ The `POST /books` handler is extended to upsert and to accept a `referents` arra
 - `parseCreateBody` becomes `parseSaveBody`: it additionally reads an optional `id`
   (`typeof === 'string' && length > 0 ? id : undefined`), an optional `createdAt`
   (same tolerant read as `study-crud`), and a `referents` array. It still validates `book`
-  (`isValidBook`), `title` (≤200), and `notes` (≤2000) exactly as today. `referents` is validated
-  per entry: `phrase` and `refersTo` are required non-empty strings ≤200 chars after trim; `notes`
-  and `scrollRef` are optional strings defaulting to `''`, each ≤1000 chars. An invalid entry (missing
-  required field, wrong type, or over-limit) → `400` with a message naming `referents`; a missing
-  `referents` key defaults to `[]` (so an old client that omits it still works).
+  (`isValidBook`), `title` (`title.length > TITLE_MAX_LENGTH`), and `notes`
+  (`notes.length > NOTES_MAX_LENGTH`) exactly as today — i.e. on the **raw** string, with the limit
+  value itself allowed. `referents` is validated per entry to match that existing pattern: `phrase`
+  and `refersTo` must be strings, must be **non-empty after `.trim()`**, and must satisfy
+  `str.length > 200` → reject (so a raw length of exactly 200 is allowed, matching the title check);
+  `notes` and `scrollRef` must be strings (defaulting to `''` when absent) and satisfy
+  `str.length > 1000` → reject. All length checks are on the raw string; only the non-empty check is
+  on the trimmed string. An invalid entry (missing required field, wrong type, blank-after-trim, or
+  over-limit) → `400` with a message naming `referents`; a missing `referents` key defaults to `[]`
+  (so an old client that omits it still works). The frontend `maxlength` attributes are set to the
+  same 200/1000 so the client and server agree on the boundary.
 - `createBookStudy` becomes `saveBookStudy`: `const bookStudyId = input.id ?? randomUUID();` and
-  `createdAt: input.createdAt ?? now`, `updatedAt: now`. The server still **ignores any body
-  `userId`** and uses `claims.sub` for the PK (the existing security property, kept). On an update,
-  `createdAt` is taken from the body when the client passes it back; to be robust the handler MAY
-  read the existing record and prefer its stored `createdAt` — see "Invariant ownership".
+  `updatedAt: now`. The server still **ignores any body `userId`** and uses `claims.sub` for the PK
+  (the existing security property, kept). **`createdAt` preservation is server-owned and
+  mandatory**, not left to the client: when `input.id` is present (update path), the handler issues
+  a `GetCommand` for the existing item (`PK=USER#${sub}`, `SK=BOOKSTUDY#${id}`) and sets
+  `createdAt` to the stored item's `createdAt` when the item exists, else `now`; when `input.id` is
+  absent (create path) `createdAt` is `now`. The frontend's `save` signature does **not** send
+  `createdAt`, so this server read-before-write is the single source of truth for the field (see
+  the HIGH finding resolution in "Review responses" and "Invariant ownership"). Concretely:
+
+  ```typescript
+  async function saveBookStudy(userId: string, input: SaveBookStudyInput) {
+    const now = new Date().toISOString();
+    const bookStudyId = input.id ?? randomUUID();
+    let createdAt = now;
+    if (input.id) {
+      const existing = await getBookStudy(userId, bookStudyId); // Get under caller's own PK
+      if (existing) createdAt = existing.createdAt; // preserve; advance only updatedAt
+    }
+    // ...Put with createdAt, updatedAt: now, referents, GSI1SK = `UPDATED#${now}`...
+    return { bookStudyId };
+  }
+  ```
+
+  Because the Get is keyed on `PK=USER#${sub}`, an update can only ever read the caller's own
+  record; it cannot leak or adopt another user's `createdAt`. If the id does not exist under the
+  caller's PK, the save still succeeds as a create with `createdAt = now` (an upsert, matching
+  `study-crud`).
 - `GET`/`DELETE` are unchanged. The record returned by `GET` now includes `referents` (absent on
   legacy records; the frontend defaults it).
 
@@ -250,10 +288,12 @@ unchanged. No log group or Lambda count changes, so the count-based CDK assertio
   the caller's own PK** only.
 - `book` (body): required; must pass `isValidBook` (existing). Failure → 400.
 - `title` (body): optional string ≤200 (existing). `notes` (body): optional string ≤2000 (existing).
-- `referents` (body): optional array (default `[]`); each entry must have `phrase` and `refersTo` as
-  non-empty strings ≤200 after trim, and `notes`/`scrollRef` as strings ≤1000 (defaulting to `''`).
-  Any violation → 400 naming `referents`. The scroll-text reference is **not** validated as a real
-  location — it is free text (assumption A3).
+- `referents` (body): optional array (default `[]`); each entry's `phrase` and `refersTo` must be
+  strings, **non-empty after `.trim()`**, and fail `str.length > 200` (raw length; exactly 200
+  allowed, matching the existing `title.length > TITLE_MAX_LENGTH` check); `notes`/`scrollRef` must
+  be strings (default `''`) failing `str.length > 1000` (raw length). Any violation → 400 naming
+  `referents`. The scroll-text reference is **not** validated as a real location — it is free text
+  (assumption A3).
 - `scrollStudyId`/scroll linkage: none — the scroll-text reference is a plain string, so there is no
   cross-entity lookup to fail.
 
@@ -261,10 +301,13 @@ unchanged. No log group or Lambda count changes, so the count-based CDK assertio
 `claims.sub`, body `userId` is ignored, and a get/delete of another user's study returns 404. The
 "referent entry is well-formed" invariant is owned by the Lambda's `parseSaveBody` (authoritative,
 never trusts the client) with a mirroring client-side check for UX. The `createdAt`-preservation
-invariant is owned by the Lambda: like `study-crud` it accepts the client's echoed `createdAt`, and
-to be robust against a client that drops it on update, the save path reads the existing record and
-prefers its stored `createdAt` when present, falling back to the body value, then to `now`. This
-keeps "createdAt is preserved across updates" true even if the client omits it.
+invariant is owned **entirely** by the Lambda and does not depend on the client: on the update path
+(`input.id` present) the save handler **always** reads the existing record under the caller's own PK
+and uses its stored `createdAt`, falling back to `now` only when no such record exists (create).
+The frontend's `save` signature deliberately omits `createdAt`, so the server read-before-write —
+not a client echo — is the single mechanism that keeps "createdAt is preserved across updates while
+`updatedAt` advances" true (Requirement 3 criterion 1). This differs from `study-crud`, where the
+word-study client echoes `createdAt`; here the server owns it unconditionally.
 
 ## Testing strategy
 
@@ -272,13 +315,19 @@ All tests run under the existing harnesses (frontend: Angular + vitest; infra: v
 SDK — never hitting AWS; `infra/test/setup-no-aws.ts` points unmocked calls at a dead endpoint).
 
 **Lambda — `book-study-crud` (`infra/lambda/book-study-crud/index.test.ts`, extend existing):**
-- POST with an `id` present updates in place (same `bookStudyId` returned) and preserves `createdAt`
-  while advancing `updatedAt`; POST without `id` still creates (existing tests keep passing).
+- POST with an `id` present updates in place (same `bookStudyId` returned). A dedicated test seeds an
+  existing item with a known `createdAt`, mocks the save path's `GetCommand` to return it, posts an
+  update that **omits** `createdAt`, and asserts the written record keeps the stored `createdAt` and
+  advances `updatedAt` to a newer value (closing the HIGH finding). POST without `id` still creates
+  (existing tests keep passing), and a POST with an `id` that has no existing item writes a create
+  with `createdAt = now`.
 - POST stores a `referents` array verbatim (phrase/refersTo/notes/scrollRef) and defaults a missing
   `referents` to `[]`.
-- Validation: a referent entry with empty `phrase` or empty `refersTo` → 400 naming `referents`; an
-  over-200 phrase/refers-to or over-1000 notes/scrollRef → 400; body `userId` still ignored (PK from
-  `sub`) with a referent list present.
+- Validation (mirroring the existing title/notes raw-length checks): a referent entry with a
+  blank-after-trim `phrase` or `refersTo` → 400 naming `referents`; a `phrase`/`refersTo` of raw
+  length 201 → 400 while raw length exactly 200 is accepted; a `notes`/`scrollRef` of raw length 1001
+  → 400 while exactly 1000 is accepted; body `userId` still ignored (PK from `sub`) with a referent
+  list present.
 - Property test (fast-check, matching the file's existing `fc` usage): for any array of valid
   referent entries, POST returns 200 and a round-trip GET returns the same `referents` in order; the
   existing round-trip property is extended to assert `referents` equality.
@@ -291,9 +340,12 @@ SDK — never hitting AWS; `infra/test/setup-no-aws.ts` points unmocked calls at
 
 **Frontend — `book-study-detail` component (`book-study-detail.component.spec.ts`, extend):**
 - Renders the Referents section with existing entries and the empty state when none; the add form
-  appends on valid submit and clears; empty phrase or refers-to blocks the add with an inline
-  message (ties Requirement 1 criteria 3–4).
+  appends on valid submit and clears; empty phrase or refers-to blocks the add and shows the inline
+  `add-referent-error` message with no entry added (ties Requirement 1 criteria 3–4).
 - Per-entry notes/scroll-ref edits update the working list; remove drops the entry.
+- **In-place phrase/refers-to edit** (Requirement 1 criterion 7): editing an existing row's phrase to
+  a new non-empty value updates that row and leaves its index unchanged (no reorder); an edit that
+  blanks a required field is rejected with the inline message and the row keeps its prior value.
 - Save calls `BookStudyService.save` with the current fields plus `referents()`; the `saving`→`saved`
   path renders a confirmation; a save error keeps the working list and shows the error (Req 3
   criterion 6). A regression assertion confirms the detail page issues exactly the `get` on load and
@@ -315,17 +367,21 @@ per-stage retention assertions already cover it; no new count moves.
   whole `referents` array (the record is written as a unit, as the word-study tool already does).
   This matches existing behaviour and is acceptable for a single-user tool; no optimistic-locking is
   added.
-- **`createdAt` on update.** If a future client posts an update without echoing `createdAt`, the
-  Lambda's read-existing-then-prefer-stored fallback keeps `createdAt` stable; this is the one place
-  the save path reads before writing (a small extra `GetCommand`), chosen over trusting the client to
-  always round-trip the field.
+- **`createdAt` on update costs one extra `GetCommand`.** Because the frontend `save` omits
+  `createdAt` and the server owns preservation, every **update** (id present) is a `GetCommand`
+  followed by a `PutCommand` rather than a bare `Put`; a **create** (no id) remains a single `Put`.
+  The extra on-demand read is negligible (a single-item `GetCommand` on `BookStudies`, well under a
+  cent at the dev/prod volumes in `delivery.md`), and it is the price of making `createdAt`
+  preservation server-authoritative instead of trusting the client to round-trip the field. The
+  Non-Functional cost note is updated accordingly.
 - **Free-text scroll reference drift.** Because the scroll-text reference is free text (A3), it can
   become stale or not match any Scroll Study. Accepted for this increment; linking to a real Scroll
   Study record is Out of Scope and can be layered on later without changing the stored shape (the
   field would gain structure, not move).
-- **Phrase/refers-to editability.** Added entries expose only notes/scroll-ref for inline edit;
-  correcting a phrase means remove-and-re-add. Called out in requirements' Out of Scope; the entry
-  shape already supports inline phrase editing if that is wanted later.
+- **Phrase/refers-to editability.** All four fields (including `phrase`/`refersTo`) are editable in
+  place per row, so a typo fix keeps the entry's position and never reorders the list. The cost is a
+  slightly larger component surface and a per-row required-field re-check; accepted because it avoids
+  the silent-reorder trap of a read-only-then-remove-and-re-add model.
 
 ## Out of scope
 
@@ -337,3 +393,42 @@ per-stage retention assertions already cover it; no new count moves.
 - A top-level "Referents" navbar surface or a cross-study referent view.
 - A dedicated `PUT`/`PATCH` route or any new table/Lambda/API resource.
 - Changes to the Word Study tool, the Scroll Study tool, or the pronoun worklist (#20).
+
+## Review responses
+
+Responses to the design review (`design-review.json`, verdict CHANGES_REQUESTED). All five findings
+are addressed; none are backlogged or ignored.
+
+1. **HIGH — `createdAt` preservation not guaranteed (addressed).** The upsert no longer takes
+   `createdAt` from the body. On the update path (`input.id` present) `saveBookStudy` now
+   **mandatorily** `GetCommand`s the existing item under the caller's own PK and uses its stored
+   `createdAt` (falling back to `now` only when no item exists). The "Backend — book-study-crud
+   Lambda" section states this as the authoritative rule with sample code, "Invariant ownership"
+   drops the "MAY"/client-echo language, and the testing strategy adds a Lambda test that posts an
+   update **omitting** `createdAt` and asserts the stored `createdAt` is preserved while `updatedAt`
+   advances. This keeps the frontend `save({ id?, book, title, notes, referents })` signature
+   (no `createdAt`) and satisfies Requirement 3 criterion 1.
+
+2. **MEDIUM — remove-and-re-add silently reorders (addressed, option b).** Phrase and refers-to are
+   now **editable in place** per row rather than read-only. The frontend "Edit per-entry" decision,
+   the Risks "Phrase/refers-to editability" bullet, and new Requirement 1 criterion 7 (plus its
+   correctness property) specify that an in-place phrase/refers-to edit preserves the entry's
+   position and never moves it to the end, with a non-empty-after-trim re-check on the row. The old
+   Out-of-Scope "edit model is a design detail" note is replaced; bulk operations remain out of
+   scope.
+
+3. **MEDIUM — ambiguous character-limit rule (addressed).** The validation rules now state the limit
+   is applied to the **raw** string with `str.length > 200` / `> 1000` (so exactly 200/1000 is
+   allowed, matching the existing `title.length > TITLE_MAX_LENGTH` check) and the non-empty check is
+   on `str.trim()`. This is stated in the backend `parseSaveBody` description, the "Validation rules"
+   list, and Requirement 1 criterion 5 / Requirement 2 criterion 4, so the frontend `maxlength` and
+   the server agree. The Lambda tests assert raw-length 200/1000 accepted and 201/1001 rejected.
+
+4. **NIT — missing testid for the add-form inline validation message (addressed).**
+   `add-referent-error` is added to the namespaced `data-testid` list and referenced by the frontend
+   add-validation test; it is also reused for a blanked in-place required-field edit.
+
+5. **NIT — extra `GetCommand` per update not reflected in cost text (addressed).** The Risks section
+   (renamed bullet "`createdAt` on update costs one extra `GetCommand`") and Non-Functional
+   Requirement 5 now state that an update is a `Get` + `Put` (a create stays a single `Put`), noting
+   the extra single-item read is negligible on-demand.
