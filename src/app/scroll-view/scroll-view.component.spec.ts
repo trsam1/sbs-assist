@@ -145,6 +145,23 @@ describe('ScrollViewComponent', () => {
     expect(query('[data-testid="error"]')).not.toBeNull();
   });
 
+  it('shows a Find pronouns link in the ready state targeting scroll/:id/pronouns', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
+    fixture.detectChanges();
+
+    const link = query('[data-testid="find-pronouns-link"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/scroll/s1/pronouns');
+  });
+
+  it('does not show the Find pronouns link outside the ready state', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x', scrollText: '' })));
+    fixture.detectChanges();
+    expect(query('[data-testid="find-pronouns-link"]')).toBeNull();
+  });
+
   it('navigates to /scroll/new on re-upload', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x' })));
