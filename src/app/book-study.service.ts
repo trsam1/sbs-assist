@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
-import { BookStudy, BookStudyInput } from './models';
+import { BookStudy, BookStudyInput, Referent } from './models';
 import { environment } from './environment';
 
 interface CreateBookStudyResponse {
@@ -17,8 +17,20 @@ interface BookStudyRecord {
   notes: string;
   createdAt: string;
   updatedAt: string;
+  referents?: unknown;
   /** May be present if the record was already mapped. */
   id?: string;
+}
+
+/** Coerce an unknown referent entry's four fields to strings defaulting to ''. */
+function normalizeReferent(raw: unknown): Referent {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  return {
+    phrase: typeof r['phrase'] === 'string' ? r['phrase'] : '',
+    refersTo: typeof r['refersTo'] === 'string' ? r['refersTo'] : '',
+    notes: typeof r['notes'] === 'string' ? r['notes'] : '',
+    scrollRef: typeof r['scrollRef'] === 'string' ? r['scrollRef'] : '',
+  };
 }
 
 function toBookStudy(record: BookStudyRecord): BookStudy {
@@ -30,6 +42,7 @@ function toBookStudy(record: BookStudyRecord): BookStudy {
     notes: record.notes ?? '',
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    referents: Array.isArray(record.referents) ? record.referents.map(normalizeReferent) : [],
   };
 }
 
@@ -57,6 +70,23 @@ export class BookStudyService {
   create(input: BookStudyInput): Observable<string> {
     return this.http
       .post<CreateBookStudyResponse>(`${this.baseUrl}/books`, input)
+      .pipe(map((res) => res.bookStudyId));
+  }
+
+  /**
+   * Create or update a book study (upsert). Including `id` updates that study; omitting it
+   * creates a new one. Returns the bookStudyId. The server owns `createdAt`/`updatedAt`, so the
+   * response is `{ bookStudyId }` only.
+   */
+  save(study: {
+    id?: string;
+    book: string;
+    title: string;
+    notes: string;
+    referents: Referent[];
+  }): Observable<string> {
+    return this.http
+      .post<CreateBookStudyResponse>(`${this.baseUrl}/books`, study)
       .pipe(map((res) => res.bookStudyId));
   }
 

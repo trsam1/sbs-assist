@@ -243,6 +243,207 @@ describe('Book Study CRUD Lambda', () => {
       expect(item['title']).toBe('');
       expect(item['notes']).toBe('');
     });
+
+    it('defaults referents to an empty array when omitted', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      await handler(makePostEvent(validBody()));
+
+      const item = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['referents']).toEqual([]);
+    });
+
+    it('stores a referents array verbatim', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const referents = [
+        { phrase: 'the ruler of this world', refersTo: 'Satan', notes: 'John 12', scrollRef: '' },
+        { phrase: 'the Lamb', refersTo: 'Jesus', notes: '', scrollRef: 'ch. 5' },
+      ];
+      await handler(makePostEvent(validBody({ referents })));
+
+      const item = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['referents']).toEqual(referents);
+    });
+
+    it('defaults a referent entry notes/scrollRef to empty strings when omitted', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      await handler(
+        makePostEvent(validBody({ referents: [{ phrase: 'the Word', refersTo: 'Jesus' }] })),
+      );
+
+      const item = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['referents']).toEqual([
+        { phrase: 'the Word', refersTo: 'Jesus', notes: '', scrollRef: '' },
+      ]);
+    });
+  });
+
+  // --- POST /books upsert (id present) ---
+
+  describe('POST /books upsert', () => {
+    it('with an id present updates in place, preserving createdAt and advancing updatedAt', async () => {
+      const storedCreatedAt = '2020-01-01T00:00:00.000Z';
+      // Update path: GetCommand resolves the existing item, then PutCommand resolves.
+      mockSend.mockResolvedValueOnce({
+        Item: { bookStudyId: 'book-existing', userId: 'u1', createdAt: storedCreatedAt },
+      });
+      mockSend.mockResolvedValueOnce({});
+
+      const res = await handler(
+        makePostEvent(
+          // deliberately omit createdAt — the server owns preservation
+          validBody({ id: 'book-existing', book: 'John', title: 'edited' }),
+          'u1',
+        ),
+      );
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).bookStudyId).toBe('book-existing');
+      // Two sends: the Get (preserve createdAt) then the Put.
+      expect(mockSend).toHaveBeenCalledTimes(2);
+
+      const item = (mockSend.mock.calls[1][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['bookStudyId']).toBe('book-existing');
+      expect(item['SK']).toBe('BOOKSTUDY#book-existing');
+      expect(item['createdAt']).toBe(storedCreatedAt);
+      expect(item['updatedAt'] as string).not.toBe(storedCreatedAt);
+      expect(new Date(item['updatedAt'] as string).getTime()).toBeGreaterThan(
+        new Date(storedCreatedAt).getTime(),
+      );
+    });
+
+    it('with an id that has no existing item writes a create with createdAt === updatedAt', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined }); // Get finds nothing
+      mockSend.mockResolvedValueOnce({}); // Put
+
+      const res = await handler(makePostEvent(validBody({ id: 'book-new' }), 'u1'));
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).bookStudyId).toBe('book-new');
+
+      const item = (mockSend.mock.calls[1][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['createdAt']).toBe(item['updatedAt']);
+    });
+
+    it('ignores body.userId on the update path; PK uses claims.sub', async () => {
+      mockSend.mockResolvedValueOnce({
+        Item: { bookStudyId: 'b-up', userId: 'u1', createdAt: '2021-01-01T00:00:00.000Z' },
+      });
+      mockSend.mockResolvedValueOnce({});
+
+      const res = await handler(
+        makePostEvent(
+          validBody({
+            id: 'b-up',
+            userId: 'attacker',
+            referents: [{ phrase: 'p', refersTo: 'r' }],
+          }),
+          'u1',
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+
+      // The Get is keyed on the caller's own PK.
+      const getKey = (mockSend.mock.calls[0][0].input as Record<string, unknown>)['Key'] as Record<
+        string,
+        unknown
+      >;
+      expect(getKey['PK']).toBe('USER#u1');
+
+      const item = (mockSend.mock.calls[1][0].input as Record<string, unknown>)['Item'] as Record<
+        string,
+        unknown
+      >;
+      expect(item['PK']).toBe('USER#u1');
+      expect(item['userId']).toBe('u1');
+    });
+  });
+
+  // --- POST /books referent validation ---
+
+  describe('POST /books referent validation', () => {
+    it('rejects a blank-after-trim phrase with 400 naming referents', async () => {
+      const res = await handler(
+        makePostEvent(validBody({ referents: [{ phrase: '   ', refersTo: 'Satan' }] })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/referents/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a blank-after-trim refersTo with 400 naming referents', async () => {
+      const res = await handler(
+        makePostEvent(validBody({ referents: [{ phrase: 'the Word', refersTo: '  ' }] })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/referents/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-array referents with 400 naming referents', async () => {
+      const res = await handler(makePostEvent(validBody({ referents: 'nope' })));
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/referents/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('accepts a phrase/refersTo of exactly 200 chars but rejects 201', async () => {
+      mockSend.mockResolvedValueOnce({});
+      const ok = await handler(
+        makePostEvent(
+          validBody({ referents: [{ phrase: 'a'.repeat(200), refersTo: 'b'.repeat(200) }] }),
+        ),
+      );
+      expect(ok.statusCode).toBe(200);
+
+      mockSend.mockReset();
+      const bad = await handler(
+        makePostEvent(validBody({ referents: [{ phrase: 'a'.repeat(201), refersTo: 'ok' }] })),
+      );
+      expect(bad.statusCode).toBe(400);
+      expect(JSON.parse(bad.body).message).toMatch(/referents/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('accepts notes/scrollRef of exactly 1000 chars but rejects 1001', async () => {
+      mockSend.mockResolvedValueOnce({});
+      const ok = await handler(
+        makePostEvent(
+          validBody({
+            referents: [
+              { phrase: 'p', refersTo: 'r', notes: 'n'.repeat(1000), scrollRef: 's'.repeat(1000) },
+            ],
+          }),
+        ),
+      );
+      expect(ok.statusCode).toBe(200);
+
+      mockSend.mockReset();
+      const bad = await handler(
+        makePostEvent(
+          validBody({ referents: [{ phrase: 'p', refersTo: 'r', notes: 'n'.repeat(1001) }] }),
+        ),
+      );
+      expect(bad.statusCode).toBe(400);
+      expect(JSON.parse(bad.body).message).toMatch(/referents/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
   });
 
   // --- GET /books/{bookStudyId} ---
@@ -422,17 +623,28 @@ describe('Book Study CRUD Lambda', () => {
      * Property: a POST then GET round-trip returns a record whose book/title/notes match the
      * input and whose createdAt === updatedAt (no edit path this increment).
      */
-    it('create then get round-trip preserves fields and keeps createdAt === updatedAt', async () => {
+    it('create then get round-trip preserves fields (incl. referents) and keeps createdAt === updatedAt', async () => {
+      const referentArb = fc.array(
+        fc.record({
+          phrase: fc.string({ minLength: 1, maxLength: 200 }).filter((s) => s.trim().length > 0),
+          refersTo: fc.string({ minLength: 1, maxLength: 200 }).filter((s) => s.trim().length > 0),
+          notes: fc.string({ maxLength: 1000 }),
+          scrollRef: fc.string({ maxLength: 1000 }),
+        }),
+        { maxLength: 5 },
+      );
+
       await fc.assert(
         fc.asyncProperty(
           fc.constantFrom(...BIBLE_BOOKS),
           fc.string({ maxLength: 200 }),
           fc.string({ maxLength: 2000 }),
-          async (book, title, notes) => {
+          referentArb,
+          async (book, title, notes, referents) => {
             mockSend.mockResolvedValueOnce({});
 
             const createRes = await handler(
-              makePostEvent(JSON.stringify({ book, title, notes }), 'u1'),
+              makePostEvent(JSON.stringify({ book, title, notes, referents }), 'u1'),
             );
             expect(createRes.statusCode).toBe(200);
             const { bookStudyId } = JSON.parse(createRes.body);
@@ -449,6 +661,7 @@ describe('Book Study CRUD Lambda', () => {
             expect(retrieved.book).toBe(book);
             expect(retrieved.title).toBe(title);
             expect(retrieved.notes).toBe(notes);
+            expect(retrieved.referents).toEqual(referents);
             expect(retrieved.createdAt).toBe(retrieved.updatedAt);
 
             mockSend.mockReset();
