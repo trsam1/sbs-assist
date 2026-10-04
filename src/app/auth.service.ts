@@ -2,6 +2,7 @@ import { Injectable, signal, computed } from '@angular/core';
 import { Amplify } from 'aws-amplify';
 import {
   signIn,
+  confirmSignIn,
   signUp,
   signOut,
   confirmSignUp,
@@ -25,7 +26,12 @@ export function configureAmplify(cfg: RuntimeConfig): void {
   });
 }
 
-export type AuthState = 'loading' | 'signedOut' | 'signedIn' | 'confirmSignUp';
+export type AuthState =
+  | 'loading'
+  | 'signedOut'
+  | 'signedIn'
+  | 'confirmSignUp'
+  | 'newPasswordRequired';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -60,9 +66,42 @@ export class AuthService {
       if (result.isSignedIn) {
         this.userEmail.set(email);
         this.state.set('signedIn');
+        return;
+      }
+      const step = result.nextStep.signInStep;
+      if (step === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+        this.pendingEmail = email;
+        this.state.set('newPasswordRequired');
+      } else {
+        this.error.set(
+          `This account needs an additional sign-in step (${step}) that isn't supported here.`,
+        );
       }
     } catch (err: unknown) {
       this.error.set(err instanceof Error ? err.message : 'Sign in failed.');
+    }
+  }
+
+  /**
+   * Completes a NEW_PASSWORD_REQUIRED challenge raised by signIn() (e.g. a user
+   * left in FORCE_CHANGE_PASSWORD by admin-create-user). On success the app
+   * advances to the signed-in state; a failure surfaces a visible error and
+   * keeps the new-password step so the user can retry.
+   */
+  async confirmNewPassword(newPassword: string): Promise<void> {
+    this.error.set(null);
+    try {
+      const result = await confirmSignIn({ challengeResponse: newPassword });
+      if (result.isSignedIn) {
+        this.userEmail.set(this.pendingEmail);
+        this.state.set('signedIn');
+      } else {
+        this.error.set('Could not set the new password. Please try again.');
+        this.state.set('newPasswordRequired');
+      }
+    } catch (err: unknown) {
+      this.error.set(err instanceof Error ? err.message : 'Could not set the new password.');
+      this.state.set('newPasswordRequired');
     }
   }
 

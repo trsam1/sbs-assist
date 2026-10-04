@@ -42,6 +42,30 @@ import { AuthService } from '../auth.service';
                 >
                   Verify
                 </button>
+              } @else if (auth.state() === 'newPasswordRequired') {
+                <p class="has-text-centered mb-4">
+                  Your account requires a new password. Set one to finish signing in.
+                </p>
+                <div class="field">
+                  <label class="label" for="new-password-input">New Password</label>
+                  <div class="control">
+                    <input
+                      class="input"
+                      id="new-password-input"
+                      type="password"
+                      [(ngModel)]="newPassword"
+                      placeholder="New password"
+                    />
+                  </div>
+                </div>
+                <button
+                  class="button is-primary is-fullwidth"
+                  [class.is-loading]="submitting()"
+                  [disabled]="!newPassword || submitting()"
+                  (click)="onConfirmNewPassword()"
+                >
+                  Set Password
+                </button>
               } @else {
                 <div class="tabs is-centered">
                   <ul>
@@ -125,6 +149,7 @@ export class AuthComponent {
   email = '';
   password = '';
   code = '';
+  newPassword = '';
 
   async onSignIn(): Promise<void> {
     this.submitting.set(true);
@@ -141,6 +166,12 @@ export class AuthComponent {
   async onConfirm(): Promise<void> {
     this.submitting.set(true);
     await this.auth.confirmSignUp(this.code);
+    this.submitting.set(false);
+  }
+
+  async onConfirmNewPassword(): Promise<void> {
+    this.submitting.set(true);
+    await this.auth.confirmNewPassword(this.newPassword);
     this.submitting.set(false);
   }
 }
