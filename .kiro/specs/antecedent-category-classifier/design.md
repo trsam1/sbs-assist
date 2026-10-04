@@ -44,6 +44,7 @@ graph TD
         AntFn[antecedent-study Lambda<br/>PUT validation EXTENDED for category]
         DDBA[(DynamoDB: AntecedentStudies<br/>stores the enlarged item unchanged)]
         SM[shared/models.ts<br/>AntecedentAssignment + category]
+        SAC[shared/antecedent-category.ts NEW<br/>ANTECEDENT_CATEGORIES values + isAntecedentCategory]
     end
 
     AV --> AC
@@ -53,7 +54,8 @@ graph TD
     AV -->|getScrollStudy| SS --> APIGW
     AV -->|get/save incl. category| ASVC --> APIGW --> AntFn --> DDBA
     AntFn --> SM
-    AntFn -. validates against .-> AC
+    AntFn -->|isAntecedentCategory| SAC
+    SAC -. mirrors values of .-> AC
 ```
 
 ```mermaid
@@ -103,15 +105,34 @@ sharing mechanism:
 
 - The canonical ordered category values and hint text live in `src/app/antecedent-category.ts`.
 - The backend gets a small parallel constant — the **category values only** (no hint text, which is
-  frontend-only) — in `infra/lambda/shared/models.ts` (or a sibling `shared/antecedent-category.ts`),
-  mirroring the mirrored-`AntecedentAssignment` precedent.
+  frontend-only) — in a **dedicated** shared module `infra/lambda/shared/antecedent-category.ts`
+  (not piggy-backed on `shared/models.ts`), mirroring the `bible-books.ts` precedent that already
+  lives as its own module in both `src/app/` and `infra/lambda/shared/`. It exports:
+
+  ```typescript
+  // infra/lambda/shared/antecedent-category.ts  (values only, no hint text)
+  /** Backend mirror of the frontend ANTECEDENT_CATEGORIES. Kept in sync by hand; a drift-guard
+   *  test (antecedent-category.test.ts) asserts this equals the same literal the frontend ships. */
+  export const ANTECEDENT_CATEGORIES: readonly string[] = [
+    'Deity', 'Person', 'Group', 'Thing', 'Place', 'Other',
+  ];
+  export function isAntecedentCategory(value: unknown): boolean {
+    return typeof value === 'string' && ANTECEDENT_CATEGORIES.includes(value);
+  }
+  ```
+
+  The `antecedent-study` Lambda imports from this module:
+  `import { isAntecedentCategory } from '../shared/antecedent-category';` — the same `../shared/...`
+  import style the handler already uses for `../shared/models` and `../shared/cors`.
 - A **drift guard test** (see Testability) asserts the two value lists are identical, so a change to
   one that is not mirrored fails CI. This gives a single *effective* source of truth without crossing
   the package boundary at build time.
 
 Rationale: this is the lowest-risk, convention-matching choice. A build-time symlink or shared package
-would be new machinery for one small enum; the mirror + guard test is exactly how the codebase already
-shares `AntecedentAssignment` and the pronoun-related constants, so it adds no new pattern.
+would be new machinery for one small enum; the dedicated mirror module + guard test is exactly how the
+codebase already shares `bible-books.ts` across the two packages, so it adds no new pattern. A
+dedicated module (rather than extending `shared/models.ts`) matches that `bible-books.ts` precedent and
+keeps the pure constant/guard separate from the record-shape interfaces in `models.ts`.
 
 ### The fixed category list
 
@@ -209,13 +230,16 @@ antecedent-view.component.ts`) is extended, not replaced:
 
 - **`OccurrenceRow`** gains a `category: string` field (`''` default). `buildWorklist` sets it to `''`
   for every new row.
-- **Category control.** In each row's `Antecedent` cell (or a new `Category` column), add a Bulma
-  `.select` bound to `row.category` with a blank first option (`— unclassified —`) and one option per
-  `ANTECEDENT_CATEGORIES` member, via a new `setCategory(occurrence, value)` method that updates only
-  the matching row (mirroring the existing `setAntecedent`). The select is **disabled/hidden when the
-  row's antecedent is empty** (a category only has meaning with an antecedent, Requirement 1 criterion
-  1 / Assumption A4), and `setAntecedent(occurrence, '')` (clear) also resets that row's `category` to
-  `''` (Requirement 1 criterion 5).
+- **Category control.** Add a **new `<th>Category</th>` column** to the worklist table with the
+  select in its own `<td>`, leaving the existing `Antecedent` cell markup and its tests untouched. The
+  cell holds a Bulma `.select` bound to `row.category` with a blank first option (`— unclassified —`)
+  and one option per `ANTECEDENT_CATEGORIES` member, via a new `setCategory(occurrence, value)` method
+  that updates only the matching row (mirroring the existing `setAntecedent`). The select is rendered
+  **disabled** (not hidden) when the row's antecedent is empty — a single deterministic binding
+  `[disabled]="row.antecedent.trim().length === 0"` — so the column layout stays stable and the
+  control is one testable binding (a category only has meaning with an antecedent, Requirement 1
+  criterion 1 / Assumption A4). `setAntecedent(occurrence, '')` (clear) also resets that row's
+  `category` to `''` (Requirement 1 criterion 5).
 - **Pre-fill on load.** `loadSaved` currently maps saved `antecedent` by `occurrence`; it also maps
   `category`, passing each saved value through `toAntecedentCategory` so a legacy/unknown value renders
   as unclassified (Requirement 3 criteria 3–5, Requirement 1 criterion 3).
@@ -257,7 +281,8 @@ if (category.length > 0 && !isAntecedentCategory(category)) {
 assignments.push({ occurrence, start, word, antecedent, category });  // '' when unclassified
 ```
 
-`isAntecedentCategory` here reads the backend's mirrored value list. An absent or empty category is
+`isAntecedentCategory` here is imported from `../shared/antecedent-category` (the dedicated backend
+mirror module above), reading the backend's mirrored value list. An absent or empty category is
 accepted and stored as `''` (Requirement 4 criterion 1); a present-but-unknown category is a 400
 (criterion 2), exactly like the existing over-length antecedent rejection. All existing checks are
 preserved (criterion 4).
@@ -307,8 +332,12 @@ on read yet an unknown value is rejected on write.
 
 - **Fixed-list membership is a product judgment.** The six proposed categories are a reasonable
   reading of the Step 6 reference, but the maintainer may want different names or granularity (e.g.
-  splitting "Deity" into Father/Son/Spirit, or dropping "Place"). This is surfaced in the spec PR's
-  "How to review"; because every consumer reads the one list, changing it is a localized edit. Not a
+  splitting "Deity" into Father/Son/Spirit, or dropping "Place"). In particular, the reference treats
+  "this world" (John 12) as *the people of this world and the world's ways* rather than strictly a
+  geographic place, so **`Place` deliberately doubles as the world/ways sense** (hint: "A place, or
+  the world and its ways"); the maintainer may prefer to fold that sense into `Group` or `Other`. This
+  is surfaced in the spec PR's "How to review" (the PR note calls out the `Place`/world-ways overlap
+  specifically); because every consumer reads the one list, changing it is a localized edit. Not a
   blocker — a defensible default is chosen so the build can proceed if the maintainer accepts it.
 - **Client/server list drift.** Because the list is mirrored across the two TS packages (the existing
   pattern), a change to one copy that is not mirrored would let the client offer a value the server
@@ -324,18 +353,32 @@ on read yet an unknown value is rejected on write.
   ordered; `ANTECEDENT_CATEGORY_HINTS` keys equal the list exactly (Requirement 2 property);
   `isAntecedentCategory` accepts every member and rejects non-members/non-strings;
   `toAntecedentCategory` maps members to themselves and everything else to `''`.
-- **Component (frontend, extend `antecedent-view.component.spec.ts`)** — a row with an antecedent
-  shows the category select with the fixed options + unclassified; `setCategory` changes only the
-  target row (Requirement 1 property); clearing an antecedent clears its category; saved categories
-  pre-fill on load and a legacy/unknown stored value renders unclassified; the save payload carries
-  `category`; the hint toggle discloses one item per category and does not block the control.
+- **Component (frontend, extend `antecedent-view.component.spec.ts`)** — the new `Category` column
+  renders a select per row with the fixed options + unclassified; the select is **disabled** when the
+  row's antecedent is empty and enabled once an antecedent is set (the `[disabled]` binding);
+  `setCategory` changes only the target row (Requirement 1 property); clearing an antecedent clears its
+  category; saved categories pre-fill on load and a legacy/unknown stored value renders unclassified;
+  the save payload carries `category`; the hint toggle discloses one item per category and does not
+  block the control.
 - **Lambda (infra, extend `antecedent-study/index.test.ts`)** — PUT accepts an assignment with a
   valid category, with no category, and with an empty category (stored `''`); PUT returns 400 for a
   non-string category and for a non-member string; all existing validation cases still pass. No AWS
   is called (DynamoDB client mocked, per the no-AWS test rule).
-- **Drift guard (infra test)** — the backend mirrored category values equal the frontend
-  `ANTECEDENT_CATEGORIES` values (hard-coded expected list asserted in both packages' tests, or a test
-  that reads both), so an unmirrored change fails CI.
+- **Drift guard (two per-package literal assertions)** — the two TypeScript packages compile
+  separately and the infra vitest package cannot `import` from `src/app/`, so there is **no**
+  cross-package import. Instead, each package asserts its own `ANTECEDENT_CATEGORIES` deep-equals the
+  **same shared literal contract** `['Deity','Person','Group','Thing','Place','Other']`, exactly as
+  `bible-books.test.ts` already guards its mirror against a hard-coded `EXPECTED_BIBLE_BOOKS` literal:
+  - `infra/lambda/shared/antecedent-category.test.ts` declares the literal
+    `EXPECTED_ANTECEDENT_CATEGORIES = ['Deity','Person','Group','Thing','Place','Other']` and asserts
+    `expect([...ANTECEDENT_CATEGORIES]).toEqual([...EXPECTED_ANTECEDENT_CATEGORIES])`.
+  - `src/app/antecedent-category.spec.ts` declares the **same** literal and makes the **same**
+    assertion against the frontend `ANTECEDENT_CATEGORIES`.
+
+  The shared literal is the contract: changing one package's list without changing the other makes
+  that package's assertion fail under `npm run verify`, so an unmirrored change cannot pass CI. This
+  is a plain in-package import plus a literal comparison — no text-parsing of the other package's
+  source and no new cross-package machinery.
 
 All of the above are unit/assertion tests with no network or AWS; the feature is fully testable
 offline, consistent with the project's `npm run verify` gate.
@@ -350,3 +393,33 @@ offline, consistent with the project's `npm run verify` gate.
   AWS service, or `stage-config.ts` change.
 - Aggregation, filtering, counting, reporting, or export of antecedents by category.
 - Judging whether a chosen category is correct for a given antecedent.
+
+## Responses to design review (round 1 — CHANGES_REQUESTED)
+
+- **Finding 1 (MEDIUM) — backend mirror location/name unresolved X-or-Y.** Addressed. Pinned the
+  backend mirror to a **dedicated module** `infra/lambda/shared/antecedent-category.ts` exporting
+  `ANTECEDENT_CATEGORIES` (values only, no hint text) and `isAntecedentCategory`, matching the
+  `bible-books.ts` precedent (confirmed present in both `src/app/` and `infra/lambda/shared/`). The
+  `antecedent-study` Lambda imports `isAntecedentCategory` from `../shared/antecedent-category` — the
+  same `../shared/...` style the handler already uses for `../shared/models` and `../shared/cors`
+  (confirmed in `index.ts`). The "or `shared/models.ts`" wording is removed; the architecture diagram
+  now shows the dedicated module.
+- **Finding 2 (MEDIUM) — drift-guard mechanism ambiguous / one option infeasible.** Addressed.
+  Dropped the infeasible "a test that reads both" option and pinned the **two per-package literal
+  assertions** pattern that `bible-books.test.ts` already uses: each package deep-equals its own
+  `ANTECEDENT_CATEGORIES` against the identical shared literal
+  `['Deity','Person','Group','Thing','Place','Other']` (infra
+  `shared/antecedent-category.test.ts` and frontend `antecedent-category.spec.ts`), the shared literal
+  being the contract. An unmirrored change fails that package's assertion under `npm run verify`; no
+  cross-package import or source-text parsing.
+- **Finding 3 (NIT) — "disabled/hidden" is two behaviors.** Addressed. Pinned **disabled** via the
+  single binding `[disabled]="row.antecedent.trim().length === 0"` (column layout stays stable, one
+  deterministic binding to test); removed the "hidden" alternative. Component test note updated.
+- **Finding 4 (NIT) — "Antecedent cell" vs. "new Category column".** Addressed. Pinned a **new
+  `<th>Category</th>` column** with the select in its own `<td>`, leaving the existing antecedent
+  control markup and tests untouched; removed the alternative. Component test note updated.
+- **Finding 5 (NIT) — "Place" over-reads the reference's "this world".** Addressed. Kept the `Place`
+  hint phrasing ("A place, or the world and its ways") and expanded the Risks note to call out
+  explicitly that `Place` doubles as the people-of-the-world / world's-ways sense and that the
+  maintainer may fold it into `Group`/`Other`; flagged that the spec PR's "How to review" should carry
+  this note so the maintainer can decide. (Not blocking; a defensible default stands.)
