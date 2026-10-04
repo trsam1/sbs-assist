@@ -70,6 +70,12 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Scroll Study CRUD + presigned upload URL */
   public readonly scrollStudyFn: nodejs.NodejsFunction;
 
+  /** DynamoDB table for user antecedent studies (Step 6) */
+  public readonly antecedentStudiesTable: dynamodb.Table;
+
+  /** Lambda: Antecedent Study CRUD */
+  public readonly antecedentStudyFn: nodejs.NodejsFunction;
+
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
 
@@ -174,6 +180,17 @@ export class WordStudyToolStack extends cdk.Stack {
       partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // Antecedent studies (Step 6). One record per scroll per user, fetched by exact key, so no
+    // GSI is needed (and no PITR, consistent with BookStudies — no new StageConfig field).
+    this.antecedentStudiesTable = new dynamodb.Table(this, 'AntecedentStudies', {
+      tableName: n('AntecedentStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
     });
 
     // -------------------------------------------------------
@@ -443,6 +460,21 @@ export class WordStudyToolStack extends cdk.Stack {
       }),
     );
 
+    // --- Antecedent Study CRUD Lambda (Step 6) ---
+    this.antecedentStudyFn = new nodejs.NodejsFunction(this, 'AntecedentStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('AntecedentStudy'),
+      logGroup: fnLogs('AntecedentStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'antecedent-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        ANTECEDENT_STUDIES_TABLE_NAME: this.antecedentStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.antecedentStudiesTable.grantReadWriteData(this.antecedentStudyFn);
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -546,6 +578,17 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // DELETE /scroll-studies/{scrollStudyId}
     scrollStudyByIdResource.addMethod('DELETE', scrollStudyIntegration, authMethodOptions);
+
+    // --- Antecedent Study routes (nested under a scroll study) ---
+    const antecedentStudyIntegration = new apigateway.LambdaIntegration(this.antecedentStudyFn);
+
+    const antecedentsResource = scrollStudyByIdResource.addResource('antecedents');
+
+    // GET /scroll-studies/{scrollStudyId}/antecedents
+    antecedentsResource.addMethod('GET', antecedentStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/{scrollStudyId}/antecedents
+    antecedentsResource.addMethod('PUT', antecedentStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json

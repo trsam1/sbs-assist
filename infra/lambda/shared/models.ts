@@ -148,6 +148,25 @@ export interface BookStudyRecord {
   GSI1SK: string; // "UPDATED#<updatedAt>" — sort by most recent
 }
 
+/** One pronoun occurrence's assigned antecedent (Step 6 — Define Antecedents). */
+export interface AntecedentAssignment {
+  occurrence: number; // 0-based ordinal of the pronoun appearance in the scroll text (the key)
+  start: number; // 0-based character offset of the occurrence in the scroll text (context/migration)
+  word: string; // canonical lower-cased pronoun form (for display; not the key)
+  antecedent: string; // trimmed, 1–200 chars
+}
+
+/** DynamoDB record shape for the AntecedentStudies table (one per scroll per user). */
+export interface AntecedentStudyRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "ANTECEDENT#<scrollStudyId>"
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  assignments: AntecedentAssignment[]; // only non-empty antecedents are stored
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
 /** DynamoDB record shape for the StrongsData table. */
 export interface StrongsRecord {
   PK: string;

@@ -11,6 +11,18 @@ export interface PronounCount {
 /** An ordered slice of the scroll text for highlighting: plain text or a matched pronoun. */
 export type Segment = { kind: 'text'; value: string } | { kind: 'pronoun'; value: string }; // value is the original-cased matched token
 
+/** One in-text appearance of a dictionary pronoun, in reading order. */
+export interface PronounOccurrence {
+  /** Canonical lower-cased dictionary form (same value `parsePronouns` reports as `word`). */
+  word: string;
+  /** The original-cased matched token as it appears in the text. */
+  token: string;
+  /** Zero-based character offset of the token's first character in `text`. */
+  start: number;
+  /** Zero-based ordinal of this appearance within `text` (reading order). */
+  occurrence: number;
+}
+
 /**
  * Matches a maximal run of ASCII letters. Anything else (whitespace, punctuation, digits, and
  * crucially the apostrophe) is a separator, so a contraction splits into its letter-runs and each
@@ -68,4 +80,23 @@ export function toHighlightSegments(text: string): Segment[] {
     segments.push({ kind: 'text', value: text.slice(lastIndex) });
   }
   return segments;
+}
+
+/**
+ * Every pronoun occurrence in `text`, ordered by `start` ascending (== `occurrence` order).
+ * One entry per in-text appearance of a dictionary pronoun. Pure, O(n), never throws; `''` → `[]`.
+ * Uses the SAME `PRONOUN_DICTIONARY` and whole-letter-run matching as
+ * `parsePronouns`/`toHighlightSegments` (one pronoun definition in the code), so grouping this
+ * output by `word` and counting reproduces `parsePronouns(text)` exactly.
+ */
+export function parsePronounOccurrences(text: string): PronounOccurrence[] {
+  const occurrences: PronounOccurrence[] = [];
+  let n = 0;
+  for (const match of text.matchAll(LETTER_RUN)) {
+    const word = match[0].toLowerCase();
+    if (PRONOUN_DICTIONARY.has(word)) {
+      occurrences.push({ word, token: match[0], start: match.index, occurrence: n++ });
+    }
+  }
+  return occurrences;
 }

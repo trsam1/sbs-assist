@@ -99,3 +99,20 @@ export interface BookStudyInput {
   title?: string;
   notes?: string;
 }
+
+/** One pronoun occurrence's assigned antecedent (Step 6 — Define Antecedents). */
+export interface AntecedentAssignment {
+  occurrence: number; // 0-based ordinal of the pronoun appearance in the scroll text (the key)
+  start: number; // 0-based character offset of the occurrence in the scroll text (context/migration)
+  word: string; // canonical lower-cased pronoun form (for display; not the key)
+  antecedent: string; // trimmed, 1–200 chars
+}
+
+/** A persisted set of antecedent assignments for one scroll study, owned by the current user. */
+export interface AntecedentStudy {
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  assignments: AntecedentAssignment[];
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
