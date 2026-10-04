@@ -83,6 +83,16 @@ describe('PronounViewComponent', () => {
     expect(query('[data-testid="pronoun-list"]')).toBeNull();
   });
 
+  it('links to the antecedent worksheet from the ready state', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
+    fixture.detectChanges();
+
+    const link = query('[data-testid="pronoun-antecedents-link"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/scroll/s1/antecedents');
+  });
+
   it('surfaces the truncation note for a truncated ready study', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'ready', truncated: true })));

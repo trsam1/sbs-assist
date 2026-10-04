@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { PRONOUN_DICTIONARY } from './pronoun-dictionary';
-import { isPronoun, parsePronouns, toHighlightSegments } from './pronoun-parse';
+import {
+  isPronoun,
+  parsePronouns,
+  parsePronounOccurrences,
+  toHighlightSegments,
+} from './pronoun-parse';
 
 const DICTIONARY = [...PRONOUN_DICTIONARY];
 
@@ -175,6 +180,94 @@ describe('toHighlightSegments', () => {
             if (seg.kind === 'pronoun') {
               expect(PRONOUN_DICTIONARY.has(seg.value.toLowerCase())).toBe(true);
             }
+          }
+        }),
+      );
+    });
+  });
+});
+
+describe('parsePronounOccurrences', () => {
+  it('returns an empty list for empty and whitespace-only input', () => {
+    expect(parsePronounOccurrences('')).toEqual([]);
+    expect(parsePronounOccurrences('   \n\t  ')).toEqual([]);
+  });
+
+  it('returns one entry per in-text appearance in reading order, with offsets and casing', () => {
+    // "He saw him. HE left." → he@0, him@7, HE@12
+    expect(parsePronounOccurrences('He saw him. HE left.')).toEqual([
+      { word: 'he', token: 'He', start: 0, occurrence: 0 },
+      { word: 'him', token: 'him', start: 7, occurrence: 1 },
+      { word: 'he', token: 'HE', start: 12, occurrence: 2 },
+    ]);
+  });
+
+  it('is deterministic: the same text yields the same ordered list', () => {
+    const text = 'They told them that she saw him and he saw her.';
+    expect(parsePronounOccurrences(text)).toEqual(parsePronounOccurrences(text));
+  });
+
+  it('splits on apostrophes and keeps each matched letter-run as its own occurrence', () => {
+    // "it's" → it@0; "we're" → we; apostrophe is a separator.
+    const result = parsePronounOccurrences("it's we're");
+    expect(result.map((o) => o.word)).toEqual(['it', 'we']);
+    expect(result[0].start).toBe(0);
+  });
+
+  it('each start indexes the first character of a letter-run that isPronoun accepts', () => {
+    const text = 'with him, within her';
+    for (const occ of parsePronounOccurrences(text)) {
+      // the run starting at `start` lower-cases to `word`
+      const run = text.slice(occ.start).match(/^[A-Za-z]+/);
+      expect(run).not.toBeNull();
+      expect(run?.[0].toLowerCase()).toBe(occ.word);
+      expect(isPronoun(run?.[0] ?? '')).toBe(true);
+    }
+  });
+
+  describe('property-based', () => {
+    it('occurrence is the 0-based reading-order ordinal and start is strictly increasing', () => {
+      fc.assert(
+        fc.property(fc.string(), (text) => {
+          const list = parsePronounOccurrences(text);
+          list.forEach((occ, i) => expect(occ.occurrence).toBe(i));
+          for (let i = 1; i < list.length; i++) {
+            expect(list[i].start).toBeGreaterThan(list[i - 1].start);
+          }
+        }),
+      );
+    });
+
+    it('grouping by word and counting equals parsePronouns (same words, same counts)', () => {
+      const sampleText = fc.oneof(
+        fc.string(),
+        fc.constantFrom(
+          'He saw them, and they saw him.',
+          "it's we're its'",
+          'She told HER that THEY were with us.',
+          'with within without',
+        ),
+      );
+      fc.assert(
+        fc.property(sampleText, (text) => {
+          const counts = new Map<string, number>();
+          for (const occ of parsePronounOccurrences(text)) {
+            expect(PRONOUN_DICTIONARY.has(occ.word)).toBe(true);
+            counts.set(occ.word, (counts.get(occ.word) ?? 0) + 1);
+          }
+          const grouped = [...counts.entries()]
+            .map(([word, count]) => ({ word, count }))
+            .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word));
+          expect(grouped).toEqual(parsePronouns(text));
+        }),
+      );
+    });
+
+    it('never throws and every token lower-cases to its word', () => {
+      fc.assert(
+        fc.property(fc.string(), (text) => {
+          for (const occ of parsePronounOccurrences(text)) {
+            expect(occ.token.toLowerCase()).toBe(occ.word);
           }
         }),
       );

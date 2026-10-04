@@ -132,6 +132,23 @@ describe.each(['prod', 'dev'] as const)('WordStudyToolStack (%s) — shared', (s
     expect(scrollMethods.length).toBeGreaterThanOrEqual(4);
   });
 
+  it('grants AntecedentStudy read/write on only the AntecedentStudies table', () => {
+    // Find the IAM policy whose statements reference an AntecedentStudies table ARN.
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const matching = policies.filter((p) => {
+      const doc = JSON.stringify(p.Properties?.['PolicyDocument']);
+      return doc.includes('AntecedentStudies');
+    });
+    expect(matching.length).toBeGreaterThan(0);
+    for (const policy of matching) {
+      const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
+      // Least privilege: this policy's DynamoDB grants never reach another study table.
+      expect(doc).not.toContain('ScrollStudies');
+      expect(doc).not.toContain('BookStudies');
+      expect(doc).not.toContain('WordStudies');
+    }
+  });
+
   it('writes config.json and serves the shell with no-cache, invalidating /*', () => {
     t.hasResourceProperties('Custom::CDKBucketDeployment', {
       SystemMetadata: { 'cache-control': 'no-cache' },
@@ -207,8 +224,48 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(7);
+    expect(groups).toHaveLength(8);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
+  });
+
+  it('adds an additive AntecedentStudies table (on-demand, AWS-managed, PK/SK, no GSI, no PITR)', () => {
+    const table = tableByName(t, 'AntecedentStudies');
+    expect(table.Properties?.['KeySchema']).toEqual([
+      { AttributeName: 'PK', KeyType: 'HASH' },
+      { AttributeName: 'SK', KeyType: 'RANGE' },
+    ]);
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.Properties?.['SSESpecification']).toEqual({ SSEEnabled: true });
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    expect(table.Properties?.['PointInTimeRecoverySpecification']).toBeUndefined();
+    expect(table.DeletionPolicy).toBe('Retain');
+  });
+
+  it('runs AntecedentStudy on Node 22 with its own log group and table env', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'AntecedentStudy',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({ ANTECEDENT_STUDIES_TABLE_NAME: Match.anyValue() }),
+      },
+    });
+  });
+
+  it('authorizes GET and PUT under scroll-studies/{scrollStudyId}/antecedents', () => {
+    const antecedentsResource = Object.entries(
+      resourcesOfType(t, 'AWS::ApiGateway::Resource'),
+    ).find(([, r]) => r.Properties?.['PathPart'] === 'antecedents');
+    expect(antecedentsResource, 'antecedents resource').toBeDefined();
+    const resourceId = antecedentsResource![0];
+
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    const httpMethods = methods.map((m) => m.Properties?.['HttpMethod']).sort();
+    expect(httpMethods).toEqual(['GET', 'PUT']);
   });
 
   it('adds an additive BookStudies table (on-demand, AWS-managed, GSI1, no PITR)', () => {
@@ -339,11 +396,19 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(7);
+    expect(groups).toHaveLength(8);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
     }
+  });
+
+  it('creates an AntecedentStudies-dev table and AntecedentStudy-dev function', () => {
+    const table = tableByName(t, 'AntecedentStudies-dev');
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.DeletionPolicy).toBe('Delete');
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'AntecedentStudy-dev' });
   });
 
   it('creates a BookStudies-dev table and BookStudyCRUD-dev function', () => {

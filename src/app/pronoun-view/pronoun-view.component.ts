@@ -29,6 +29,16 @@ type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
               </div>
             }
 
+            <p class="mb-4">
+              <a
+                [routerLink]="['/scroll', scrollStudyId, 'antecedents']"
+                class="button is-link is-light is-small"
+                data-testid="pronoun-antecedents-link"
+              >
+                Assign antecedents (Step 6)
+              </a>
+            </p>
+
             @if (pronouns().length === 0) {
               <div class="box" role="status" data-testid="pronoun-empty">
                 No pronouns found in this scroll.
