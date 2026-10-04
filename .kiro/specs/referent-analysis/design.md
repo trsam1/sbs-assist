@@ -69,6 +69,7 @@ sequenceDiagram
     DB-->>BFn: ok
     BFn-->>BSS: { bookStudyId }
     BSS-->>BSD: id
+    Note over BSD: set bookStudy.updatedAt = new Date().toISOString() (display)
     BSD-->>U: "Referents saved"
 ```
 
@@ -106,9 +107,23 @@ Behaviour:
   student's list on a typo fix — a usability trap the shape does not force on us.)
 - **Remove**: `removeReferent(index)` filters the entry out into a new array.
 - **Save**: `saveReferents()` sets `saveState='saving'` and calls `BookStudyService.save(...)` with
-  the current `bookStudy()` fields plus `referents()`; on success sets `saved` and updates the
-  `bookStudy` signal's `updatedAt` from the reloaded/returned value; on error sets `error` and keeps
-  the working list intact so the student can retry (Requirement 3 criterion 6).
+  the current `bookStudy()` fields plus `referents()`. The `POST /books` response is the existing
+  `{ bookStudyId }` only — it carries **no** `createdAt`/`updatedAt` — so on success the component
+  does **not** try to read a timestamp off the response. Instead it sets `saveState='saved'` and
+  updates the `bookStudy` signal's `updatedAt` to a client-generated `new Date().toISOString()`
+  (via an immutable `update()` producing a new `BookStudy`), so the detail timestamps block
+  (`data-testid="detail-timestamps"`, which renders `bs.updatedAt | date`) reflects the save
+  without a reload. This is a display convenience; the **authoritative** `updatedAt` is the one the
+  Lambda writes (`updatedAt: now`), and it will match on the next real `get(id)` (e.g. a page
+  reload). The client value may differ from the server's by milliseconds, which is acceptable for a
+  "medium"-granularity display. On error it sets `saveState='error'` and keeps the working list
+  intact so the student can retry (Requirement 3 criterion 6).
+
+  (Alternative considered: re-issue `get(id)` after a successful POST and set `bookStudy` from the
+  returned authoritative record — one extra GET per save. Rejected for this increment: it adds a
+  round-trip and a second failure mode on the save path purely to refresh a display timestamp that
+  a reload already reconciles. The client-set `updatedAt` keeps the save path a single request while
+  still keeping the displayed timestamp honest to the second.)
 
 `data-testid`s are namespaced to this section: `referents-section`, `referent-row`,
 `referent-phrase`, `referent-refersto`, `referent-notes`, `referent-scrollref`,
@@ -160,7 +175,11 @@ record with no `referents` attribute loads as `[]` (Requirement 3 criterion 4). 
 coerces each entry's four fields to strings defaulting to `''` (mirroring how `toBookStudy` already
 defaults `title`/`notes` to `''`), so the in-app shape is uniform regardless of what the record
 holds. `save` POSTs `{ id, book, title, notes, referents }` to `/books`; omitting `id` creates,
-including it updates.
+including it updates. It returns `Observable<string>` (the `bookStudyId`), consistent with
+`create`; the response body is the existing `{ bookStudyId }` and carries **no**
+`createdAt`/`updatedAt`. The component therefore does not read a timestamp off the save response —
+it sets `updatedAt` client-side on success (see the detail component's **Save** behaviour) and the
+server-written `updatedAt` reconciles on the next `get(id)`.
 
 **Why reuse `POST /books` rather than add `PATCH`/`PUT`.** The shared CORS helper
 (`infra/lambda/shared/cors.ts`) advertises `Access-Control-Allow-Methods: GET,POST,DELETE,OPTIONS`.
@@ -307,7 +326,11 @@ and uses its stored `createdAt`, falling back to `now` only when no such record 
 The frontend's `save` signature deliberately omits `createdAt`, so the server read-before-write —
 not a client echo — is the single mechanism that keeps "createdAt is preserved across updates while
 `updatedAt` advances" true (Requirement 3 criterion 1). This differs from `study-crud`, where the
-word-study client echoes `createdAt`; here the server owns it unconditionally.
+word-study client echoes `createdAt`; here the server owns it unconditionally. The **authoritative**
+`updatedAt` is likewise owned by the Lambda (`updatedAt: now` on every write); the client's
+post-save `new Date().toISOString()` is a **display-only** optimistic update that keeps the detail
+timestamp current without an extra round-trip and is reconciled to the server value on the next
+`get(id)` (e.g. a reload). The persisted record never takes `updatedAt` from the client.
 
 ## Testing strategy
 
@@ -348,9 +371,13 @@ SDK — never hitting AWS; `infra/test/setup-no-aws.ts` points unmocked calls at
   blanks a required field is rejected with the inline message and the row keeps its prior value.
 - Save calls `BookStudyService.save` with the current fields plus `referents()`; the `saving`→`saved`
   path renders a confirmation; a save error keeps the working list and shows the error (Req 3
-  criterion 6). A regression assertion confirms the detail page issues exactly the `get` on load and
-  the `save` on save (no new/unexpected service dependency), and that the existing load states
-  (`loading`/`notfound`/`error`) are unchanged.
+  criterion 6). On a successful save the component advances the displayed `updatedAt`: a test records
+  the `bookStudy().updatedAt` shown before save, stubs `save` to return an id, and asserts the
+  rendered `detail-timestamps` "Updated" value moves to a newer timestamp than the pre-save value
+  (ties Requirement 3 criterion 1 to an observable UI change without a reload). A regression
+  assertion confirms the detail page issues exactly the `get` on load and the `save` on save (no
+  new/unexpected service dependency, and in particular **no** extra `get` after save), and that the
+  existing load states (`loading`/`notfound`/`error`) are unchanged.
 
 **CDK / infra:** no change and nothing new to assert — no construct, route, table, or Lambda is
 added, so the existing `infra/test/` suite (including the log-group count and `PROD_LOGICAL_IDS`
@@ -382,6 +409,12 @@ per-stage retention assertions already cover it; no new count moves.
   place per row, so a typo fix keeps the entry's position and never reorders the list. The cost is a
   slightly larger component surface and a per-row required-field re-check; accepted because it avoids
   the silent-reorder trap of a read-only-then-remove-and-re-add model.
+- **Displayed `updatedAt` is a client estimate until the next load.** Because the save path sets the
+  shown `updatedAt` to a client `new Date().toISOString()` rather than re-reading the server record,
+  the displayed value can differ from the stored one by a few milliseconds (clock skew / round-trip
+  latency). Accepted: the detail page renders at `medium` granularity, so the skew is invisible, and
+  the authoritative server value reconciles on the next `get(id)`. The alternative (a post-save
+  re-GET) was rejected to keep the save path a single request (see the **Save** behaviour).
 
 ## Out of scope
 
@@ -396,8 +429,30 @@ per-stage retention assertions already cover it; no new count moves.
 
 ## Review responses
 
-Responses to the design review (`design-review.json`, verdict CHANGES_REQUESTED). All five findings
-are addressed; none are backlogged or ignored.
+### Round 2 (current)
+
+Responses to the latest design review (`design-review.json`, verdict CHANGES_REQUESTED — one MEDIUM
+plus a related NIT). Both are addressed; neither is backlogged or ignored.
+
+1. **MEDIUM — save success cannot read `updatedAt` from the `{ bookStudyId }` POST response; the
+   displayed timestamp goes stale (addressed, option b).** The design no longer claims the component
+   reads `updatedAt` from a "reloaded/returned value". The detail component's **Save** behaviour now
+   states that on success it sets the `bookStudy` signal's `updatedAt` to a client
+   `new Date().toISOString()` (a display-only optimistic update, reconciled to the server value on
+   the next `get(id)`), so `data-testid="detail-timestamps"` advances without a reload and
+   Requirement 3 criterion 1 is verifiable from the UI. The sequence diagram, the "Invariant
+   ownership" paragraph, a new Risks bullet ("Displayed `updatedAt` is a client estimate…"), and a
+   new component test (the shown "Updated" value moves to a newer timestamp on save, with **no**
+   extra `get` after save) all reflect this. The re-GET alternative is stated and explicitly
+   rejected to keep the save path a single request.
+
+2. **NIT — `save()` return type exposes only the id (addressed).** The `BookStudyService` section
+   now states `save` returns `Observable<string>` (the `bookStudyId`) consistent with `create`, that
+   the response body is `{ bookStudyId }` with no `createdAt`/`updatedAt`, and that the component
+   therefore does not read a timestamp off it — keeping it consistent with finding 1's option (b).
+   No signature change is needed.
+
+### Round 1
 
 1. **HIGH — `createdAt` preservation not guaranteed (addressed).** The upsert no longer takes
    `createdAt` from the body. On the update path (`input.id` present) `saveBookStudy` now

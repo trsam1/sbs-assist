@@ -114,8 +114,13 @@ need.
 
 ### Acceptance Criteria
 1. WHEN the student saves the referent section THEN the system SHALL persist the full referent list
-   onto the Book Study record, scoped to the authenticated Cognito user, and SHALL update the
-   study's `updatedAt` timestamp while preserving its `createdAt`.
+   onto the Book Study record, scoped to the authenticated Cognito user, and the server SHALL set the
+   study's `updatedAt` to the save time while preserving its `createdAt`.
+1a. WHEN a save succeeds THEN the detail page's displayed "Updated" timestamp SHALL advance to a time
+   no earlier than the value shown before the save, without requiring a page reload (the client sets
+   the displayed `updatedAt` on success; the authoritative server value reconciles on the next load).
+   The POST response body is `{ bookStudyId }` only and the client SHALL NOT depend on it carrying a
+   timestamp.
 2. WHEN the student re-opens a Book Study THEN the system SHALL display its persisted referent
    entries exactly as saved (phrase, refers-to, notes, scroll-text reference, and order).
 3. WHEN the student removes a referent entry and saves THEN that entry SHALL no longer be present on
