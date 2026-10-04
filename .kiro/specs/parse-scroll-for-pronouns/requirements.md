@@ -36,6 +36,8 @@ Assumptions (flagged for the design review; each is the lowest-risk reading of t
   grammatical parser; a word is a pronoun iff its lower-cased form is in the dictionary.
 - **A3 — matching is whole-word and case-insensitive.** "He" and "he" are the same pronoun;
   "the" is never matched inside "there". Punctuation adjacent to a word does not block a match.
+  An apostrophe is a token separator: a contraction splits into its letter-runs and each run is
+  matched independently (so "it's" yields a match for "it"; "we're" yields a match for "we").
 - **A4 — this increment lists and (optionally) highlights only.** It does not let the student
   record an antecedent/referent/audience/speaker per occurrence, and it does not persist any new
   record. The parse runs on demand from the already-persisted scroll text.
@@ -56,22 +58,28 @@ uploaded, so that I have a complete worklist of pronouns to identify antecedents
    form is a member of the fixed pronoun dictionary (the Step 6 set in assumption A2).
 3. Matching SHALL be case-insensitive and whole-word: a dictionary pronoun SHALL match only a
    full token, never a substring of a longer word (e.g. "it" SHALL NOT match inside "with").
-4. WHEN the scroll text contains no pronoun-dictionary words THEN the system SHALL display an
+4. An apostrophe SHALL act as a token separator: a token containing an apostrophe SHALL be split
+   into its constituent letter-runs and each run SHALL be matched independently against the
+   dictionary (e.g. "it's" SHALL yield a match for "it", "we're" SHALL yield a match for "we", and
+   "its'" SHALL yield a match for "its").
+5. WHEN the scroll text contains no pronoun-dictionary words THEN the system SHALL display an
    empty-state message ("No pronouns found in this scroll.") rather than an error.
-5. WHEN the referenced Scroll Study status is `uploading` or `extracting` THEN the system SHALL
-   show a non-blocking "the scroll text is still being prepared" message and SHALL NOT attempt to
+6. WHEN the referenced Scroll Study status is `uploading` or `extracting` THEN the system SHALL
+   show a non-blocking "the scroll text is still being prepared" message with a link back to the
+   scroll view (`/scroll/:scrollStudyId`, which polls to completion) and SHALL NOT attempt to
    parse.
-6. WHEN the referenced Scroll Study status is `failed`, or the study does not exist or does not
+7. WHEN the referenced Scroll Study status is `failed`, or the study does not exist or does not
    belong to the user (API returns 404) THEN the system SHALL show an explanatory message and a
-   link back, and SHALL NOT attempt to parse.
+   link back to the scroll list (`/scrolls`), and SHALL NOT attempt to parse.
 
 ### Correctness Properties
 - Property: `isPronoun(token)` is pure and returns `true` for every member of the dictionary in
   any letter case and surrounded by punctuation, and `false` for any token whose stripped,
   lower-cased form is not in the dictionary.
 - Property: For any input text, `parsePronouns(text)` returns one entry per distinct dictionary
-  pronoun present, each with `count >= 1`, and `sum(counts)` equals the number of whole-word
-  pronoun tokens in the text (so no occurrence is double-counted or dropped).
+  pronoun present, each with `count >= 1`, and `sum(counts)` equals the number of letter-run tokens
+  (after apostrophe splitting, per criterion 4) whose lower-cased form is in the dictionary (so no
+  occurrence is double-counted or dropped).
 - Property: `parsePronouns('')` returns an empty list and never throws.
 
 ---
@@ -134,7 +142,7 @@ that I can see each pronoun in its context while I work through the book.
    places the scroll text into any AI prompt.
 4. **Auth and scoping.** The scroll text is fetched through the existing authenticated
    `ScrollStudyService` path; a student can only parse their own scroll (the API returns 404 for a
-   scroll they do not own, handled by Requirement 1 criterion 6).
+   scroll they do not own, handled by Requirement 1 criterion 7).
 5. **Accessibility.** New UI SHALL be keyboard operable and screen-reader labeled, matching the
    ARIA patterns already used (`aria-label`, `aria-live`, `aria-pressed`, `is-sr-only`).
 6. **Determinism / performance.** Parsing a typical single Bible book (the scroll-text spec caps

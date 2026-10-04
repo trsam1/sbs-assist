@@ -89,11 +89,19 @@ component mirroring the existing `scroll-view` component's structure (signal-bas
 - holds a `state` signal (`'loading' | 'ready' | 'preparing' | 'failed' | 'error'`), a `study`
   signal, a `pronouns` signal (`PronounCount[]`), and a `highlight` signal (`boolean`, default
   `false`);
+- distinguishes a *not found* study from a *transient* load failure the way
+  `book-study-detail.component.ts` does — its `getScrollStudy` `error` callback is typed
+  `(err: { status?: number })` and sets `state.set(err?.status === 404 ? 'failed' : 'error')`.
+  (`scroll-view` collapses all load errors into one `error` state, so this 404-branch pattern is
+  copied from `book-study-detail`, not `scroll-view`.) A 404 is a terminal `failed` state; a
+  network/5xx error is a recoverable `error` state with a Retry button that re-issues the GET;
 - on a `ready` study, computes `pronouns` once from `study.scrollText` via `parsePronouns`;
 - renders the pronoun list (Bulma `table` or tag list) with per-pronoun counts and the two totals
   (distinct count, total occurrences), an empty-state box when there are no pronouns, a "still
-  being prepared" notification for `uploading`/`extracting`, a `failed`/`error` notification with a
-  back link to `/scroll/:id`, and a highlight toggle;
+  being prepared" notification for `uploading`/`extracting` with a back link to the scroll view
+  (`/scroll/:scrollStudyId`, which polls to completion — see below), a `failed` notification (study
+  `failed`, or 404) with a back link to the scroll list (`/scrolls`), an `error` notification with
+  a Retry button for a transient load failure, and a highlight toggle;
 - when `highlight()` is on, renders the scroll text from `toHighlightSegments(scrollText)` inside a
   scrollable `box` using the same `white-space: pre-wrap`, bounded `max-height`, `overflow-y: auto`
   styling the `scroll-view` component already uses, so line breaks and wrapping match.
@@ -123,8 +131,12 @@ Nesting the pronoun route under the scroll id keeps the "a scroll's pronouns" re
 and lets the view read the same `scrollStudyId` param. The student reaches it from the existing
 `scroll-view`: a **"Find pronouns (Step 6)"** button is added to `scroll-view`'s `ready` state
 (the one additive change to `scroll-view` — a `routerLink` button in the ready block, guarded so it
-only shows when the text is ready), routing to `scroll/:id/pronouns`. The back link in
-`pronoun-view` returns to `scroll/:id`. **Decision:** no new top-level navbar entry is added for
+only shows when the text is ready), routing to `scroll/:id/pronouns`. Back links in `pronoun-view`
+are state-dependent: the `preparing` state links back to `scroll/:scrollStudyId` (the scroll view,
+which polls `uploading`/`extracting` to completion — `pronoun-view` itself does **not** poll, so the
+student returns here once the scroll is `ready`), while the `failed`/404 state links to `/scrolls`
+(the scroll list), because the specific scroll is unavailable and linking back to `scroll/:id` for a
+404 would simply 404 again. **Decision:** no new top-level navbar entry is added for
 this increment — the pronoun view is reached contextually from a specific scroll, which matches how
 the step actually flows (you parse *a* book's scroll), and avoids a navbar item that would need a
 scroll to be chosen first. A top-level "Pronoun Studies" surface can be added later if the step
@@ -142,17 +154,20 @@ forms, grouped in source comments by the Step 6 reference's categories so the pr
 - **Archaic KJV forms:** thou, thee, thine, thy, ye.
 - **Demonstrative:** this, that, these, those.
 - **Indefinite:** all, another, any, anybody, anyone, anything, each, everybody, everyone,
-  everything, few, many, most, neither, nobody, none, no one, nothing, one, several, some,
-  somebody, someone, something.
+  everything, few, many, most, neither, nobody, none, nothing, one, several, some, somebody,
+  someone, something. (The reference's multi-word indefinite "no one" is **not** stored — see
+  Reciprocal / multi-word, below.)
 - **Intensive / reflexive:** myself, yourself, himself, herself, itself, ourselves, yourselves,
   themselves.
 - **Interrogative / relative:** who, whom, whose, which, what, whoever, whomever, whichever,
   whosever, whatever, that.
-- **Reciprocal:** `each other` and `one another` are two-word forms; **this increment matches
-  single-token pronouns only**, so these multi-word reciprocals and the multi-word indefinite
-  "no one" are matched by their constituent single tokens where applicable and otherwise flagged
-  as a known limitation (see Risks). The dictionary therefore stores single tokens; `no one` is
-  included as a documented edge the single-token matcher cannot catch as a unit.
+- **Reciprocal / multi-word (not stored):** `each other`, `one another`, and the indefinite
+  `no one` are two-word forms. **This increment matches single-token pronouns only**, and the
+  dictionary is a `ReadonlySet<string>` keyed by single lower-cased tokens, so a multi-word string
+  could never match the single-token matcher. These multi-word forms are therefore **deliberately
+  excluded from the set** (storing them would be dead, misleading data); they are recorded as a
+  documented limitation in Risks instead. Their constituent single tokens that are themselves
+  dictionary members ("one", "another", "other" is not a pronoun) match on their own as usual.
 - **Quantifier:** all, both, some, much, any, many, little, half (numerals like "three" from the
   reference are excluded — they are open-ended and would produce noise; this is a deliberate
   narrowing noted in Risks).
@@ -187,12 +202,15 @@ export function parsePronouns(text: string): PronounCount[];
 export function toHighlightSegments(text: string): Segment[];
 ```
 
-**Tokenisation.** A single regex walks the text splitting on word boundaries so punctuation and
-whitespace are preserved as `text` segments and word runs are tested against the dictionary. A
-"word" token is a maximal run of letters (including the apostrophe only where needed — pronouns in
-the dictionary contain none, so a plain `[A-Za-z]+` run with surrounding punctuation stripped is
-sufficient; apostrophe-containing forms like "it's" tokenise as `it` + `'s`, and `it` matches,
-which is the intended behaviour). Matching lower-cases the token and tests set membership.
+**Tokenisation.** A single regex walks the text, splitting on anything that is not an ASCII letter
+so that punctuation, whitespace, digits, and apostrophes are all preserved as `text` segments and
+each maximal `[A-Za-z]+` letter-run is tested against the dictionary. Crucially, the **apostrophe
+is a separator, not a word character** (no dictionary pronoun contains one): a contraction splits
+into its letter-runs and each run is matched independently. So "it's" tokenises as the letter-run
+`it` (matches) plus `s`; "we're" tokenises as `we` (matches) plus `re`; "its'" tokenises as `its`
+(matches). This is the behaviour pinned by Requirement 1 criterion 4, and it is directly
+unit-testable against each of those inputs. Matching lower-cases the letter-run and tests set
+membership.
 `parsePronouns` counts occurrences into a `Map<string, number>` keyed by the canonical lower-cased
 form, then returns entries sorted by `count` descending and `word` ascending (Requirement 2
 criterion 2). `toHighlightSegments` emits the same tokenisation as an ordered `Segment[]`, tagging
@@ -228,18 +246,24 @@ lists are unaffected. No new CDK context lookup is introduced, so `cdk.context.j
 
 ## Error handling
 
-| Operation | Failure condition | Recoverable? | Caller receives | Logged |
-|---|---|---|---|---|
-| `getScrollStudy(id)` | scroll not found / not owned (404) | n/a (wrong id) | `failed` state: "This scroll could not be found" + back link to `/scrolls` | no (expected) |
-| `getScrollStudy(id)` | network / 5xx | yes | `error` state with a Retry button (re-issues the GET) | browser console only |
-| parse | study status `uploading`/`extracting` | yes (poll/return later) | `preparing` notification; no parse attempted (Req 1 criterion 5) | no |
-| parse | study status `failed` | no (re-upload needed) | `failed` notification with the scroll's `failureReason` and back link | no |
-| `parsePronouns` | empty / whitespace-only text | n/a | empty-state box "No pronouns found in this scroll." | no |
-| `parsePronouns` / `toHighlightSegments` | any text input | n/a (never throws) | always returns a value (possibly empty) | no |
+The 404-vs-transient distinction is made in the `getScrollStudy` subscription's `error` callback,
+typed `(err: { status?: number })`, which sets `state.set(err?.status === 404 ? 'failed' : 'error')`
+— the same branch `book-study-detail.component.ts` already uses (`scroll-view` does not distinguish
+them). The `failed` state is terminal with a back link to `/scrolls`; the `error` state is
+recoverable with a Retry button.
+
+| Operation | Failure condition | How detected | Recoverable? | Caller receives | Logged |
+|---|---|---|---|---|---|
+| `getScrollStudy(id)` | scroll not found / not owned (404) | `err?.status === 404` → `failed` | n/a (wrong id) | `failed` state: "This scroll could not be found" + back link to `/scrolls` | no (expected) |
+| `getScrollStudy(id)` | network / 5xx | `err?.status !== 404` → `error` | yes | `error` state with a Retry button (re-issues the GET) | browser console only |
+| parse | study status `uploading`/`extracting` | `study.status` | yes (poll/return later) | `preparing` notification with a back link to `/scroll/:scrollStudyId` (the scroll view polls to completion; `pronoun-view` does not poll); no parse attempted (Req 1 criterion 6) | no |
+| parse | study status `failed` | `study.status` | no (re-upload needed) | `failed` notification with the scroll's `failureReason` and back link to `/scrolls` (Req 1 criterion 7) | no |
+| `parsePronouns` | empty / whitespace-only text | — | n/a | empty-state box "No pronouns found in this scroll." | no |
+| `parsePronouns` / `toHighlightSegments` | any text input | — | n/a (never throws) | always returns a value (possibly empty) | no |
 
 **Validation rules (external inputs).**
 - `scrollStudyId` (route param): required; passed straight to `getScrollStudy`. A missing/empty id
-  or an id the user does not own yields a 404 → `failed` state (Requirement 1 criterion 6). No
+  or an id the user does not own yields a 404 → `failed` state (Requirement 1 criterion 7). No
   client-side format validation is needed beyond non-empty, matching how `scroll-view` treats the
   param today.
 - `scrollText` (from the record): may be any string, including empty, whitespace-only, truncated
@@ -260,14 +284,19 @@ cannot parse another user's scroll. The pronoun view adds no new trust boundary.
 All tests run under the existing frontend harness (Angular + vitest); nothing in this feature
 touches AWS, so no SDK mocking or `setup-no-aws` concern applies.
 
-Unit — `pronoun-parse.ts` (pure, the bulk of the coverage; mirrors the property-style tests used
-for `validateStrongsNumber` and `english-definition.normalize`):
-- `isPronoun`: property test over the dictionary — every member matches in upper/lower/mixed case
-  and surrounded by punctuation (`"He,"`, `"(it)"`); non-members (`"the"`, `"there"`, `""`) do not.
+Unit — `pronoun-parse.ts` (pure, the bulk of the coverage; the in-package pure-helper precedents
+are `english-definition.normalize.spec.ts` and `bible-books.spec.ts` — the latter already uses
+`fast-check` with `fc.property`, which these parser tests follow for the property-style cases;
+`validateStrongsNumber` is the analogous pattern in the infra package, not the frontend):
+- `isPronoun`: property test (`fast-check`) over the dictionary — every member matches in
+  upper/lower/mixed case and surrounded by punctuation (`"He,"`, `"(it)"`); non-members (`"the"`,
+  `"there"`, `""`) do not.
 - `parsePronouns`: whole-word matching (no substring hits — "it" not matched in "with", "with"
-  itself not a pronoun); case-insensitive counting ("He"/"he" collapse to one entry); the sort
-  order (count desc, then word asc); empty and whitespace-only input → `[]`; the count-conservation
-  property (`sum(counts)` equals the number of whole-word pronoun tokens); never throws.
+  itself not a pronoun); the apostrophe-split rule ("it's" → `it` matches, "we're" → `we` matches,
+  "its'" → `its` matches; Req 1 criterion 4); case-insensitive counting ("He"/"he" collapse to one
+  entry); the sort order (count desc, then word asc); empty and whitespace-only input → `[]`; the
+  count-conservation property (`sum(counts)` equals the number of matched letter-run tokens);
+  never throws.
 - `toHighlightSegments`: the concatenation property (joined segment values === input) over varied
   inputs including HTML-significant characters, newlines, and leading/trailing punctuation; every
   `pronoun` segment's lower-cased value is in the dictionary; empty input → `[]`.
@@ -302,9 +331,12 @@ Lambda, so the existing `infra/test/` suite (including the count-based log-group
   Scope (no type/POS classification). Numerals-as-quantifiers ("three", etc.) are deliberately
   excluded to limit noise.
 - **Multi-word pronouns.** "each other", "one another", and "no one" are multi-token forms the
-  single-token matcher cannot catch as units; their constituent single tokens ("one", "other",
-  "another") are matched instead. This is a documented limitation of this increment; a two-token
-  pass could be added later without changing the data model.
+  single-token matcher cannot catch as units. They are **deliberately excluded from the dictionary**
+  (a multi-word string could never match a set keyed by single tokens, so storing it would be dead
+  data); instead their constituent single tokens that are themselves dictionary members ("one",
+  "another"; "each", "no", "other" are not pronoun members) match on their own. This is a documented
+  limitation of this increment; a two-token pass could be added later without changing the data
+  model.
 - **Archaic / translation variance.** The dictionary includes the KJV archaic forms the reference
   lists (thou/thee/thine/thy/ye) but a student's uploaded translation may use spellings or forms
   outside the set; unmatched forms simply do not appear in the list. The dictionary is a plain
@@ -328,3 +360,37 @@ Lambda, so the existing `infra/test/` suite (including the count-based log-group
   place; cross-navigation is deferred).
 - A top-level navbar "Pronoun Studies" surface or any new persisted entity/API/table.
 - Non-English scroll text, and any change to the Scroll Study, Word Study, or Book Study tools.
+
+## Responses to design review findings
+
+Review verdict: CHANGES_REQUESTED (4 MEDIUM, 2 NIT). All six are addressed.
+
+1. **MEDIUM — 404-vs-5xx distinction mechanism unspecified.** *Addressed.* The Error-handling
+   section now states the mechanism explicitly: the `getScrollStudy` `error` callback is typed
+   `(err: { status?: number })` and sets `state.set(err?.status === 404 ? 'failed' : 'error')`,
+   citing `book-study-detail.component.ts` as the prior art (and noting that `scroll-view` does not
+   make this distinction). The table gained a "How detected" column making 404→`failed` and
+   non-404→`error`+Retry explicit, and the component bullets describe the same branch.
+2. **MEDIUM — conflicting back-link target for failed/404.** *Addressed.* One rule is now stated in
+   both docs: the `failed`/404 state links to `/scrolls` (the scroll list) because the specific
+   scroll is unavailable; the `preparing` state links back to `/scroll/:scrollStudyId`. Requirements
+   split the old criterion 6 into criterion 6 (preparing → scroll view) and criterion 7
+   (failed/404 → `/scrolls`), both testable, and the design body, component bullets, and table all
+   match.
+3. **MEDIUM — apostrophe tokenisation not a testable criterion.** *Addressed.* Requirement 1 gained
+   criterion 4: an apostrophe splits a token and each letter-run is matched independently
+   ("it's"→`it`, "we're"→`we`, "its'"→`its`). Assumption A3, the Tokenisation paragraph, the
+   count-conservation property, and the unit-test list all pin the same rule.
+4. **MEDIUM — "no one" is self-contradictory dead data.** *Addressed.* "no one" and all multi-word
+   forms are removed from the dictionary set (which now contains single tokens exclusively). The
+   indefinite bullet notes the exclusion, the Reciprocal/multi-word bullet documents it, and the
+   Risks "Multi-word pronouns" entry carries the limitation.
+5. **NIT — `validateStrongsNumber` cited as a frontend model.** *Addressed.* The testing strategy
+   now names the correct in-package precedents (`english-definition.normalize.spec.ts`,
+   `bible-books.spec.ts` with `fast-check`) and relabels `validateStrongsNumber` as the infra
+   analogue.
+6. **NIT — "preparing" state refresh behaviour unstated.** *Addressed.* The design now states that
+   `pronoun-view` does not poll; the `preparing` state links back to `/scroll/:scrollStudyId`, whose
+   scroll view polls `uploading`/`extracting` to completion, and the student returns once the scroll
+   is `ready`. Captured in the routing paragraph, the component bullets, the table, and Requirement 1
+   criterion 6.
