@@ -33,7 +33,8 @@ mirror the existing `scroll-study` / `book-study-crud` constructs exactly.
 graph TD
     subgraph Frontend ["Frontend (Angular 21 + Bulma)"]
         AV[antecedent-view Component<br/>worklist + per-pronoun dropdown]
-        PP[pronoun-parse.ts (from #20)<br/>parsePronouns + dictionary]
+        PP[pronoun-parse.ts #20<br/>parsePronouns]
+        PD[pronoun-dictionary.ts #20<br/>PRONOUN_DICTIONARY set]
         AS[antecedent-suggest.ts<br/>pure candidate extractor]
         SS[ScrollStudyService<br/>existing]
         ASVC[AntecedentStudyService<br/>new CRUD client]
@@ -50,6 +51,8 @@ graph TD
     AV -->|getScrollStudy id| SS --> APIGW --> ScrollFn --> DDBS
     AV -->|scrollText| PP
     AV -->|scrollText| AS
+    AS -->|exclude pronouns| PD
+    PP -->|uses| PD
     AV -->|load/save| ASVC --> APIGW --> AntFn --> DDBA
 ```
 
@@ -131,7 +134,8 @@ components (`ChangeDetectionStrategy.OnPush`, `ActivatedRoute` param, signal-bas
   `book-study-detail.component.ts` uses. 404/`failed` is terminal (back link to `/scrolls`); a 5xx is
   recoverable with a Retry button;
 - on a `ready` study, computes the worklist once via `parsePronouns(study.scrollText)` (imported from
-  #20's `src/app/pronoun-parse.ts`), computes `options` via `suggestAntecedents(study.scrollText)`
+  #20's `src/app/pronoun-parse.ts`; the dictionary it uses lives in #20's
+  `src/app/pronoun-dictionary.ts`), computes `options` via `suggestAntecedents(study.scrollText)`
   (new helper, below), then calls `AntecedentStudyService.get(scrollStudyId)` to pre-fill each row's
   `antecedent` from any saved record and to seed `options` with saved antecedents;
 - renders a Bulma `table`/list, one row per worklist unit, each with the pronoun word, its count, and
@@ -159,8 +163,9 @@ input.
 `pronoun-view`, or (b) a **new, separate `antecedent-view`** on its own route. **Decision: (b)** —
 #20 is a read-only parse/worklist surface that persists nothing, while this feature adds editing and
 persistence; keeping them separate avoids complicating #20's component and specs (the same reasoning
-#20 used to stay separate from `scroll-view`). `antecedent-view` *reuses* #20's pure
-`parsePronouns`/dictionary and the scroll service, but does not modify #20's component.
+#20 used to stay separate from `scroll-view`). `antecedent-view` *reuses* #20's pure `parsePronouns`
+(`pronoun-parse.ts`) and `PRONOUN_DICTIONARY` (`pronoun-dictionary.ts`) and the scroll service, but
+does not modify #20's component.
 
 ### Routing and navigation
 
@@ -174,9 +179,34 @@ scroll/:scrollStudyId/antecedents  →  antecedent-view
 
 The student reaches it from #20's pronoun view (a **"Assign antecedents (Step 6)"** link added to
 the pronoun view's `ready` state — the one additive change to that component) and/or directly from
-the scroll view; the exact entry link placement follows whatever #20 ships, and if #20 is not yet
-merged the link is added when both land. No new top-level navbar entry is added (the view is reached
-contextually from a specific scroll), matching #20's navigation decision.
+the scroll view; the exact entry link placement follows whatever #20 ships. No new top-level navbar
+entry is added (the view is reached contextually from a specific scroll), matching #20's navigation
+decision.
+
+### Build ordering rule: this feature MUST be built on a merged #20
+
+The frontend half of this feature (`antecedent-view`, `antecedent-suggest.ts`) imports two symbols
+that **only exist once #20 is merged**: `parsePronouns` from `src/app/pronoun-parse.ts` and the
+pronoun-dictionary set from `src/app/pronoun-dictionary.ts`. Those files do not exist in `src/`
+today (`#20` is still only a spec at `.kiro/specs/parse-scroll-for-pronouns/`). This is a **hard
+build-ordering rule, not a sequencing note**:
+
+- **This issue (#23) MUST be built on top of a merged #20.** If #20 is not merged when the build
+  phase starts, the build agent SHALL stop and mark the issue `agent-blocked` (it cannot import a
+  file that does not exist, and the frontend acceptance criteria below cannot be satisfied or
+  tested). It MUST NOT re-create #20's parser or dictionary to work around the gap — doing so would
+  violate the single-source-of-truth invariant (one pronoun definition in the code).
+- **Which criteria are blocked until #20 lands.** Requirement 1 criteria 1, 2, 3, 5 (worklist
+  derivation and empty-state depend on `parsePronouns`), all of Requirement 2 (suggestion depends on
+  the pronoun dictionary), all of Requirement 3 (the per-pronoun dropdown is per worklist row), and
+  Requirement 4 criteria 1, 3, 5, 6 (the saved set is keyed to worklist units). These are
+  **unverifiable at build time** without the merged #20 parser and dictionary.
+- **What is independent of #20.** The backend half — the `AntecedentStudies` table, the
+  `AntecedentStudyFn` Lambda, its API routes, and their CDK/Lambda tests — depends on nothing from
+  #20 and can be built and fully tested in isolation (the Lambda tests pass an `assignments` array
+  directly; they never call `parsePronouns`). If a partial landing is ever desired, the backend can
+  land first, but the **feature is not complete** (and the issue not closable) until the merged #20
+  lets the frontend half build and its criteria be verified.
 
 ### Antecedent suggestion helper (`src/app/antecedent-suggest.ts`)
 
@@ -198,6 +228,23 @@ ascending. This is a deliberately simple, deterministic heuristic — it is *sug
 authoritative parsing; the student edits freely. It never throws; `suggestAntecedents('')` returns
 `[]`.
 
+**Single-source dependency on #20's dictionary (hard coupling).** The "exclude pronoun-dictionary
+words" rule (Requirement 2 criterion 3) MUST consume the **exact same** pronoun set #20 owns — not
+a private copy. `antecedent-suggest.ts` therefore imports it directly from #20's dictionary module:
+
+```typescript
+import { PRONOUN_DICTIONARY } from './pronoun-dictionary';
+// (the single ReadonlySet<string> of lower-cased pronoun forms #20 exports from
+//  src/app/pronoun-dictionary.ts; use whatever exact symbol name #20 ships from that file.)
+```
+
+`suggestAntecedents` lower-cases each candidate token and skips it when
+`PRONOUN_DICTIONARY.has(lowerToken)`. It MUST NOT declare its own pronoun list or re-derive one;
+this preserves the invariant that there is exactly one pronoun definition in the code (shared with
+`parsePronouns`). Because `pronoun-dictionary.ts` does not exist until #20 merges, this helper
+cannot be implemented or tested until then — this is the frontend half of the H1 build-ordering
+rule above.
+
 **Why a heuristic, not AI.** AI suggestion was rejected: it would add a Bedrock call (cost + the
 copyright constraint that AI prompts contain no copyrighted text — the scroll text is the student's
 own, but routing it to Bedrock for this is unnecessary) and non-determinism. The product's "no
@@ -209,21 +256,15 @@ scroll text.
 A new `@Injectable({ providedIn: 'root' })` service mirroring `BookStudyService` /
 `ScrollStudyService` (uses `HttpClient`, `environment.apiUrl`, user scoping via the existing
 `user-id.interceptor`). It maps the DynamoDB record shape to a frontend `AntecedentStudy` the way
-`toBookStudy`/`toScrollStudy` do:
+`toBookStudy`/`toScrollStudy` do.
+
+The frontend domain interfaces `AntecedentStudy` and `AntecedentAssignment` are declared **once**
+in `src/app/models.ts` (beside `BookStudy`/`ScrollStudy`) and **imported** by the service and the
+component — matching the repo convention that `book-study.service.ts` imports `BookStudy` from
+`./models` (they are not re-declared inline in the service). See Data model for their shape.
 
 ```typescript
-export interface AntecedentAssignment {
-  pronounKey: string;   // canonical lower-cased pronoun word (today == the worklist word)
-  antecedent: string;   // trimmed, non-empty
-}
-
-export interface AntecedentStudy {
-  scrollStudyId: string;
-  userId: string;
-  assignments: AntecedentAssignment[];
-  createdAt: string;
-  updatedAt: string;
-}
+import { AntecedentStudy, AntecedentAssignment } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class AntecedentStudyService {
@@ -244,7 +285,45 @@ needed for the MVP — the worksheet always loads by its scroll id:
 
 - `GET /scroll-studies/{scrollStudyId}/antecedents` → return the record or `404` if none saved.
 - `PUT /scroll-studies/{scrollStudyId}/antecedents` → validate the body, upsert the record
-  (preserve `createdAt`, set `updatedAt`), return `200`.
+  (preserve `createdAt`, set `updatedAt`) via the explicit read-before-write below, return `200`.
+
+**`createdAt`-preserving upsert (authoritative mechanism).** Neither `scroll-study` nor
+`book-study-crud` has an update-in-place path today — `book-study-crud` only ever *creates* with
+`createdAt == updatedAt == now`. A naive `PutCommand` of a freshly-built record would therefore
+**overwrite `createdAt` with the current time on every save**, silently violating Requirement 4's
+"`createdAt` preserved across updates" property. The `PUT` handler MUST read before it writes:
+
+```typescript
+async function saveAntecedentStudy(
+  userId: string,
+  scrollStudyId: string,
+  assignments: AntecedentAssignment[], // already validated + empties dropped
+): Promise<void> {
+  const now = new Date().toISOString();
+  const key = { PK: `USER#${userId}`, SK: `ANTECEDENT#${scrollStudyId}` };
+
+  // 1) read the existing item (own partition only)
+  const existing = await docClient.send(new GetCommand({ TableName: tableName, Key: key }));
+  const createdAt = (existing.Item as AntecedentStudyRecord | undefined)?.createdAt ?? now;
+
+  // 2) write, carrying createdAt forward (or now on first save)
+  const record: AntecedentStudyRecord = {
+    ...key,
+    scrollStudyId,
+    userId,
+    assignments,
+    createdAt,          // preserved on update; == now on first create
+    updatedAt: now,     // always advances
+  };
+  await docClient.send(new PutCommand({ TableName: tableName, Item: record }));
+}
+```
+
+The `GetCommand` is scoped to `PK=USER#<sub>`, so a user can only ever read/overwrite their own
+record; there is no cross-user path. This read-before-write is the single authoritative mechanism
+for the `createdAt` invariant (owned by the Lambda — see Invariant ownership) and is covered by a
+Lambda test that issues two `PUT`s and asserts `createdAt` is unchanged while `updatedAt` advances
+(mocked `GetCommand` returning the first-save item on the second call).
 
 Nesting the antecedent routes under the existing `scroll-studies/{scrollStudyId}` resource keeps the
 ownership relationship explicit and reuses the same path param the scroll routes use. The Lambda is a
@@ -295,9 +374,16 @@ interface AntecedentAssignment {
 }
 ```
 
-The shared `AntecedentAssignment`/`AntecedentStudyRecord` interfaces are added to
-`infra/lambda/shared/models.ts` (and the frontend `AntecedentStudy`/`AntecedentAssignment` to
-`src/app/models.ts`), beside the existing `ScrollStudyRecord`/`BookStudyRecord`.
+**Interface homes (one declaration each, no inline duplicates).**
+- Backend: `AntecedentStudyRecord` and the backend `AntecedentAssignment` are added to
+  `infra/lambda/shared/models.ts`, beside the existing `ScrollStudyRecord`/`BookStudyRecord`; the
+  `antecedent-study` Lambda imports them from `../shared/models`.
+- Frontend: `AntecedentStudy` and `AntecedentAssignment` are added to `src/app/models.ts`, beside
+  `BookStudy`/`ScrollStudy`; the `AntecedentStudyService` and `antecedent-view` component import
+  them from `./models`. The service's `get` maps the record to `AntecedentStudy` (dropping the
+  `PK`/`SK`), exactly as `toBookStudy`/`toScrollStudy` do.
+
+Neither interface is declared inline in a service or component file.
 
 ### New API routes (both Cognito-authorized)
 
@@ -334,12 +420,22 @@ record returns `404`. Validation failures on `PUT` return `400` with a specific 
   scroll the `sub` does not own is simply absent → `404` on `GET` and a fresh record on `PUT` keyed
   to this user (a user can only ever write under their own `USER#<sub>` partition, so there is no
   cross-user write).
-- `assignments` (PUT body): must be an array; each element must have a non-empty string `pronounKey`
-  and a `antecedent` string that is trimmed, 1–200 chars after trim. The Lambda **drops** any
-  element whose `antecedent` is empty after trim and **rejects** (400) a body that is not an array
-  or whose elements are malformed (missing/with wrong-typed fields). The 200-char cap is enforced
-  server-side (truncate-or-reject) in addition to the client input cap (Requirement 3 criterion 6),
-  so the client cap is defense-in-depth, not the authority.
+- `assignments` (PUT body): must be an array (an empty array `[]` is valid — see empty-worksheet
+  save below); each element must have a non-empty string `pronounKey` and an `antecedent` string.
+  The Lambda first **trims** each `antecedent`, then **drops** any element whose trimmed `antecedent`
+  is empty (these are unassigned rows, not errors). It **rejects** (400) a body that is not an array,
+  an element with a missing/wrong-typed field, or an element whose trimmed `antecedent` exceeds 200
+  characters — the server **rejects over-length, it does not truncate** (Requirement 3 criterion 6).
+  The client's `maxlength=200` input cap means over-length normally never reaches the server; the
+  server reject is defense-in-depth and the single authority on the 200-char invariant. The two
+  tiers agree on the outcome (reject), so there is no silent truncation anywhere.
+- **Empty-worksheet save (Requirement 4 criterion 5):** a `PUT` whose assignments are all empty
+  after the drop step yields `assignments: []`. The handler still **upserts** a record with
+  `assignments: []` through the same `createdAt`-preserving path above — it does **not** delete the
+  record and does **not** leave a prior non-empty set in place. The operation is idempotent (saving
+  an all-empty worksheet twice is indistinguishable from saving it once). There is no `DELETE` route
+  in this increment. A Lambda test asserts that a `PUT` with all-empty assignments stores
+  `assignments: []` and that a subsequent `GET` returns the empty-assignment record (not a 404).
 - `scrollText` (client-side, from the record): any string including empty/whitespace/HTML-significant
   chars; `parsePronouns` and `suggestAntecedents` tolerate all (empty → empty list), per #20's parse
   contract and Requirement 2.
@@ -347,9 +443,13 @@ record returns `404`. Validation failures on `PUT` return `400` with a specific 
 **Invariant ownership.** User-scoping is owned by the backend exactly as the other CRUD Lambdas own
 it: all reads/writes are under `PK=USER#<sub>`, so a student can only touch their own antecedent
 records; the frontend adds no new trust boundary. The "assignment antecedent is non-empty and ≤200
-chars" invariant is owned by the Lambda `PUT` validation (authoritative), with the client enforcing
-the same for UX. The "a pronoun worklist unit maps to the #20 parse" invariant is owned by reusing
-#20's `parsePronouns`/dictionary unchanged — there is exactly one pronoun definition in the code.
+chars" invariant is owned by the Lambda `PUT` validation (authoritative — it rejects over-length
+with 400, never truncates), with the client `maxlength=200` enforcing the same for UX. The
+"`createdAt` preserved across updates" invariant is owned by the Lambda's read-before-write `PUT`
+(the single mechanism; see the upsert pseudocode above). The "a pronoun worklist unit maps to the
+#20 parse" invariant is owned by reusing #20's `parsePronouns` (`pronoun-parse.ts`) and
+`PRONOUN_DICTIONARY` (`pronoun-dictionary.ts`) unchanged, never a copy — there is exactly one pronoun
+definition in the code.
 
 ## Testing strategy
 
@@ -367,22 +467,29 @@ pre-fills matching rows; selecting an option sets the row antecedent; typing + A
 option (de-duped) and sets it; clearing resets to empty; Save calls `save` with only non-empty
 assignments and reports success; a `save` failure keeps selections editable and shows the error;
 `uploading`/`extracting` → `preparing`; `failed`/404 → `failed`; 5xx → `error` with working Retry;
-empty-text scroll → empty-state with no Save; a stale saved pronoun no longer in the parse is ignored
-on load (Requirement 4 criterion 5); a regression assertion that the view calls only
+empty-text scroll → empty-state with no Save; saving after clearing every selection calls `save`
+with `[]` (empty-worksheet save, R4 criterion 5); a stale saved pronoun no longer in the parse is
+ignored on load (Requirement 4 criterion 6); a regression assertion that the view calls only
 `ScrollStudyService.getScrollStudy` and the two `AntecedentStudyService` methods.
 
 Lambda — `infra/lambda/antecedent-study/index.test.ts` (mocked `DynamoDBDocumentClient`): `GET`
-returns the record / `404` when absent; `PUT` upserts, preserves `createdAt`, advances `updatedAt`,
-drops empty-antecedent elements, rejects a non-array body and over-length/ malformed elements (400);
-missing `sub` → 400; missing path param → 400; unexpected error → 500; CORS headers via the shared
-helper.
+returns the record / `404` when absent; `PUT` upserts; **two sequential `PUT`s preserve `createdAt`
+and advance `updatedAt`** (the second `GetCommand` mock returns the first-save item, asserting
+read-before-write); drops empty-antecedent elements after trim; **a `PUT` with all-empty assignments
+stores `assignments: []` and a following `GET` returns that empty record (not 404)**; **rejects an
+over-length antecedent (>200 chars after trim) with 400 — asserting reject, not a truncated save**;
+rejects a non-array body and malformed elements (400); missing `sub` → 400; missing path param →
+400; unexpected error → 500; CORS headers via the shared helper.
 
-CDK / infra — `infra/test/` gains assertions for the new `AntecedentStudies` table (keys, billing,
-encryption, removal policy per stage), the new `AntecedentStudyFn` (env var, least-privilege grant
-to the new table only, its log group), and the two new authorized routes under
-`scroll-studies/{scrollStudyId}/antecedents`. The existing count-based log-group and
-`PROD_LOGICAL_IDS` assertions are updated additively (new ids added, none renamed), consistent with
-the "add constructs, never rename" rule.
+CDK / infra — `infra/test/word-study-tool-stack.test.ts` gains assertions for the new
+`AntecedentStudies` table (keys, billing, encryption, removal policy per stage), the new
+`AntecedentStudyFn` (env var, least-privilege grant to the new table only, its log group), and the
+two new authorized routes under `scroll-studies/{scrollStudyId}/antecedents`. One existing assertion
+**must** change: the two hardcoded log-group counts `expect(groups).toHaveLength(7)` (lines ~210 and
+~342) become `8`, because the new `AntecedentStudyFn` adds one log group. The `PROD_LOGICAL_IDS`
+array (line ~12) needs **no** edit — it is asserted with `expect(ids).toContain(id)` (a must-contain
+subset check, line ~158), so a new construct id does not have to be added to it, and no existing id
+is renamed. This is consistent with the "add constructs, never rename" rule.
 
 ## Risks
 
@@ -396,16 +503,21 @@ the "add constructs, never rename" rule.
   (sentence starts, place names that are not the intended antecedent). This is accepted because the
   dropdown is user-editable: the student types anything the suggestions miss (Requirement 3), and the
   suggestions are a convenience, not an authority.
-- **Dependency on #20.** This feature imports #20's `pronoun-parse.ts`/dictionary and links from its
-  pronoun view. If #20 is not merged first, the entry link and the import land together with #20; the
-  CRUD/table/Lambda half of this feature is independent of #20 and can land either way. This ordering
-  is a sequencing note for the build phase, not a design gap.
+- **Hard dependency on a merged #20 (build-ordering rule).** The frontend half imports
+  `parsePronouns` (`src/app/pronoun-parse.ts`) and `PRONOUN_DICTIONARY` (`src/app/pronoun-dictionary.ts`)
+  — files that only exist once #20 is merged. Per the **Build ordering rule** in the Architecture
+  section, #23 MUST be built on a merged #20; if #20 is not merged the build agent stops and marks
+  the issue `agent-blocked` rather than re-creating the parser/dictionary (which would break the
+  single-pronoun-definition invariant). The CRUD/table/Lambda half is independent of #20 and fully
+  testable in isolation, but the feature is not complete until the merged #20 lets the frontend half
+  build and its criteria (R1.1/1.2/1.3/1.5, all of R2 and R3, R4.1/3/5/6) be verified. This is a
+  stated gate, not an optimistic sequencing note.
 - **No "list my antecedent studies" surface.** Records are keyed one-per-scroll and fetched by scroll
   id, so there is no standalone list of antecedent studies (you reach them via the scroll). A list
   surface would need a `GSI1` (updated-at) like the other tables; deferred as Out of Scope since the
   scroll is always the entry point.
 - **Stale saved pronouns after re-upload.** If a scroll is re-uploaded with different text, saved
-  antecedents whose pronoun no longer appears are ignored on load (Requirement 4 criterion 5) rather
+  antecedents whose pronoun no longer appears are ignored on load (Requirement 4 criterion 6) rather
   than migrated; they remain in the stored record harmlessly until the next save rewrites the set.
 
 ## Out of scope
@@ -420,3 +532,41 @@ the "add constructs, never rename" rule.
 - A top-level "Antecedent Studies" list surface and the `GSI1` it would require.
 - Serving or displaying copyrighted Bible verse text.
 - Any change to the Scroll Study upload/extraction flow, the Word Study tool, or the Book Study tool.
+
+## Responses to design review (CHANGES_REQUESTED)
+
+Revision pass addressing every finding in `design-review.json` / `design-review.md`. All were
+addressed; none backlogged or ignored.
+
+- **H1 (frontend depends on unimplemented #20; no decision rule) — addressed.** Added an explicit
+  **Build ordering rule** (Architecture): #23 MUST be built on a merged #20, else the build agent
+  stops and marks the issue `agent-blocked` and MUST NOT re-create #20's parser/dictionary. The rule
+  enumerates exactly which criteria are unverifiable until #20 lands (R1.1/1.2/1.3/1.5, all R2, all
+  R3, R4.1/3/5/6) and which half (backend) is independent. The "Dependency on #20" risk was rewritten
+  from a "sequencing note" to this hard gate.
+- **H2 (`createdAt`-preserving upsert under-specified) — addressed.** The `PUT` section now specifies
+  the authoritative read-before-write mechanism with pseudocode (`GetCommand` the existing item,
+  carry its `createdAt` forward, else `createdAt = updatedAt = now`), notes that neither
+  `book-study-crud` nor `scroll-study` has this path today, assigns the invariant to the Lambda, and
+  adds a two-`PUT` Lambda test asserting `createdAt` is unchanged while `updatedAt` advances.
+- **M1 (over-length handling ambiguous / client-server mismatch) — addressed.** R3 criterion 6 and
+  the validation section now state one behavior for both tiers: client `maxlength=200` caps input,
+  server **rejects (400)** a trimmed antecedent over 200 (never truncates). The Lambda test asserts
+  400, not a truncated save. Invariant ownership updated to match.
+- **M2 (all-empty save unspecified) — addressed.** Added R4 criterion 5 and an "Empty-worksheet
+  save" paragraph: a `PUT` with zero non-empty assignments idempotently upserts `assignments: []`
+  (no delete route, no stale prior set). Covered in the save correctness property, the Lambda test,
+  and a component test.
+- **M3 (`suggestAntecedents` dictionary coupling named wrong / not enforced) — addressed.** The
+  suggestion-helper section now names the exact import
+  (`import { PRONOUN_DICTIONARY } from './pronoun-dictionary'`, the single `ReadonlySet<string>` #20
+  exports from `src/app/pronoun-dictionary.ts`), requires consuming that one set never a copy, and
+  ties the file's absence to the H1 build gate. Architecture diagram and prose updated to show both
+  `pronoun-parse.ts` and `pronoun-dictionary.ts`.
+- **N1 (interface home inconsistent) — addressed.** Interfaces are now declared once:
+  `AntecedentStudyRecord` + backend `AntecedentAssignment` in `infra/lambda/shared/models.ts`;
+  frontend `AntecedentStudy` + `AntecedentAssignment` in `src/app/models.ts`. The service and
+  component import them; no inline duplicate.
+- **N2 (`PROD_LOGICAL_IDS` "updated additively" misleading) — addressed.** The CDK testing paragraph
+  now states `PROD_LOGICAL_IDS` needs no edit (it is a `toContain` subset check) and that the real
+  required change is the two hardcoded log-group counts `toHaveLength(7) → 8`.

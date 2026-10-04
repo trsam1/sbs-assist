@@ -127,8 +127,11 @@ I can record exactly who or what each pronoun refers to.
 4. The student SHALL be able to clear a pronoun's antecedent back to the empty (unassigned) state.
 5. A typed antecedent SHALL be trimmed of leading/trailing whitespace; an all-whitespace entry SHALL
    be treated as clearing the selection (criterion 4), not as adding a blank option.
-6. A typed antecedent SHALL be limited to a maximum length (200 characters); input beyond the limit
-   SHALL be rejected or truncated at the input boundary rather than persisted over-length.
+6. A typed antecedent SHALL be limited to a maximum length of 200 characters. The input control
+   SHALL cap entry at 200 characters (`maxlength`) so over-length text cannot be typed, AND the
+   server SHALL **reject** (HTTP 400) any assignment whose trimmed `antecedent` exceeds 200
+   characters rather than truncating it, so the client and server agree on reject (never a silent
+   truncation).
 7. The dropdown SHALL be keyboard operable and screen-reader labeled, matching the ARIA patterns the
    app already uses (`aria-label`, Bulma `select`/control styling), and each row SHALL identify which
    pronoun its control is for.
@@ -160,15 +163,22 @@ I can work through a book's pronouns across multiple sittings.
 4. The save action SHALL report success or failure to the student; on failure the student's
    in-progress selections SHALL remain editable (the save is retryable) and SHALL NOT be silently
    discarded.
-5. A pronoun worklist unit present in a saved record but no longer found in the current scroll parse
+5. WHEN the student saves a worksheet in which every pronoun's antecedent is empty (none assigned,
+   or all previously-assigned antecedents cleared) THEN the save SHALL upsert the Antecedent Study
+   record with `assignments: []` idempotently — it SHALL NOT delete the record and SHALL NOT leave a
+   stale prior set of assignments. (There is no delete action in this increment.)
+6. A pronoun worklist unit present in a saved record but no longer found in the current scroll parse
    (e.g. the scroll was re-uploaded with different text) SHALL be ignored on load rather than causing
    an error; only antecedents whose pronoun still appears in the worklist are shown.
 
 ### Correctness Properties
 - Property: For any set of pronoun→antecedent assignments, `save` followed by a load for the same
   `scrollStudyId` returns a record whose assignments equal the saved non-empty assignments (empty
-  assignments are not persisted).
-- Property: `createdAt` is preserved across updates while `updatedAt` advances to the save time.
+  assignments are dropped); a save with zero non-empty assignments yields a loaded record with
+  `assignments: []` (never a missing record and never the prior set).
+- Property: On the first save a record is created with `createdAt == updatedAt == saveTime`; on
+  every subsequent save of the same `scrollStudyId` the loaded record's `createdAt` equals the
+  value from the first save (unchanged) while `updatedAt` equals the later save time.
 
 ---
 
