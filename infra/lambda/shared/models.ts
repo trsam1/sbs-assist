@@ -103,6 +103,14 @@ export interface ScrollStudyRecord {
   GSI1SK: string; // "UPDATED#<updatedAt>"
 }
 
+/** A documented referent found while working Step 6 (what a descriptive phrase stands for). */
+export interface Referent {
+  phrase: string; // descriptive phrase found (required, <=200)
+  refersTo: string; // what it stands for (required, <=200)
+  notes: string; // free text, '' when unset (<=1000)
+  scrollRef: string; // optional free-text location, '' when unset (<=1000)
+}
+
 /** A user-owned container that organizes study work by a book of the Bible. */
 export interface BookStudy {
   id: string; // server-generated UUID
@@ -112,6 +120,7 @@ export interface BookStudy {
   notes: string; // optional free text; '' when unset
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
+  referents: Referent[]; // documented referents (Step 6); [] on legacy records
   // Reserved for a later increment that links word studies; not populated yet.
   // wordStudyIds?: string[];
 }
@@ -134,6 +143,7 @@ export interface BookStudyRecord {
   notes: string;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
+  referents: Referent[]; // documented referents (Step 6); absent on legacy records
   GSI1PK: string; // "USER#<userId>"
   GSI1SK: string; // "UPDATED#<updatedAt>" — sort by most recent
 }

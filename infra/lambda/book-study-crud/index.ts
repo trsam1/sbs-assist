@@ -7,7 +7,7 @@ import {
   QueryCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'node:crypto';
-import type { BookStudyRecord } from '../shared/models';
+import type { BookStudyRecord, Referent } from '../shared/models';
 import { isValidBook } from '../shared/bible-books';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
 
@@ -17,6 +17,8 @@ const tableName = process.env['BOOK_STUDIES_TABLE_NAME'] ?? '';
 
 const TITLE_MAX_LENGTH = 200;
 const NOTES_MAX_LENGTH = 2000;
+const REFERENT_FIELD_MAX = 200;
+const REFERENT_LONG_MAX = 1000;
 
 interface APIGatewayEvent {
   httpMethod: string;
@@ -36,16 +38,74 @@ function getUserId(event: APIGatewayEvent): string {
   return event.requestContext?.authorizer?.claims?.['sub'] ?? '';
 }
 
-interface CreateBookStudyInput {
+interface SaveBookStudyInput {
+  id?: string;
   book: string;
   title: string;
   notes: string;
+  referents: Referent[];
 }
 
-type ParseResult = { input: CreateBookStudyInput } | { error: string };
+type ParseResult = { input: SaveBookStudyInput } | { error: string };
 
-/** Parse and validate the create body. Server validation never trusts the client. */
-function parseCreateBody(body: string | null | undefined): ParseResult {
+/**
+ * Validate a referents array per entry, mirroring the raw-length rule used for title/notes
+ * (`length > max` rejects, so the limit value itself is allowed). phrase/refersTo are required
+ * (non-empty after trim); notes/scrollRef default to '' when absent.
+ */
+function parseReferents(raw: unknown): { referents: Referent[] } | { error: string } {
+  if (raw === undefined) return { referents: [] };
+  if (!Array.isArray(raw)) {
+    return { error: 'Invalid referents: expected an array.' };
+  }
+
+  const referents: Referent[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) {
+      return { error: 'Invalid referents: each entry must be an object.' };
+    }
+    const e = entry as Record<string, unknown>;
+
+    const phrase = e['phrase'];
+    const refersTo = e['refersTo'];
+    if (typeof phrase !== 'string' || typeof refersTo !== 'string') {
+      return { error: 'Invalid referents: phrase and refersTo must be strings.' };
+    }
+    if (phrase.trim().length === 0 || refersTo.trim().length === 0) {
+      return { error: 'Invalid referents: phrase and refersTo are required.' };
+    }
+    if (phrase.length > REFERENT_FIELD_MAX || refersTo.length > REFERENT_FIELD_MAX) {
+      return {
+        error: `Invalid referents: phrase and refersTo must be ${REFERENT_FIELD_MAX} characters or fewer.`,
+      };
+    }
+
+    const rawEntryNotes = e['notes'];
+    if (rawEntryNotes !== undefined && typeof rawEntryNotes !== 'string') {
+      return { error: 'Invalid referents: notes must be a string.' };
+    }
+    const notes = typeof rawEntryNotes === 'string' ? rawEntryNotes : '';
+
+    const rawScrollRef = e['scrollRef'];
+    if (rawScrollRef !== undefined && typeof rawScrollRef !== 'string') {
+      return { error: 'Invalid referents: scrollRef must be a string.' };
+    }
+    const scrollRef = typeof rawScrollRef === 'string' ? rawScrollRef : '';
+
+    if (notes.length > REFERENT_LONG_MAX || scrollRef.length > REFERENT_LONG_MAX) {
+      return {
+        error: `Invalid referents: notes and scrollRef must be ${REFERENT_LONG_MAX} characters or fewer.`,
+      };
+    }
+
+    referents.push({ phrase, refersTo, notes, scrollRef });
+  }
+
+  return { referents };
+}
+
+/** Parse and validate the save (upsert) body. Server validation never trusts the client. */
+function parseSaveBody(body: string | null | undefined): ParseResult {
   if (!body) return { error: 'Invalid or missing request body.' };
 
   let parsed: unknown;
@@ -60,6 +120,9 @@ function parseCreateBody(body: string | null | undefined): ParseResult {
   }
 
   const obj = parsed as Record<string, unknown>;
+
+  const rawId = obj['id'];
+  const id = typeof rawId === 'string' && rawId.length > 0 ? rawId : undefined;
 
   const book = obj['book'];
   if (typeof book !== 'string' || !isValidBook(book)) {
@@ -84,15 +147,28 @@ function parseCreateBody(body: string | null | undefined): ParseResult {
     return { error: `Notes must be ${NOTES_MAX_LENGTH} characters or fewer.` };
   }
 
-  return { input: { book, title, notes } };
+  const referentsResult = parseReferents(obj['referents']);
+  if ('error' in referentsResult) {
+    return { error: referentsResult.error };
+  }
+
+  return { input: { id, book, title, notes, referents: referentsResult.referents } };
 }
 
-async function createBookStudy(
+async function saveBookStudy(
   userId: string,
-  input: CreateBookStudyInput,
+  input: SaveBookStudyInput,
 ): Promise<{ bookStudyId: string }> {
   const now = new Date().toISOString();
-  const bookStudyId = randomUUID();
+  const bookStudyId = input.id ?? randomUUID();
+
+  // createdAt preservation is server-owned: on the update path read the caller's own record
+  // (PK from claims.sub) and reuse its createdAt; fall back to now when none exists (create).
+  let createdAt = now;
+  if (input.id) {
+    const existing = await getBookStudy(userId, bookStudyId);
+    if (existing) createdAt = existing.createdAt;
+  }
 
   const record: BookStudyRecord = {
     PK: `USER#${userId}`,
@@ -102,8 +178,9 @@ async function createBookStudy(
     book: input.book,
     title: input.title,
     notes: input.notes,
-    createdAt: now,
+    createdAt,
     updatedAt: now,
+    referents: input.referents,
     GSI1PK: `USER#${userId}`,
     GSI1SK: `UPDATED#${now}`,
   };
@@ -155,19 +232,19 @@ async function deleteBookStudy(userId: string, bookStudyId: string): Promise<boo
 export const handler = async (event: APIGatewayEvent) => {
   const origin = getRequestOrigin(event.headers);
   try {
-    // POST /books — create a book study
+    // POST /books — create or update (upsert) a book study
     if (event.httpMethod === 'POST' && event.resource === '/books') {
       const userId = getUserId(event);
       if (!userId) {
         return corsResponse(400, { message: 'Missing authentication.' }, origin);
       }
 
-      const parsed = parseCreateBody(event.body);
+      const parsed = parseSaveBody(event.body);
       if ('error' in parsed) {
         return corsResponse(400, { message: parsed.error }, origin);
       }
 
-      const result = await createBookStudy(userId, parsed.input);
+      const result = await saveBookStudy(userId, parsed.input);
       return corsResponse(200, result, origin);
     }
 

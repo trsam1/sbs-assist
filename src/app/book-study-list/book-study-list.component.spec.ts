@@ -16,6 +16,7 @@ function makeBookStudy(overrides: Partial<BookStudy> = {}): BookStudy {
     notes: '',
     createdAt: '2025-06-01T10:00:00.000Z',
     updatedAt: '2025-06-02T12:00:00.000Z',
+    referents: [],
     ...overrides,
   };
 }
