@@ -153,7 +153,8 @@ export interface AntecedentAssignment {
   occurrence: number; // 0-based ordinal of the pronoun appearance in the scroll text (the key)
   start: number; // 0-based character offset of the occurrence in the scroll text (context/migration)
   word: string; // canonical lower-cased pronoun form (for display; not the key)
-  antecedent: string; // trimmed, 1–200 chars
+  antecedent: string; // trimmed, 0–200 chars ('' allowed when only a type is set)
+  pronounType?: string; // '' or one of PRONOUN_TYPES; optional/additive; legacy records omit it
 }
 
 /** DynamoDB record shape for the AntecedentStudies table (one per scroll per user). */
@@ -162,7 +163,7 @@ export interface AntecedentStudyRecord {
   SK: string; // "ANTECEDENT#<scrollStudyId>"
   scrollStudyId: string;
   userId: string; // Cognito sub
-  assignments: AntecedentAssignment[]; // only non-empty antecedents are stored
+  assignments: AntecedentAssignment[]; // rows with a non-empty antecedent and/or a pronounType
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }

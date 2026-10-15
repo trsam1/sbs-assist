@@ -6,6 +6,7 @@ import { AntecedentViewComponent } from './antecedent-view.component';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { AntecedentStudyService } from '../antecedent-study.service';
 import { AntecedentStudy } from '../models';
+import { PRONOUN_TYPES } from '../pronoun-type';
 
 function makeStudy(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
   return {
@@ -216,6 +217,7 @@ describe('AntecedentViewComponent', () => {
         start: rows[0].start,
         word: rows[0].word,
         antecedent: 'Jesus',
+        pronounType: '',
       },
     ]);
     fixture.detectChanges();
@@ -315,6 +317,153 @@ describe('AntecedentViewComponent', () => {
     expect(query('[data-testid="antecedent-empty"]')).not.toBeNull();
     expect(query('[data-testid="antecedent-table"]')).toBeNull();
     expect(query('[data-testid="antecedent-save"]')).toBeNull();
+  });
+
+  it('renders a Type select per row with the nine types plus an unclassified option', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    const selects = queryAll('[data-testid="pronoun-type-select"]');
+    expect(selects).toHaveLength(component.rows().length);
+    const options = Array.from((selects[0] as HTMLSelectElement).querySelectorAll('option')).map(
+      (o) => o.getAttribute('value'),
+    );
+    // first option is the unclassified sentinel (''), then the nine types in order
+    expect(options).toEqual(['', ...PRONOUN_TYPES]);
+  });
+
+  it('keeps the Type select enabled on a row whose antecedent is empty', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    expect(component.rows()[0].antecedent).toBe(''); // no antecedent assigned
+    const select = query('[data-testid="pronoun-type-select"]') as HTMLSelectElement;
+    expect(select.disabled).toBe(false);
+
+    component.setPronounType(component.rows()[0].occurrence, 'Personal');
+    expect(component.rows()[0].pronounType).toBe('Personal');
+    expect(component.rows()[0].antecedent).toBe(''); // type set without an antecedent
+  });
+
+  it('setPronounType changes only the target row, including another occurrence of the same word', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy({ scrollText: 'He went. He stayed.' })));
+    fixture.detectChanges();
+
+    const rows = component.rows();
+    expect(rows[0].word).toBe('he');
+    expect(rows[1].word).toBe('he');
+
+    component.setPronounType(rows[0].occurrence, 'Personal');
+    expect(component.rows()[0].pronounType).toBe('Personal');
+    expect(component.rows()[1].pronounType).toBe(''); // the other "he" is unchanged
+  });
+
+  it('leaves a row pronounType unchanged when its antecedent is changed or cleared', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    const occ = component.rows()[0].occurrence;
+    component.setPronounType(occ, 'Relative');
+    component.setAntecedent(occ, 'the Father');
+    expect(component.rows()[0].pronounType).toBe('Relative');
+    component.setAntecedent(occ, ''); // clear antecedent
+    expect(component.rows()[0].pronounType).toBe('Relative');
+  });
+
+  it('pre-fills saved pronounType and renders a legacy/unknown value as unclassified', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getAntSpy.mockReturnValue(
+      of(
+        makeAntecedentStudy({
+          assignments: [
+            { occurrence: 0, start: 0, word: 'he', antecedent: 'Jesus', pronounType: 'Personal' },
+            // legacy row: unknown stored type → unclassified
+            {
+              occurrence: 1,
+              start: 7,
+              word: 'them',
+              antecedent: 'the crowd',
+              pronounType: 'Possessive',
+            },
+          ],
+        }),
+      ),
+    );
+    fixture.detectChanges();
+
+    const rows = component.rows();
+    expect(rows[0].pronounType).toBe('Personal');
+    expect(rows[1].pronounType).toBe(''); // unknown normalized to unclassified
+    expect(rows[1].antecedent).toBe('the crowd'); // antecedent still restored
+  });
+
+  it('restores a type-only saved row (no antecedent) as unclassified antecedent with its type', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getAntSpy.mockReturnValue(
+      of(
+        makeAntecedentStudy({
+          assignments: [
+            { occurrence: 0, start: 0, word: 'he', antecedent: '', pronounType: 'Personal' },
+          ],
+        }),
+      ),
+    );
+    fixture.detectChanges();
+
+    const rows = component.rows();
+    expect(rows[0].antecedent).toBe('');
+    expect(rows[0].pronounType).toBe('Personal');
+  });
+
+  it('saves a type-only row (empty antecedent, type set) and still drops a fully-empty row', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    const rows = component.rows();
+    component.setPronounType(rows[0].occurrence, 'Personal'); // type only, no antecedent
+    component.setAntecedent(rows[1].occurrence, 'the Father'); // antecedent only
+    // rows[2] and rows[3] stay fully empty → dropped
+    component.save();
+
+    const [, assignments] = saveSpy.mock.calls[0];
+    expect(assignments).toEqual([
+      {
+        occurrence: rows[0].occurrence,
+        start: rows[0].start,
+        word: rows[0].word,
+        antecedent: '',
+        pronounType: 'Personal',
+      },
+      {
+        occurrence: rows[1].occurrence,
+        start: rows[1].start,
+        word: rows[1].word,
+        antecedent: 'the Father',
+        pronounType: '',
+      },
+    ]);
+  });
+
+  it('discloses one hint item per type and the control works whether or not the hint is open', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    const items = queryAll('[data-testid="pronoun-type-hint-item"]');
+    expect(items).toHaveLength(PRONOUN_TYPES.length);
+    expect(query('[data-testid="pronoun-type-hint-toggle"]')).not.toBeNull();
+
+    // The Type control is usable regardless of the hint panel's open/closed state.
+    const occ = component.rows()[0].occurrence;
+    component.setPronounType(occ, 'Interrogative');
+    expect(component.rows()[0].pronounType).toBe('Interrogative');
   });
 
   it('calls only getScrollStudy and the two AntecedentStudyService methods', () => {
