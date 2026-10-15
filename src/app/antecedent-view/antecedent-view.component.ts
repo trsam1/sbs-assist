@@ -6,16 +6,18 @@ import { AntecedentStudyService } from '../antecedent-study.service';
 import { AntecedentAssignment } from '../models';
 import { parsePronounOccurrences } from '../pronoun-parse';
 import { suggestAntecedents } from '../antecedent-suggest';
+import { PRONOUN_TYPES, PRONOUN_TYPE_HINTS, PronounType, toPronounType } from '../pronoun-type';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
 
-/** One worklist row: a pronoun occurrence plus its (editable) antecedent selection. */
+/** One worklist row: a pronoun occurrence plus its (editable) antecedent + grammatical type. */
 interface OccurrenceRow {
   occurrence: number;
   start: number;
   word: string;
   snippet: string;
   antecedent: string;
+  pronounType: string; // '' (unclassified) or one of PRONOUN_TYPES
 }
 
 /** Characters of context shown on each side of the pronoun token in a row's snippet. */
@@ -45,11 +47,31 @@ const SNIPPET_RADIUS = 30;
               </div>
             } @else {
               <p class="mb-3">
-                Assign an antecedent to each pronoun occurrence. Pick a suggestion or type your own.
+                Assign an antecedent to each pronoun occurrence and, optionally, classify its
+                grammatical type. Pick a suggestion or type your own.
               </p>
+
+              <details class="box mb-3" data-testid="pronoun-type-hint-panel">
+                <summary
+                  class="has-text-weight-semibold"
+                  data-testid="pronoun-type-hint-toggle"
+                  aria-label="Show pronoun type hints"
+                >
+                  What are the pronoun types?
+                </summary>
+                <dl class="content mt-3">
+                  @for (type of pronounTypes; track type) {
+                    <div data-testid="pronoun-type-hint-item">
+                      <dt class="has-text-weight-semibold">{{ type }}</dt>
+                      <dd>{{ hints[type] }}</dd>
+                    </div>
+                  }
+                </dl>
+              </details>
+
               <table
                 class="table is-striped is-fullwidth"
-                aria-label="Pronoun occurrences and their antecedents"
+                aria-label="Pronoun occurrences, their antecedents, and their grammatical types"
                 data-testid="antecedent-table"
               >
                 <thead>
@@ -57,6 +79,7 @@ const SNIPPET_RADIUS = 30;
                     <th>Pronoun</th>
                     <th>Context</th>
                     <th>Antecedent</th>
+                    <th>Type</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -105,6 +128,23 @@ const SNIPPET_RADIUS = 30;
                               Add
                             </button>
                           </div>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="select is-small">
+                          <select
+                            [attr.aria-label]="
+                              'Grammatical type for ' + row.word + ' at position ' + row.start
+                            "
+                            [ngModel]="row.pronounType"
+                            (ngModelChange)="setPronounType(row.occurrence, $event)"
+                            data-testid="pronoun-type-select"
+                          >
+                            <option value="">— unclassified —</option>
+                            @for (type of pronounTypes; track type) {
+                              <option [value]="type">{{ type }}</option>
+                            }
+                          </select>
                         </div>
                       </td>
                     </tr>
@@ -202,6 +242,11 @@ export class AntecedentViewComponent implements OnInit {
   /** Per-occurrence free-text draft for the "Add" input. */
   private readonly drafts = signal<Record<number, string>>({});
 
+  /** The fixed grammatical pronoun types offered by the Type control and the hint panel. */
+  readonly pronounTypes: readonly PronounType[] = PRONOUN_TYPES;
+  /** Per-type hint text (keys === pronounTypes), for the optional hint panel. */
+  readonly hints: Readonly<Record<PronounType, string>> = PRONOUN_TYPE_HINTS;
+
   scrollStudyId = '';
 
   ngOnInit(): void {
@@ -241,6 +286,7 @@ export class AntecedentViewComponent implements OnInit {
       word: occ.word,
       snippet: this.snippetAround(scrollText, occ.start, occ.token.length),
       antecedent: '',
+      pronounType: '',
     }));
     this.rows.set(rows);
     this.options.set(suggestAntecedents(scrollText));
@@ -251,12 +297,20 @@ export class AntecedentViewComponent implements OnInit {
   private loadSaved(): void {
     this.antecedentStudy.get(this.scrollStudyId).subscribe({
       next: (saved) => {
-        const byOccurrence = new Map(saved.assignments.map((a) => [a.occurrence, a.antecedent]));
+        const byOccurrence = new Map(saved.assignments.map((a) => [a.occurrence, a]));
         this.rows.update((rows) =>
           rows.map((row) => {
-            const antecedent = byOccurrence.get(row.occurrence);
+            const match = byOccurrence.get(row.occurrence);
             // Ignore a saved assignment whose occurrence no longer resolves to a current row.
-            return antecedent !== undefined ? { ...row, antecedent } : row;
+            if (match === undefined) {
+              return row;
+            }
+            // A legacy/unknown stored pronounType normalizes to '' (unclassified).
+            return {
+              ...row,
+              antecedent: match.antecedent,
+              pronounType: toPronounType(match.pronounType),
+            };
           }),
         );
         // Seed options with saved antecedents so previously-typed values stay selectable.
@@ -297,6 +351,16 @@ export class AntecedentViewComponent implements OnInit {
     this.saved.set(false);
   }
 
+  /** Set or clear a row's grammatical pronoun type; never touches another row or its antecedent. */
+  setPronounType(occurrence: number, value: string): void {
+    this.rows.update((rows) =>
+      rows.map((row) =>
+        row.occurrence === occurrence ? { ...row, pronounType: toPronounType(value) } : row,
+      ),
+    );
+    this.saved.set(false);
+  }
+
   /** Add the row's typed draft: trim, (whitespace-only clears), de-dup into options, set the row. */
   addAntecedent(occurrence: number): void {
     const trimmed = this.draft(occurrence).trim();
@@ -324,18 +388,22 @@ export class AntecedentViewComponent implements OnInit {
     });
   }
 
-  /** Save the non-empty assignments; keep selections editable on failure (retryable). */
+  /**
+   * Save every row that has an antecedent and/or a pronoun type (drop only rows with neither);
+   * keep selections editable on failure (retryable).
+   */
   save(): void {
     this.saving.set(true);
     this.saved.set(false);
     this.saveError.set(false);
     const assignments: AntecedentAssignment[] = this.rows()
-      .filter((row) => row.antecedent.trim().length > 0)
+      .filter((row) => row.antecedent.trim().length > 0 || row.pronounType.length > 0)
       .map((row) => ({
         occurrence: row.occurrence,
         start: row.start,
         word: row.word,
         antecedent: row.antecedent.trim(),
+        pronounType: row.pronounType,
       }));
     this.antecedentStudy.save(this.scrollStudyId, assignments).subscribe({
       next: () => {

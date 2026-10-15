@@ -61,6 +61,18 @@ function assignment(overrides: Record<string, unknown> = {}) {
   return { occurrence: 0, start: 0, word: 'he', antecedent: 'Jesus', ...overrides };
 }
 
+/** The stored shape adds pronounType ('' when unclassified) to the sent assignment. */
+function stored(overrides: Record<string, unknown> = {}) {
+  return {
+    occurrence: 0,
+    start: 0,
+    word: 'he',
+    antecedent: 'Jesus',
+    pronounType: '',
+    ...overrides,
+  };
+}
+
 function putItem(callIndex: number): Record<string, unknown> {
   return (mockSend.mock.calls[callIndex][0].input as Record<string, unknown>)['Item'] as Record<
     string,
@@ -128,7 +140,7 @@ describe('Antecedent Study CRUD Lambda', () => {
       expect(item['SK']).toBe('ANTECEDENT#s1');
       expect(item['scrollStudyId']).toBe('s1');
       expect(item['userId']).toBe('user-1');
-      expect(item['assignments']).toEqual([assignment()]);
+      expect(item['assignments']).toEqual([stored()]);
       expect(item['createdAt']).toBe(item['updatedAt']); // first save
     });
 
@@ -212,6 +224,94 @@ describe('Antecedent Study CRUD Lambda', () => {
       );
       expect(res.statusCode).toBe(400);
       expect(JSON.parse(res.body).message).toMatch(/200 characters/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('accepts a valid pronounType and stores it', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+
+      const res = await handler(
+        makePutEvent(JSON.stringify({ assignments: [assignment({ pronounType: 'Personal' })] })),
+      );
+      expect(res.statusCode).toBe(200);
+      const storedRows = putItem(1)['assignments'] as Array<Record<string, unknown>>;
+      expect(storedRows).toEqual([stored({ pronounType: 'Personal' })]);
+    });
+
+    it('stores pronounType as "" when absent or empty', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            assignments: [
+              assignment({ occurrence: 0 }), // no pronounType field
+              assignment({ occurrence: 1, pronounType: '' }), // explicit empty
+              assignment({ occurrence: 2, pronounType: '   ' }), // whitespace trims to ''
+            ],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+      const storedRows = putItem(1)['assignments'] as Array<Record<string, unknown>>;
+      expect(storedRows).toHaveLength(3);
+      expect(storedRows.every((r) => r['pronounType'] === '')).toBe(true);
+    });
+
+    it('keeps a type-only row (valid pronounType, empty antecedent) with antecedent ""', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            assignments: [assignment({ antecedent: '   ', pronounType: 'Relative' })],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+      const storedRows = putItem(1)['assignments'] as Array<Record<string, unknown>>;
+      expect(storedRows).toEqual([stored({ antecedent: '', pronounType: 'Relative' })]);
+    });
+
+    it('drops a row with neither an antecedent nor a pronounType', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            assignments: [
+              assignment({ occurrence: 0, antecedent: '  ', pronounType: '' }), // dropped
+              assignment({ occurrence: 1, antecedent: 'Jesus', pronounType: 'Personal' }), // kept
+            ],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+      const storedRows = putItem(1)['assignments'] as Array<Record<string, unknown>>;
+      expect(storedRows).toEqual([
+        stored({ occurrence: 1, antecedent: 'Jesus', pronounType: 'Personal' }),
+      ]);
+    });
+
+    it('rejects a non-string pronounType with 400 and does not write', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ assignments: [assignment({ pronounType: 7 })] })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/pronounType must be a string/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown pronounType with 400 and does not write', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ assignments: [assignment({ pronounType: 'Bogus' })] })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/allowed values/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 

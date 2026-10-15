@@ -2,6 +2,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { AntecedentAssignment, AntecedentStudyRecord } from '../shared/models';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
+import { isPronounType } from '../shared/pronoun-type';
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -36,7 +37,8 @@ type ParseResult = { assignments: AntecedentAssignment[] } | { error: string };
 
 /**
  * Parse and validate the PUT body. Server validation never trusts the client: it trims each
- * antecedent, drops the empties (unassigned rows), and rejects malformed or over-length input.
+ * antecedent, validates the optional pronounType against the fixed list, drops rows with neither
+ * an antecedent nor a type, and rejects malformed, over-length, or unknown-type input.
  */
 function parsePutBody(body: string | null | undefined): ParseResult {
   if (!body) return { error: 'Request body is required.' };
@@ -75,8 +77,16 @@ function parsePutBody(body: string | null | undefined): ParseResult {
       return { error: 'antecedent must be a string.' };
     }
     const antecedent = obj['antecedent'].trim();
-    if (antecedent.length === 0) {
-      continue; // unassigned row — drop it, not an error
+    const rawType = obj['pronounType'];
+    if (rawType !== undefined && typeof rawType !== 'string') {
+      return { error: 'pronounType must be a string.' };
+    }
+    const pronounType = typeof rawType === 'string' ? rawType.trim() : '';
+    if (pronounType.length > 0 && !isPronounType(pronounType)) {
+      return { error: 'pronounType must be one of the allowed values.' };
+    }
+    if (antecedent.length === 0 && pronounType.length === 0) {
+      continue; // nothing to persist for this row — drop it, not an error
     }
     if (antecedent.length > ANTECEDENT_MAX_LENGTH) {
       return { error: `antecedent must be ${ANTECEDENT_MAX_LENGTH} characters or fewer.` };
@@ -86,6 +96,7 @@ function parsePutBody(body: string | null | undefined): ParseResult {
       start: obj['start'],
       word: obj['word'],
       antecedent,
+      pronounType,
     });
   }
 

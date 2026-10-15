@@ -105,7 +105,8 @@ export interface AntecedentAssignment {
   occurrence: number; // 0-based ordinal of the pronoun appearance in the scroll text (the key)
   start: number; // 0-based character offset of the occurrence in the scroll text (context/migration)
   word: string; // canonical lower-cased pronoun form (for display; not the key)
-  antecedent: string; // trimmed, 1–200 chars
+  antecedent: string; // trimmed, 0–200 chars ('' allowed when only a type is set)
+  pronounType?: string; // '' or one of PRONOUN_TYPES; optional/additive; legacy records omit it
 }
 
 /** A persisted set of antecedent assignments for one scroll study, owned by the current user. */
