@@ -59,6 +59,13 @@ const MAX_POLLS = 20;
             >
               Find pronouns (Step 6)
             </a>
+            <a
+              [routerLink]="['/scroll', scrollStudyId, 'structure']"
+              class="button is-link is-outlined mt-2 ml-2"
+              data-testid="analyze-structure-link"
+            >
+              Analyze structure (Step 7)
+            </a>
           }
           @case ('failed') {
             <div class="notification is-danger" role="alert" data-testid="failed">

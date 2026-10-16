@@ -42,6 +42,11 @@ export const routes: Routes = [
       import('./antecedent-view/antecedent-view.component').then((m) => m.AntecedentViewComponent),
   },
   {
+    path: 'scroll/:scrollStudyId/structure',
+    loadComponent: () =>
+      import('./structure-view/structure-view.component').then((m) => m.StructureViewComponent),
+  },
+  {
     path: 'books',
     loadComponent: () =>
       import('./book-study-list/book-study-list.component').then((m) => m.BookStudyListComponent),

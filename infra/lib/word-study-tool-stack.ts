@@ -76,6 +76,12 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Antecedent Study CRUD */
   public readonly antecedentStudyFn: nodejs.NodejsFunction;
 
+  /** DynamoDB table for user structure studies (Step 7) */
+  public readonly structureStudiesTable: dynamodb.Table;
+
+  /** Lambda: Structure Study CRUD */
+  public readonly structureStudyFn: nodejs.NodejsFunction;
+
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
 
@@ -186,6 +192,17 @@ export class WordStudyToolStack extends cdk.Stack {
     // GSI is needed (and no PITR, consistent with BookStudies — no new StageConfig field).
     this.antecedentStudiesTable = new dynamodb.Table(this, 'AntecedentStudies', {
       tableName: n('AntecedentStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    // Structure studies (Step 7). One record per scroll per user, fetched by exact key, so no
+    // GSI is needed (and no PITR, consistent with AntecedentStudies — no new StageConfig field).
+    this.structureStudiesTable = new dynamodb.Table(this, 'StructureStudies', {
+      tableName: n('StructureStudies'),
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -475,6 +492,21 @@ export class WordStudyToolStack extends cdk.Stack {
 
     this.antecedentStudiesTable.grantReadWriteData(this.antecedentStudyFn);
 
+    // --- Structure Study CRUD Lambda (Step 7) ---
+    this.structureStudyFn = new nodejs.NodejsFunction(this, 'StructureStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('StructureStudy'),
+      logGroup: fnLogs('StructureStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'structure-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        STRUCTURE_STUDIES_TABLE_NAME: this.structureStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.structureStudiesTable.grantReadWriteData(this.structureStudyFn);
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -589,6 +621,17 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // PUT /scroll-studies/{scrollStudyId}/antecedents
     antecedentsResource.addMethod('PUT', antecedentStudyIntegration, authMethodOptions);
+
+    // --- Structure Study routes (nested under a scroll study, Step 7) ---
+    const structureStudyIntegration = new apigateway.LambdaIntegration(this.structureStudyFn);
+
+    const structureResource = scrollStudyByIdResource.addResource('structure');
+
+    // GET /scroll-studies/{scrollStudyId}/structure
+    structureResource.addMethod('GET', structureStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/{scrollStudyId}/structure
+    structureResource.addMethod('PUT', structureStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json
