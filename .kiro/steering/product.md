@@ -4,32 +4,49 @@ A suite of web tools that support an **inductive Bible study methodology** — a
 
 The word-study tool (**Step 5 — Define Key Words**) is the first tool built. Additional step tools are added over time; not every step will become a tool, only those where guided, savable worksheets add value.
 
+## Product intent
+
+The product is a **digital companion to the inductive method**, not a replacement for it. The method is the fixed thing; the software exists to assist the steps where a computer genuinely helps — capturing the student's work, doing the mechanical lookups (dictionary, concordance, lexicon, cross-references), imposing structure (scroll, outline, element charts), and linking related material — so the student spends their effort on observation, interpretation, and application rather than on bookkeeping.
+
+Three commitments follow from that intent and bound every tool:
+
+- **Assist, never replace the student's own work.** The method's value is the student doing the observing and reasoning. Tools prompt, capture, and organize; they do not hand over conclusions. The AI summary in Step 5 synthesizes *the student's own notes* — it is the one assisted step, deliberately placed last, after the student has done the work.
+- **Not every step is a tool.** Some steps are spiritual (1 Pray, 17 Obey) or interpersonal (15 Discuss) and software should stay out of their way. Others are good software candidates because they are concrete, data-backed, and worksheet-shaped — which is why Step 5 (key words) and Step 6 (antecedents/referents) were chosen first. See the software-fit tags on each step below.
+- **One step, one focused tool.** Each tool supports a single step with a guided, savable worksheet, so the product grows as a suite of small focused tools rather than one monolith. A student builds a library of studies across tools over time.
+
 ## The inductive method
 
 The 17 steps are grouped into three phases. The source material is the methodology reference the maintainer follows (step names below match it; see `docs/references/` for per-step reference material as it is added).
 
+Each step carries a **software-fit tag** — how it stands with respect to becoming a tool:
+
+- **shipped** — a tool for this step is live.
+- **planned** — a tool is intended and has a spec or is next up.
+- **candidate** — a good fit for a future tool; not yet specced.
+- **manual** — stays pencil-and-paper by design: a spiritual, interpersonal, or free-reading step software should not try to replace. Do not draft a tool spec for a `manual` step.
+
 ### Observation
-1. Pray
-2. Read the Book
-3. Research the Background
-4. Observe the Text as a Scroll
-5. Define Key Words
-6. Identify Antecedents, Referents, Audience, and Speaker
-7. Analyze the Structure of the Book
-8. Make a Provisional Outline
-9. State a Provisional Theme and Purpose
+1. Pray — *manual* (spiritual)
+2. Read the Book — *manual* (free reading; software adds little beyond pointing at a Bible)
+3. Research the Background — *candidate* (structured background questions + saved answers)
+4. Observe the Text as a Scroll — *candidate* (digital scroll: continuous text, annotation, theme markers)
+5. Define Key Words — *shipped* (Word Study)
+6. Identify Antecedents, Referents, Audience, and Speaker — *planned* (Pronoun Study)
+7. Analyze the Structure of the Book — *candidate* (repeated-word search, element charts, tone/transition markers)
+8. Make a Provisional Outline — *candidate* (paragraph list → title → bracket → group → outline form)
+9. State a Provisional Theme and Purpose — *candidate* (derives from the outline in Step 8; likely folded into that tool)
 
 ### Interpretation
-10. Identify Figures of Speech
-11. Identify the Genre
-12. Interrogate the Text
-13. Check Cross-References
-14. Write a Condensed Paraphrase
-15. Discuss the Text
+10. Identify Figures of Speech — *candidate* (tag figures/parallelism against a reference list)
+11. Identify the Genre — *candidate* (genre picker backed by the characteristics table)
+12. Interrogate the Text — *candidate* (question bank + saved Q&A per passage)
+13. Check Cross-References — *candidate* (cross-reference capture; locations only, never verse text)
+14. Write a Condensed Paraphrase — *candidate* (expand the outline into a paraphrase, preserving genre/tone/POV)
+15. Discuss the Text — *manual* (interpersonal; a discussion-group step, not a solo tool)
 
 ### Application
-16. Draw Applications
-17. Obey God's Word
+16. Draw Applications — *candidate* (capture applications by form: command, warning, promise, example, implication)
+17. Obey God's Word — *manual* (spiritual)
 
 ## Study tools
 
@@ -50,6 +67,8 @@ See `.kiro/specs/word-study-tool/requirements.md` for the full spec. Studies sav
 ### Step 6 — Identify Antecedents, Referents, Audience, and Speaker (Pronoun Study) — planned
 
 A tool to help a student resolve the references in a passage before interpreting it: identifying what each pronoun and possessive adjective points to (its **antecedent**), what a descriptive phrase stands for (its **referent**), the intended **audience** of the book, and the **speaker** whose voice is being expressed (which is not always the author). Reference material for this step is at `docs/references/inductive-study-step-6.md`.
+
+This tool is being built across several specs under `.kiro/specs/`: `scroll-text-upload` and `parse-scroll-for-pronouns` (get the passage in and find its pronouns), `antecedent-analysis` and `antecedent-category-classifier` (resolve and classify antecedents), `referent-analysis` (resolve referents), and `organize-studies-by-book` (file studies under their book, following the method's book-by-book principle).
 
 ## Domain vocabulary
 
