@@ -29,9 +29,9 @@ Each step carries a **software-fit tag** — how it stands with respect to becom
 1. Pray — *manual* (spiritual)
 2. Read the Book — *manual* (free reading; software adds little beyond pointing at a Bible)
 3. Research the Background — *candidate* (structured background questions + saved answers)
-4. Observe the Text as a Scroll — *candidate* (digital scroll: continuous text, annotation, theme markers)
+4. Observe the Text as a Scroll — *shipped* (Scroll Study: upload, list, view)
 5. Define Key Words — *shipped* (Word Study)
-6. Identify Antecedents, Referents, Audience, and Speaker — *planned* (Pronoun Study)
+6. Identify Antecedents, Referents, Audience, and Speaker — *shipped* (Pronoun Study: parse pronouns, classify type, resolve antecedents and referents)
 7. Analyze the Structure of the Book — *candidate* (repeated-word search, element charts, tone/transition markers)
 8. Make a Provisional Outline — *candidate* (paragraph list → title → bracket → group → outline form)
 9. State a Provisional Theme and Purpose — *candidate* (derives from the outline in Step 8; likely folded into that tool)
@@ -50,7 +50,11 @@ Each step carries a **software-fit tag** — how it stands with respect to becom
 
 ## Study tools
 
-Each subsection is a tool for one step. "Shipped" tools are live; "planned" tools are intended but not yet built.
+Each subsection is a tool for one step, tagged with its software-fit status (see the legend under "The inductive method"): *shipped* tools are live, *planned* tools are specced or next up, *candidate* tools are good fits not yet specced. Studies are grouped by book of the Bible (see **Book Studies** below), following the method's book-by-book principle.
+
+### Step 4 — Observe the Text as a Scroll (Scroll Study) — shipped
+
+A student uploads a document containing the "scroll" form of a book (running text with chapter/verse markers removed or de-emphasised); the system extracts the plain text and saves it with the study, and the student can list and view their scrolls. The scroll is the shared substrate the Step 6 Pronoun Study reads from. See `.kiro/specs/scroll-text-upload/`.
 
 ### Step 5 — Define Key Words (Word Study) — shipped
 
@@ -64,11 +68,15 @@ A student enters an English word and a Strong's concordance number, then works t
 
 See `.kiro/specs/word-study-tool/requirements.md` for the full spec. Studies saved before 2026-04-27 store the English definition as a plain string; the app reads both shapes.
 
-### Step 6 — Identify Antecedents, Referents, Audience, and Speaker (Pronoun Study) — planned
+### Step 6 — Identify Antecedents, Referents, Audience, and Speaker (Pronoun Study) — shipped
 
-A tool to help a student resolve the references in a passage before interpreting it: identifying what each pronoun and possessive adjective points to (its **antecedent**), what a descriptive phrase stands for (its **referent**), the intended **audience** of the book, and the **speaker** whose voice is being expressed (which is not always the author). Reference material for this step is at `docs/references/inductive-study-step-6.md`.
+Helps a student resolve the references in a passage before interpreting it: identifying what each pronoun and possessive adjective points to (its **antecedent**), what a descriptive phrase stands for (its **referent**), the intended **audience** of the book, and the **speaker** whose voice is being expressed (which is not always the author). Reference material for this step is at `docs/references/inductive-study-step-6.md`.
 
-This tool is being built across several specs under `.kiro/specs/`: `scroll-text-upload` and `parse-scroll-for-pronouns` (get the passage in and find its pronouns), `antecedent-analysis` and `antecedent-category-classifier` (resolve and classify antecedents), `referent-analysis` (resolve referents), and `organize-studies-by-book` (file studies under their book, following the method's book-by-book principle).
+It reads from a Step 4 scroll and was built across several specs under `.kiro/specs/`: `parse-scroll-for-pronouns` (find the pronouns in a scroll), `antecedent-analysis` and `antecedent-category-classifier` (resolve antecedents and classify each pronoun's grammatical type), and `referent-analysis` (resolve referents). Frontend: `pronoun-view`, `antecedent-view`, and the `pronoun-*` / `antecedent-*` units.
+
+### Book Studies — organize studies by book — shipped
+
+Groups a student's work under the book of the Bible being studied, so word studies, scrolls, and pronoun studies live together per book rather than as a flat list. See `.kiro/specs/organize-studies-by-book/` and the `book-study-*` components.
 
 ## Domain vocabulary
 
