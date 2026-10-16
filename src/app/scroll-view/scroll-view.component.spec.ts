@@ -162,6 +162,23 @@ describe('ScrollViewComponent', () => {
     expect(query('[data-testid="find-pronouns-link"]')).toBeNull();
   });
 
+  it('shows an Analyze structure link in the ready state targeting scroll/:id/structure', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
+    fixture.detectChanges();
+
+    const link = query('[data-testid="analyze-structure-link"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/scroll/s1/structure');
+  });
+
+  it('does not show the Analyze structure link outside the ready state', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x', scrollText: '' })));
+    fixture.detectChanges();
+    expect(query('[data-testid="analyze-structure-link"]')).toBeNull();
+  });
+
   it('navigates to /scroll/new on re-upload', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x' })));

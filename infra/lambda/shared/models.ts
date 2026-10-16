@@ -178,3 +178,40 @@ export interface StrongsRecord {
   lexiconEntry?: string;
   reference?: string;
 }
+
+/** One structural marker the student recorded in Step 7 (Analyze the Structure of the Book). */
+export interface StructureMarker {
+  kind: 'transition' | 'direct-address' | 'declarative' | 'command' | 'other';
+  phrase: string; // required (<=200)
+  ref: string; // optional free-text location, '' when unset (<=200)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** One ordered section/division of the book the student drew in Step 7. */
+export interface StructureSection {
+  label: string; // required free text (<=200)
+  startRef: string; // optional free text, '' when unset (<=50)
+  endRef: string; // optional free text, '' when unset (<=50)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** One row of the optional elements chart (an element and where it occurs). */
+export interface StructureElement {
+  element: string; // required free text (<=200)
+  sectionRefs: string[]; // labels/positions of sections where it occurs; [] allowed
+}
+
+/** DynamoDB record shape for the StructureStudies table (one per scroll per user). */
+export interface StructureStudyRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "STRUCTURE#<scrollStudyId>"
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  genre: string; // '' when unset
+  tone: string; // '' when unset
+  markers: StructureMarker[];
+  sections: StructureSection[]; // ordered; feeds Step 8
+  elements: StructureElement[]; // optional elements chart; [] when unset
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}

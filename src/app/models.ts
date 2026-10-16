@@ -117,3 +117,47 @@ export interface AntecedentStudy {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+/** One structural marker the student recorded in Step 7 (Analyze the Structure of the Book). */
+export interface StructureMarker {
+  kind: 'transition' | 'direct-address' | 'declarative' | 'command' | 'other';
+  phrase: string; // required
+  ref: string; // optional free-text location, '' when unset (<=200)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** One ordered section/division of the book the student drew in Step 7. */
+export interface StructureSection {
+  label: string; // required free text (<=200)
+  startRef: string; // optional free text, '' when unset (<=50)
+  endRef: string; // optional free text, '' when unset (<=50)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** One row of the optional elements chart (an element and where it occurs). */
+export interface StructureElement {
+  element: string; // required free text (<=200)
+  sectionRefs: string[]; // labels/positions of sections where it occurs; [] allowed
+}
+
+/** The persisted Step 7 worksheet for one scroll study, owned by the current user. */
+export interface StructureStudy {
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  genre: string; // '' when unset
+  tone: string; // '' when unset
+  markers: StructureMarker[];
+  sections: StructureSection[]; // ordered; feeds Step 8 (Provisional Outline)
+  elements: StructureElement[]; // optional elements chart; [] when unset
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/** Save payload from the structure view (server sets userId/timestamps). */
+export interface StructureStudyInput {
+  genre?: string;
+  tone?: string;
+  markers?: StructureMarker[];
+  sections?: StructureSection[];
+  elements?: StructureElement[];
+}
