@@ -161,3 +161,26 @@ export interface StructureStudyInput {
   sections?: StructureSection[];
   elements?: StructureElement[];
 }
+
+/** One node of the provisional outline (Step 8). Nesting is encoded by `level`, not children. */
+export interface OutlineNode {
+  title: string; // required free text (<=200)
+  level: number; // 0 = "I", 1 = "A", 2 = "1", 3 = "a"; integer 0..3
+  startRef: string; // optional free text, '' when unset (<=50)
+  endRef: string; // optional free text, '' when unset (<=50)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** The persisted Step 8 worksheet for one scroll study, owned by the current user. */
+export interface OutlineStudy {
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  nodes: OutlineNode[]; // ordered; levels encode nesting
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/** Save payload from the outline view (server sets userId/timestamps). */
+export interface OutlineStudyInput {
+  nodes?: OutlineNode[];
+}

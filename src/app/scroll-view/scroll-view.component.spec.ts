@@ -179,6 +179,23 @@ describe('ScrollViewComponent', () => {
     expect(query('[data-testid="analyze-structure-link"]')).toBeNull();
   });
 
+  it('shows a Make an outline link in the ready state targeting scroll/:id/outline', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
+    fixture.detectChanges();
+
+    const link = query('[data-testid="make-outline-link"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/scroll/s1/outline');
+  });
+
+  it('does not show the Make an outline link outside the ready state', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x', scrollText: '' })));
+    fixture.detectChanges();
+    expect(query('[data-testid="make-outline-link"]')).toBeNull();
+  });
+
   it('navigates to /scroll/new on re-upload', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x' })));

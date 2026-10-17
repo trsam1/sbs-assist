@@ -240,7 +240,7 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(9);
+    expect(groups).toHaveLength(10);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
   });
 
@@ -314,6 +314,63 @@ describe('WordStudyToolStack (prod)', () => {
     );
     expect(structureResource, 'structure resource').toBeDefined();
     const resourceId = structureResource![0];
+
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    const httpMethods = methods.map((m) => m.Properties?.['HttpMethod']).sort();
+    expect(httpMethods).toEqual(['GET', 'PUT']);
+  });
+
+  it('adds an additive OutlineStudies table (on-demand, AWS-managed, PK/SK, no GSI, no PITR)', () => {
+    const table = tableByName(t, 'OutlineStudies');
+    expect(table.Properties?.['KeySchema']).toEqual([
+      { AttributeName: 'PK', KeyType: 'HASH' },
+      { AttributeName: 'SK', KeyType: 'RANGE' },
+    ]);
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.Properties?.['SSESpecification']).toEqual({ SSEEnabled: true });
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    expect(table.Properties?.['PointInTimeRecoverySpecification']).toBeUndefined();
+    expect(table.DeletionPolicy).toBe('Retain');
+  });
+
+  it('runs OutlineStudy on Node 22 with its own log group and table env', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'OutlineStudy',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({ OUTLINE_STUDIES_TABLE_NAME: Match.anyValue() }),
+      },
+    });
+  });
+
+  it('grants OutlineStudy read/write on only the OutlineStudies table', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const matching = policies.filter((p) => {
+      const doc = JSON.stringify(p.Properties?.['PolicyDocument']);
+      return doc.includes('OutlineStudies');
+    });
+    expect(matching.length).toBeGreaterThan(0);
+    for (const policy of matching) {
+      const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
+      // Least privilege: this policy's DynamoDB grants never reach another study table.
+      expect(doc).not.toContain('StructureStudies');
+      expect(doc).not.toContain('ScrollStudies');
+      expect(doc).not.toContain('BookStudies');
+      expect(doc).not.toContain('WordStudies');
+    }
+  });
+
+  it('authorizes GET and PUT under scroll-studies/{scrollStudyId}/outline', () => {
+    const outlineResource = Object.entries(resourcesOfType(t, 'AWS::ApiGateway::Resource')).find(
+      ([, r]) => r.Properties?.['PathPart'] === 'outline',
+    );
+    expect(outlineResource, 'outline resource').toBeDefined();
+    const resourceId = outlineResource![0];
 
     const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
       (m) =>
@@ -452,7 +509,7 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(9);
+    expect(groups).toHaveLength(10);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
@@ -473,6 +530,14 @@ describe('WordStudyToolStack (dev)', () => {
     expect(table.DeletionPolicy).toBe('Delete');
     expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
     t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'StructureStudy-dev' });
+  });
+
+  it('creates an OutlineStudies-dev table and OutlineStudy-dev function', () => {
+    const table = tableByName(t, 'OutlineStudies-dev');
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.DeletionPolicy).toBe('Delete');
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'OutlineStudy-dev' });
   });
 
   it('creates a BookStudies-dev table and BookStudyCRUD-dev function', () => {

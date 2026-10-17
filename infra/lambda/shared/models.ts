@@ -215,3 +215,23 @@ export interface StructureStudyRecord {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+/** One node of the provisional outline (Step 8 — Make a Provisional Outline). */
+export interface OutlineNode {
+  title: string; // required free text (<=200)
+  level: number; // 0 = "I", 1 = "A", 2 = "1", 3 = "a"; integer 0..3
+  startRef: string; // optional free text, '' when unset (<=50)
+  endRef: string; // optional free text, '' when unset (<=50)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** DynamoDB record shape for the OutlineStudies table (one per scroll per user). */
+export interface OutlineStudyRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "OUTLINE#<scrollStudyId>"
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  nodes: OutlineNode[]; // ordered; levels encode nesting
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}

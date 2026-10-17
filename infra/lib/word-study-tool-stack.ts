@@ -82,6 +82,12 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Structure Study CRUD */
   public readonly structureStudyFn: nodejs.NodejsFunction;
 
+  /** DynamoDB table for user outline studies (Step 8) */
+  public readonly outlineStudiesTable: dynamodb.Table;
+
+  /** Lambda: Outline Study CRUD */
+  public readonly outlineStudyFn: nodejs.NodejsFunction;
+
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
 
@@ -203,6 +209,17 @@ export class WordStudyToolStack extends cdk.Stack {
     // GSI is needed (and no PITR, consistent with AntecedentStudies — no new StageConfig field).
     this.structureStudiesTable = new dynamodb.Table(this, 'StructureStudies', {
       tableName: n('StructureStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    // Outline studies (Step 8). One record per scroll per user, fetched by exact key, so no
+    // GSI is needed (and no PITR, consistent with StructureStudies — no new StageConfig field).
+    this.outlineStudiesTable = new dynamodb.Table(this, 'OutlineStudies', {
+      tableName: n('OutlineStudies'),
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -507,6 +524,21 @@ export class WordStudyToolStack extends cdk.Stack {
 
     this.structureStudiesTable.grantReadWriteData(this.structureStudyFn);
 
+    // --- Outline Study CRUD Lambda (Step 8) ---
+    this.outlineStudyFn = new nodejs.NodejsFunction(this, 'OutlineStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('OutlineStudy'),
+      logGroup: fnLogs('OutlineStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'outline-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        OUTLINE_STUDIES_TABLE_NAME: this.outlineStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.outlineStudiesTable.grantReadWriteData(this.outlineStudyFn);
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -632,6 +664,17 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // PUT /scroll-studies/{scrollStudyId}/structure
     structureResource.addMethod('PUT', structureStudyIntegration, authMethodOptions);
+
+    // --- Outline Study routes (nested under a scroll study, Step 8) ---
+    const outlineStudyIntegration = new apigateway.LambdaIntegration(this.outlineStudyFn);
+
+    const outlineResource = scrollStudyByIdResource.addResource('outline');
+
+    // GET /scroll-studies/{scrollStudyId}/outline
+    outlineResource.addMethod('GET', outlineStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/{scrollStudyId}/outline
+    outlineResource.addMethod('PUT', outlineStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json
