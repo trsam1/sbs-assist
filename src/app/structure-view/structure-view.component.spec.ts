@@ -173,6 +173,58 @@ describe('StructureViewComponent', () => {
     expect(component.sections().map((s) => s.label)).toEqual(['A']);
   });
 
+  it('records each section’s start/stop passage reference and notes and persists them', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    saveSpy.mockReturnValue(of(makeStructureStudy()));
+    fixture.detectChanges();
+
+    component.addSection();
+    component.setSectionLabel(0, 'Thanksgiving');
+    component.setSectionStartRef(0, '1:3');
+    component.setSectionEndRef(0, '1:11');
+    component.setSectionNotes(0, 'opens with blessing, closes before the appeal');
+
+    expect(component.sections()[0]).toEqual({
+      label: 'Thanksgiving',
+      startRef: '1:3',
+      endRef: '1:11',
+      notes: 'opens with blessing, closes before the appeal',
+    });
+
+    component.save();
+    expect(saveSpy).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({
+        sections: [
+          {
+            label: 'Thanksgiving',
+            startRef: '1:3',
+            endRef: '1:11',
+            notes: 'opens with blessing, closes before the appeal',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('renders start/stop/notes inputs for each section row', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getStructSpy.mockReturnValue(
+      of(
+        makeStructureStudy({
+          sections: [{ label: 'Thanksgiving', startRef: '1:3', endRef: '1:11', notes: 'n' }],
+        }),
+      ),
+    );
+    fixture.detectChanges();
+
+    expect(query('[data-testid="section-start"]')).not.toBeNull();
+    expect(query('[data-testid="section-end"]')).not.toBeNull();
+    expect(query('[data-testid="section-notes"]')).not.toBeNull();
+  });
+
   it('saves and shows a confirmation, calling the service', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeStudy()));

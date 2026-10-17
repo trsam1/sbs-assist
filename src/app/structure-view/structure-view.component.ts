@@ -231,53 +231,110 @@ const FREQUENCY_PAGE = 25;
                 text rather than trusting them; let the author's own signals set your sections.
               </p>
               @for (s of sections(); track $index) {
-                <div class="field has-addons mb-2" data-testid="section-row">
-                  <div class="control is-expanded">
-                    <input
-                      class="input is-small"
-                      type="text"
-                      maxlength="200"
-                      placeholder="Section label"
-                      [ngModel]="s.label"
-                      (ngModelChange)="setSectionLabel($index, $event)"
-                      [attr.aria-label]="'Section ' + ($index + 1) + ' label'"
-                      data-testid="section-label"
-                    />
+                <div class="box p-3 mb-2" data-testid="section-row">
+                  <!-- Label + reorder/remove controls -->
+                  <div class="field has-addons mb-2">
+                    <div class="control is-expanded">
+                      <input
+                        class="input is-small"
+                        type="text"
+                        maxlength="200"
+                        placeholder="Section label"
+                        [ngModel]="s.label"
+                        (ngModelChange)="setSectionLabel($index, $event)"
+                        [attr.aria-label]="'Section ' + ($index + 1) + ' label'"
+                        data-testid="section-label"
+                      />
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        [disabled]="$index === 0"
+                        (click)="moveSection($index, -1)"
+                        [attr.aria-label]="'Move section ' + ($index + 1) + ' up'"
+                        data-testid="section-up"
+                      >
+                        ↑
+                      </button>
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        [disabled]="$index === sections().length - 1"
+                        (click)="moveSection($index, 1)"
+                        [attr.aria-label]="'Move section ' + ($index + 1) + ' down'"
+                        data-testid="section-down"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small is-danger is-outlined"
+                        type="button"
+                        (click)="removeSection($index)"
+                        [attr.aria-label]="'Remove section ' + ($index + 1)"
+                        data-testid="section-remove"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                  <div class="control">
-                    <button
-                      class="button is-small"
-                      type="button"
-                      [disabled]="$index === 0"
-                      (click)="moveSection($index, -1)"
-                      [attr.aria-label]="'Move section ' + ($index + 1) + ' up'"
-                      data-testid="section-up"
-                    >
-                      ↑
-                    </button>
+
+                  <!-- Passage location: where this section starts and stops -->
+                  <div class="field is-grouped mb-2">
+                    <div class="control is-expanded">
+                      <label class="label is-small mb-1" [attr.for]="'section-start-' + $index">
+                        Starts at
+                      </label>
+                      <input
+                        [id]="'section-start-' + $index"
+                        class="input is-small"
+                        type="text"
+                        maxlength="50"
+                        placeholder="e.g. 1:1 or “the opening greeting”"
+                        [ngModel]="s.startRef"
+                        (ngModelChange)="setSectionStartRef($index, $event)"
+                        [attr.aria-label]="'Section ' + ($index + 1) + ' starts at'"
+                        data-testid="section-start"
+                      />
+                    </div>
+                    <div class="control is-expanded">
+                      <label class="label is-small mb-1" [attr.for]="'section-end-' + $index">
+                        Stops at
+                      </label>
+                      <input
+                        [id]="'section-end-' + $index"
+                        class="input is-small"
+                        type="text"
+                        maxlength="50"
+                        placeholder="e.g. 2:4 or “before the hymn”"
+                        [ngModel]="s.endRef"
+                        (ngModelChange)="setSectionEndRef($index, $event)"
+                        [attr.aria-label]="'Section ' + ($index + 1) + ' stops at'"
+                        data-testid="section-end"
+                      />
+                    </div>
                   </div>
-                  <div class="control">
-                    <button
-                      class="button is-small"
-                      type="button"
-                      [disabled]="$index === sections().length - 1"
-                      (click)="moveSection($index, 1)"
-                      [attr.aria-label]="'Move section ' + ($index + 1) + ' down'"
-                      data-testid="section-down"
-                    >
-                      ↓
-                    </button>
-                  </div>
-                  <div class="control">
-                    <button
-                      class="button is-small is-danger is-outlined"
-                      type="button"
-                      (click)="removeSection($index)"
-                      [attr.aria-label]="'Remove section ' + ($index + 1)"
-                      data-testid="section-remove"
-                    >
-                      Remove
-                    </button>
+
+                  <!-- Optional per-section notes -->
+                  <div class="field">
+                    <label class="label is-small mb-1" [attr.for]="'section-notes-' + $index">
+                      Notes
+                    </label>
+                    <textarea
+                      [id]="'section-notes-' + $index"
+                      class="textarea is-small"
+                      rows="2"
+                      maxlength="1000"
+                      placeholder="Why this is a section — the author's signals that mark its edges"
+                      [ngModel]="s.notes"
+                      (ngModelChange)="setSectionNotes($index, $event)"
+                      [attr.aria-label]="'Section ' + ($index + 1) + ' notes'"
+                      data-testid="section-notes"
+                    ></textarea>
                   </div>
                 </div>
               }
@@ -493,6 +550,18 @@ export class StructureViewComponent implements OnInit {
 
   setSectionLabel(index: number, label: string): void {
     this.sections.update((s) => s.map((sec, i) => (i === index ? { ...sec, label } : sec)));
+  }
+
+  setSectionStartRef(index: number, startRef: string): void {
+    this.sections.update((s) => s.map((sec, i) => (i === index ? { ...sec, startRef } : sec)));
+  }
+
+  setSectionEndRef(index: number, endRef: string): void {
+    this.sections.update((s) => s.map((sec, i) => (i === index ? { ...sec, endRef } : sec)));
+  }
+
+  setSectionNotes(index: number, notes: string): void {
+    this.sections.update((s) => s.map((sec, i) => (i === index ? { ...sec, notes } : sec)));
   }
 
   removeSection(index: number): void {
