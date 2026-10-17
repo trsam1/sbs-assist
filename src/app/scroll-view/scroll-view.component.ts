@@ -66,6 +66,13 @@ const MAX_POLLS = 20;
             >
               Analyze structure (Step 7)
             </a>
+            <a
+              [routerLink]="['/scroll', scrollStudyId, 'outline']"
+              class="button is-link is-outlined mt-2 ml-2"
+              data-testid="make-outline-link"
+            >
+              Make an outline (Step 8)
+            </a>
           }
           @case ('failed') {
             <div class="notification is-danger" role="alert" data-testid="failed">

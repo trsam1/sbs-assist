@@ -32,8 +32,8 @@ Each step carries a **software-fit tag** — how it stands with respect to becom
 4. Observe the Text as a Scroll — *shipped* (Scroll Study: upload, list, view)
 5. Define Key Words — *shipped* (Word Study)
 6. Identify Antecedents, Referents, Audience, and Speaker — *shipped* (Pronoun Study: parse pronouns, classify type, resolve antecedents and referents)
-7. Analyze the Structure of the Book — *candidate* (repeated-word search, element charts, tone/transition markers)
-8. Make a Provisional Outline — *candidate* (paragraph list → title → bracket → group → outline form)
+7. Analyze the Structure of the Book — *shipped* (Structure Study: repeated-word frequency, tone/transition markers, genre/tone, ordered sections with start/stop passage references)
+8. Make a Provisional Outline — *shipped* (Outline Study: ordered, nestable titled nodes rendered in standard I/A/1/a form; seeds from the Step 7 sections)
 9. State a Provisional Theme and Purpose — *candidate* (derives from the outline in Step 8; likely folded into that tool)
 
 ### Interpretation
