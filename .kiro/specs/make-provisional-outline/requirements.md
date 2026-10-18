@@ -1,4 +1,19 @@
-# Requirements: Make a Provisional Outline (Step 8 — Outline Study)
+# Requirements: Make a Provisional Outline (Step 8 — Outline Study) + State Theme & Purpose (Step 9)
+
+> **Revision (R3).** Folds **Step 9 — State a Provisional Theme and Purpose** into this same
+> Outline Study tool, rather than building a separate tool. The inductive method states the theme
+> and purpose **atop the outline** and derives both directly from it (theme = a 1–3 word
+> condensation of the outline; purpose = the author's goal in one sentence), and `product.md`
+> already flags Step 9 as "derives from the outline in Step 8; likely folded into that tool". This
+> revision adds two free-text fields — `theme` and `purpose` — to the existing `OutlineStudy`
+> record and a **Theme & Purpose panel pinned to the top of the outline view**, with the
+> paragraph→grouping flow beneath it as the evidence the student condenses from. Both are
+> **student-authored free text**: the app captures them, never generates them (Step 5's AI summary
+> is the method's one deliberately-assisted step; Step 9 is the student's own interpretive
+> condensation). **Zero new infrastructure** — the existing `OutlineStudies` table, `OutlineStudy`
+> Lambda, and `/scroll-studies/{id}/outline` routes are reused; only two optional string fields are
+> added to the stored item shape and the frontend. Legacy records read `theme=''`/`purpose=''`;
+> no migration.
 
 > **Revision (R2).** The first shipped Step 8 (PR #42) modelled the outline as a single flat,
 > indented list of titled nodes carrying a `level`. User feedback: that hides the *process*. The
@@ -223,11 +238,42 @@ onto the live stack, so that it is consistent and introduces no infrastructure c
 4. The change to the stored item shape SHALL require no schema migration (the table is schemaless;
    the only existing records are from PR #42 and carry no real user data).
 
+### Requirement 8 — State a provisional theme and purpose atop the outline (Step 9)
+
+**User story:** As a student who has built a provisional outline, I want to state the book's
+**theme** (what it is about, in a few words) and **purpose** (the author's goal, in a sentence) at
+the top of the outline, so that I capture the Step 9 artifact where the method places it — derived
+from, and sitting above, the outline I just made.
+
+#### Acceptance criteria
+
+1. WHEN the Outline Study worksheet renders in the `ready` state THEN the system SHALL show a
+   **Theme & Purpose panel at the top of the worksheet, above the paragraph/grouping flow**, with a
+   `theme` input and a `purpose` input, both editable free text.
+2. The `theme` field SHALL be a short free-text condensation (≤ 80 chars), and the `purpose` field
+   SHALL be a one-sentence free-text statement (≤ 500 chars). Both are **optional** — an outline
+   with no theme/purpose yet is valid and saves without error.
+3. The system SHALL NOT generate, suggest, or auto-fill the theme or purpose from the outline or
+   any other source; the student authors both. Nothing from the theme/purpose is sent to any AI
+   prompt, and no Bible text is introduced.
+4. WHEN the student edits `theme` or `purpose` THEN the system SHALL update only that field,
+   leaving paragraphs and groupings untouched.
+5. WHEN the student saves THEN the system SHALL persist `theme` and `purpose` with the worksheet
+   via the same `PUT /scroll-studies/{scrollStudyId}/outline` call, and SHALL reflect them on
+   reload. A saved empty value persists as `''`.
+6. WHEN an outline saved before this revision (no `theme`/`purpose`) is loaded THEN the system
+   SHALL present empty, editable `theme`/`purpose` fields without error (legacy records default to
+   `''`).
+7. The panel SHALL make the Step 9 framing visible to the student — brief helper text that theme =
+   *what the book is about* (a short condensation of the outline) and purpose = *the author's goal*
+   — without prescribing or generating content.
+
 ## Out of scope
 
-- Generating paragraphs, main ideas, titles, or groupings automatically — the student authors
-  every one and decides every merge.
-- Step 9 (State a Provisional Theme and Purpose) capture.
+- Generating paragraphs, main ideas, titles, groupings, **theme, or purpose** automatically — the
+  student authors every one and decides every merge; the theme and purpose are the student's own
+  interpretive condensation, captured but never suggested.
 - Any new source of Bible text, or any server-side parsing of the scroll text.
 - Non-contiguous groupings — a grouping is always a single contiguous run of paragraphs.
 - A free-standing outline collection, list view, or cross-scroll outline.
+- A standalone Step 9 tool, table, Lambda, or route — Step 9 is folded into this Outline Study.
