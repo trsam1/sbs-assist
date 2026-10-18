@@ -1,93 +1,135 @@
 import { describe, it, expect } from 'vitest';
 import { outlineLabels } from './outline-number';
-import type { OutlineNode } from './models';
+import type { OutlineGrouping, OutlineParagraph } from './models';
 
-function node(title: string, level: number): OutlineNode {
-  return { title, level, startRef: '', endRef: '', notes: '' };
+function para(mainIdea: string): OutlineParagraph {
+  return { startRef: '', endRef: '', mainIdea, notes: '' };
 }
 
-/** Convenience: just the label strings, in node order. */
-function labelsOf(nodes: OutlineNode[]): string[] {
-  return outlineLabels(nodes).map((l) => l.label);
+function grouping(
+  column: number,
+  startIndex: number,
+  endIndex: number,
+  title = 't',
+): OutlineGrouping {
+  return { column, startIndex, endIndex, title, notes: '' };
+}
+
+/** Convenience: just the label strings, in emission order. */
+function labelsOf(paragraphs: OutlineParagraph[], groupings: OutlineGrouping[]): string[] {
+  return outlineLabels(paragraphs, groupings).map((l) => l.label);
 }
 
 describe('outlineLabels', () => {
-  it('returns [] for an empty list', () => {
-    expect(outlineLabels([])).toEqual([]);
+  it('returns [] for an empty paragraph list', () => {
+    expect(outlineLabels([], [])).toEqual([]);
+    expect(outlineLabels([], [grouping(1, 0, 0)])).toEqual([]);
   });
 
-  it('numbers a flat top-level list with Roman numerals', () => {
-    const nodes = [node('a', 0), node('b', 0), node('c', 0)];
-    expect(labelsOf(nodes)).toEqual(['I', 'II', 'III']);
+  it('numbers a flat paragraph list (no groupings) with Roman numerals', () => {
+    const paras = [para('a'), para('b'), para('c')];
+    expect(labelsOf(paras, [])).toEqual(['I', 'II', 'III']);
   });
 
-  it('numbers nested levels as I / A / 1 / a', () => {
-    const nodes = [node('I', 0), node('A', 1), node('1', 2), node('a', 3)];
-    expect(labelsOf(nodes)).toEqual(['I', 'A', '1', 'a']);
-  });
-
-  it('restarts sibling numbering under each new parent', () => {
-    const nodes = [
-      node('I', 0),
-      node('A', 1),
-      node('B', 1),
-      node('II', 0),
-      node('A again', 1), // first child of the new parent → "A", not "C"
-    ];
-    expect(labelsOf(nodes)).toEqual(['I', 'A', 'B', 'II', 'A']);
-  });
-
-  it('restarts deeper counters when a shallower node appears', () => {
-    const nodes = [
-      node('I', 0),
-      node('A', 1),
-      node('1', 2),
-      node('2', 2),
-      node('B', 1), // level-1 resets the level-2 counter
-      node('1 again', 2), // → "1", not "3"
-    ];
-    expect(labelsOf(nodes)).toEqual(['I', 'A', '1', '2', 'B', '1']);
-  });
-
-  it('reuses the arabic/lowercase cycle for levels deeper than 3', () => {
-    const nodes = [
-      node('I', 0),
-      node('A', 1),
-      node('1', 2),
-      node('a', 3),
-      node('level4', 4), // 4 % 4 === 0 → Roman again
-      node('level5', 5), // 5 % 4 === 1 → upper letter
-    ];
-    expect(labelsOf(nodes)).toEqual(['I', 'A', '1', 'a', 'I', 'A']);
-  });
-
-  it('rolls Roman numerals past single symbols (IV, IX)', () => {
-    const nodes = Array.from({ length: 9 }, () => node('x', 0));
-    expect(labelsOf(nodes)).toEqual(['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX']);
-  });
-
-  it('rolls letters past Z to AA', () => {
-    const nodes: OutlineNode[] = [node('parent', 0)];
-    for (let i = 0; i < 27; i++) nodes.push(node('child', 1));
-    const labels = labelsOf(nodes);
-    expect(labels[1]).toBe('A');
-    expect(labels[26]).toBe('Z');
-    expect(labels[27]).toBe('AA');
-  });
-
-  it('carries index and level through on each label', () => {
-    const nodes = [node('I', 0), node('A', 1)];
-    expect(outlineLabels(nodes)).toEqual([
-      { index: 0, level: 0, label: 'I' },
-      { index: 1, level: 1, label: 'A' },
+  it('emits paragraph rows at the top level when there are no groupings', () => {
+    const paras = [para('a'), para('b')];
+    expect(outlineLabels(paras, [])).toEqual([
+      { kind: 'paragraph', ref: 0, level: 0, label: 'I' },
+      { kind: 'paragraph', ref: 1, level: 0, label: 'II' },
     ]);
   });
 
-  it('treats a negative or non-integer level as 0', () => {
-    const nodes = [
-      { title: 'x', level: -1, startRef: '', endRef: '', notes: '' },
-      { title: 'y', level: 1.5, startRef: '', endRef: '', notes: '' },
+  it('one bracket column: bracket is I, its paragraphs are A/B underneath', () => {
+    // 3 paragraphs, one bracket covering paras 0..1; para 2 uncovered.
+    const paras = [para('p0'), para('p1'), para('p2')];
+    const groupings = [grouping(1, 0, 1, 'Bracket')];
+    const result = outlineLabels(paras, groupings);
+    // Top level: the bracket (I) and the uncovered paragraph 2 (II).
+    expect(result.map((r) => `${r.kind}:${r.ref}:${r.label}:${r.level}`)).toEqual([
+      'grouping:0:I:0',
+      'paragraph:0:A:1',
+      'paragraph:1:B:1',
+      'paragraph:2:II:0',
+    ]);
+  });
+
+  it('two columns: division I, bracket A, paragraphs 1/2 — I/A/1', () => {
+    // 2 paragraphs; column-1 bracket over 0..1; column-2 division over 0..1.
+    const paras = [para('p0'), para('p1')];
+    const groupings = [grouping(1, 0, 1, 'Bracket'), grouping(2, 0, 1, 'Division')];
+    const result = outlineLabels(paras, groupings);
+    expect(result.map((r) => `${r.kind}:${r.ref}:${r.label}:${r.level}`)).toEqual([
+      'grouping:1:I:0', // column-2 division is the top level
+      'grouping:0:A:1', // column-1 bracket under it
+      'paragraph:0:1:2', // paragraphs at level 2 → arabic
+      'paragraph:1:2:2',
+    ]);
+  });
+
+  it('restarts sibling numbering under each new parent', () => {
+    // 4 paragraphs; two column-1 brackets: [0,1] and [2,3].
+    const paras = [para('p0'), para('p1'), para('p2'), para('p3')];
+    const groupings = [grouping(1, 0, 1, 'B1'), grouping(1, 2, 3, 'B2')];
+    // Top level: bracket B1 (I) with A/B, bracket B2 (II) with A/B again.
+    expect(labelsOf(paras, groupings)).toEqual(['I', 'A', 'B', 'II', 'A', 'B']);
+  });
+
+  it('orders brackets by their start index regardless of array order', () => {
+    const paras = [para('p0'), para('p1'), para('p2'), para('p3')];
+    // Later span listed first in the array.
+    const groupings = [grouping(1, 2, 3, 'second'), grouping(1, 0, 1, 'first')];
+    const result = outlineLabels(paras, groupings);
+    const brackets = result.filter((r) => r.kind === 'grouping');
+    // First-by-start-index gets "I".
+    expect(brackets).toEqual([
+      { kind: 'grouping', ref: 1, level: 0, label: 'I' },
+      { kind: 'grouping', ref: 0, level: 0, label: 'II' },
+    ]);
+  });
+
+  it('mixes a covered bracket and an uncovered paragraph at the top level in reading order', () => {
+    const paras = [para('p0'), para('p1'), para('p2')];
+    // Bracket over 1..2; paragraph 0 uncovered and comes first.
+    const groupings = [grouping(1, 1, 2, 'late bracket')];
+    const result = outlineLabels(paras, groupings);
+    expect(result.map((r) => `${r.kind}:${r.ref}:${r.label}`)).toEqual([
+      'paragraph:0:I', // uncovered para 0 first
+      'grouping:0:II', // then the bracket
+      'paragraph:1:A',
+      'paragraph:2:B',
+    ]);
+  });
+
+  it('ignores a grouping with an out-of-range or inverted span', () => {
+    const paras = [para('p0'), para('p1')];
+    const bad = [
+      grouping(1, 0, 5, 'too wide'),
+      grouping(1, 1, 0, 'inverted'),
+      grouping(0, 0, 1, 'column 0'),
     ];
-    expect(labelsOf(nodes)).toEqual(['I', 'II']);
+    // All invalid → treated as a flat list.
+    expect(labelsOf(paras, bad)).toEqual(['I', 'II']);
+  });
+
+  it('rolls Roman numerals past single symbols for a long flat list', () => {
+    const paras = Array.from({ length: 9 }, (_, i) => para(`p${i}`));
+    expect(labelsOf(paras, [])).toEqual(['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX']);
+  });
+
+  it('rolls letters past Z to AA under a single parent', () => {
+    const paras = Array.from({ length: 27 }, (_, i) => para(`p${i}`));
+    const groupings = [grouping(1, 0, 26, 'big bracket')];
+    const labels = outlineLabels(paras, groupings).filter((r) => r.kind === 'paragraph');
+    expect(labels[0].label).toBe('A');
+    expect(labels[25].label).toBe('Z');
+    expect(labels[26].label).toBe('AA');
+  });
+
+  it('three columns cycle I / A / 1 / a with paragraphs at the leaf', () => {
+    // 2 paragraphs under col1 bracket, under col2, under col3 → depths 0,1,2 then paras at 3.
+    const paras = [para('p0'), para('p1')];
+    const groupings = [grouping(1, 0, 1), grouping(2, 0, 1), grouping(3, 0, 1)];
+    // I (col3) / A (col2) / 1 (col1) / then the two paragraphs at level 3 → lowercase a, b
+    expect(labelsOf(paras, groupings)).toEqual(['I', 'A', '1', 'a', 'b']);
   });
 });

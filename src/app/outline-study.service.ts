@@ -1,14 +1,15 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
-import { OutlineNode, OutlineStudy, OutlineStudyInput } from './models';
+import { OutlineGrouping, OutlineParagraph, OutlineStudy, OutlineStudyInput } from './models';
 import { environment } from './environment';
 
 /** Raw record shape returned by the API (DynamoDB field names, incl. PK/SK). */
 interface OutlineStudyRecord {
   scrollStudyId: string;
   userId: string;
-  nodes?: OutlineNode[];
+  paragraphs?: OutlineParagraph[];
+  groupings?: OutlineGrouping[];
   createdAt: string;
   updatedAt: string;
 }
@@ -17,7 +18,8 @@ function toOutlineStudy(record: OutlineStudyRecord): OutlineStudy {
   return {
     scrollStudyId: record.scrollStudyId,
     userId: record.userId,
-    nodes: record.nodes ?? [],
+    paragraphs: record.paragraphs ?? [],
+    groupings: record.groupings ?? [],
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

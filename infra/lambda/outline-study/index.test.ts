@@ -64,7 +64,8 @@ function putItem(callIndex: number): Record<string, unknown> {
   >;
 }
 
-const node = { title: 'Greeting', level: 0, startRef: '1:1', endRef: '1:2', notes: 'opens' };
+const paragraph = { startRef: '1:1', endRef: '1:2', mainIdea: 'Greeting', notes: 'opens' };
+const grouping = { column: 1, startIndex: 0, endIndex: 0, title: 'Opening', notes: '' };
 
 describe('Outline Study CRUD Lambda', () => {
   beforeEach(() => {
@@ -80,7 +81,8 @@ describe('Outline Study CRUD Lambda', () => {
         SK: 'OUTLINE#s1',
         scrollStudyId: 's1',
         userId: 'u1',
-        nodes: [node],
+        paragraphs: [paragraph],
+        groupings: [grouping],
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-02T00:00:00.000Z',
       };
@@ -119,31 +121,35 @@ describe('Outline Study CRUD Lambda', () => {
       mockSend.mockResolvedValueOnce({ Item: undefined }); // read-before-write: none yet
       mockSend.mockResolvedValueOnce({}); // put
 
-      const res = await handler(makePutEvent(JSON.stringify({ nodes: [node] })));
+      const res = await handler(
+        makePutEvent(JSON.stringify({ paragraphs: [paragraph], groupings: [grouping] })),
+      );
       expect(res.statusCode).toBe(200);
       const item = putItem(1);
       expect(item['PK']).toBe('USER#user-1');
       expect(item['SK']).toBe('OUTLINE#s1');
       expect(item['scrollStudyId']).toBe('s1');
       expect(item['userId']).toBe('user-1');
-      expect(item['nodes']).toEqual([node]);
+      expect(item['paragraphs']).toEqual([paragraph]);
+      expect(item['groupings']).toEqual([grouping]);
       expect(item['createdAt']).toBe(item['updatedAt']); // first save
       expect(JSON.parse(res.body).scrollStudyId).toBe('s1');
     });
 
-    it('defaults nodes to [] for an empty body object', async () => {
+    it('defaults paragraphs and groupings to [] for an empty body object', async () => {
       mockSend.mockResolvedValueOnce({ Item: undefined });
       mockSend.mockResolvedValueOnce({});
       const res = await handler(makePutEvent(JSON.stringify({})));
       expect(res.statusCode).toBe(200);
-      expect(putItem(1)['nodes']).toEqual([]);
+      expect(putItem(1)['paragraphs']).toEqual([]);
+      expect(putItem(1)['groupings']).toEqual([]);
     });
 
     it('ignores a userId supplied in the body (taken only from the claim)', async () => {
       mockSend.mockResolvedValueOnce({ Item: undefined });
       mockSend.mockResolvedValueOnce({});
       const res = await handler(
-        makePutEvent(JSON.stringify({ userId: 'attacker', nodes: [node] })),
+        makePutEvent(JSON.stringify({ userId: 'attacker', paragraphs: [paragraph] })),
       );
       expect(res.statusCode).toBe(200);
       expect(putItem(1)['userId']).toBe('user-1');
@@ -152,7 +158,7 @@ describe('Outline Study CRUD Lambda', () => {
     it('preserves createdAt and advances updatedAt across two sequential PUTs', async () => {
       mockSend.mockResolvedValueOnce({ Item: undefined });
       mockSend.mockResolvedValueOnce({});
-      await handler(makePutEvent(JSON.stringify({ nodes: [node] })));
+      await handler(makePutEvent(JSON.stringify({ paragraphs: [paragraph] })));
       const first = putItem(1);
       const firstCreatedAt = first['createdAt'] as string;
 
@@ -160,7 +166,7 @@ describe('Outline Study CRUD Lambda', () => {
       await new Promise((r) => setTimeout(r, 2));
       mockSend.mockResolvedValueOnce({ Item: first });
       mockSend.mockResolvedValueOnce({});
-      await handler(makePutEvent(JSON.stringify({ nodes: [node] })));
+      await handler(makePutEvent(JSON.stringify({ paragraphs: [paragraph] })));
       const second = putItem(1);
 
       expect(second['createdAt']).toBe(firstCreatedAt);
@@ -169,104 +175,177 @@ describe('Outline Study CRUD Lambda', () => {
       );
     });
 
-    it('preserves node order as sent', async () => {
+    it('preserves paragraph order as sent', async () => {
       mockSend.mockResolvedValueOnce({ Item: undefined });
       mockSend.mockResolvedValueOnce({});
-      const nodes = [
-        { title: 'C', level: 0, startRef: '', endRef: '', notes: '' },
-        { title: 'A', level: 1, startRef: '', endRef: '', notes: '' },
-        { title: 'B', level: 0, startRef: '', endRef: '', notes: '' },
+      const paragraphs = [
+        { startRef: '', endRef: '', mainIdea: 'C', notes: '' },
+        { startRef: '', endRef: '', mainIdea: 'A', notes: '' },
+        { startRef: '', endRef: '', mainIdea: 'B', notes: '' },
       ];
-      await handler(makePutEvent(JSON.stringify({ nodes })));
-      expect((putItem(1)['nodes'] as Array<{ title: string }>).map((n) => n.title)).toEqual([
-        'C',
-        'A',
-        'B',
-      ]);
+      await handler(makePutEvent(JSON.stringify({ paragraphs })));
+      expect(
+        (putItem(1)['paragraphs'] as Array<{ mainIdea: string }>).map((p) => p.mainIdea),
+      ).toEqual(['C', 'A', 'B']);
     });
 
-    it('defaults optional ref/notes fields on a node to empty strings', async () => {
+    it('defaults optional ref/notes fields on a paragraph to empty strings', async () => {
       mockSend.mockResolvedValueOnce({ Item: undefined });
       mockSend.mockResolvedValueOnce({});
       const res = await handler(
-        makePutEvent(JSON.stringify({ nodes: [{ title: 'bare', level: 2 }] })),
+        makePutEvent(JSON.stringify({ paragraphs: [{ mainIdea: 'bare' }] })),
       );
       expect(res.statusCode).toBe(200);
-      expect(putItem(1)['nodes']).toEqual([
-        { title: 'bare', level: 2, startRef: '', endRef: '', notes: '' },
+      expect(putItem(1)['paragraphs']).toEqual([
+        { startRef: '', endRef: '', mainIdea: 'bare', notes: '' },
       ]);
     });
 
-    // --- validation ---
-
-    it('rejects an empty node title with 400', async () => {
+    it('defaults optional notes on a grouping to an empty string', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
       const res = await handler(
-        makePutEvent(JSON.stringify({ nodes: [{ ...node, title: '   ' }] })),
+        makePutEvent(
+          JSON.stringify({
+            paragraphs: [paragraph],
+            groupings: [{ column: 1, startIndex: 0, endIndex: 0, title: 'g' }],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+      expect(putItem(1)['groupings']).toEqual([
+        { column: 1, startIndex: 0, endIndex: 0, title: 'g', notes: '' },
+      ]);
+    });
+
+    // --- paragraph validation ---
+
+    it('rejects an empty paragraph mainIdea with 400', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ paragraphs: [{ ...paragraph, mainIdea: '   ' }] })),
       );
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/title/i);
+      expect(JSON.parse(res.body).message).toMatch(/mainIdea/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it('rejects an over-length node title with 400', async () => {
+    it('rejects an over-length paragraph mainIdea with 400', async () => {
       const res = await handler(
-        makePutEvent(JSON.stringify({ nodes: [{ ...node, title: 'a'.repeat(201) }] })),
+        makePutEvent(JSON.stringify({ paragraphs: [{ ...paragraph, mainIdea: 'a'.repeat(201) }] })),
       );
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/title/i);
+      expect(JSON.parse(res.body).message).toMatch(/mainIdea/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it('rejects a non-integer level with 400', async () => {
-      const res = await handler(makePutEvent(JSON.stringify({ nodes: [{ ...node, level: 1.5 }] })));
-      expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/level/i);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('rejects a level below 0 with 400', async () => {
-      const res = await handler(makePutEvent(JSON.stringify({ nodes: [{ ...node, level: -1 }] })));
-      expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/level/i);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('rejects a level above 3 with 400', async () => {
-      const res = await handler(makePutEvent(JSON.stringify({ nodes: [{ ...node, level: 4 }] })));
-      expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/level/i);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('rejects a missing level with 400', async () => {
-      const res = await handler(makePutEvent(JSON.stringify({ nodes: [{ title: 'x' }] })));
-      expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/level/i);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('rejects an over-length startRef with 400', async () => {
+    it('rejects an over-length paragraph startRef with 400', async () => {
       const res = await handler(
-        makePutEvent(JSON.stringify({ nodes: [{ ...node, startRef: 'a'.repeat(51) }] })),
+        makePutEvent(JSON.stringify({ paragraphs: [{ ...paragraph, startRef: 'a'.repeat(51) }] })),
       );
       expect(res.statusCode).toBe(400);
       expect(JSON.parse(res.body).message).toMatch(/startRef/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it('rejects over-length notes with 400', async () => {
+    it('rejects over-length paragraph notes with 400', async () => {
       const res = await handler(
-        makePutEvent(JSON.stringify({ nodes: [{ ...node, notes: 'a'.repeat(1001) }] })),
+        makePutEvent(JSON.stringify({ paragraphs: [{ ...paragraph, notes: 'a'.repeat(1001) }] })),
       );
       expect(res.statusCode).toBe(400);
       expect(JSON.parse(res.body).message).toMatch(/notes/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it('rejects a non-array nodes field with 400', async () => {
-      const res = await handler(makePutEvent(JSON.stringify({ nodes: 'nope' })));
+    it('rejects a non-array paragraphs field with 400', async () => {
+      const res = await handler(makePutEvent(JSON.stringify({ paragraphs: 'nope' })));
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).message).toMatch(/nodes must be an array/i);
+      expect(JSON.parse(res.body).message).toMatch(/paragraphs must be an array/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    // --- grouping validation ---
+
+    it('rejects a grouping with column below 1 with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({ paragraphs: [paragraph], groupings: [{ ...grouping, column: 0 }] }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/column/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a grouping with a non-integer column with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({ paragraphs: [paragraph], groupings: [{ ...grouping, column: 1.5 }] }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/column/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a grouping span out of range (endIndex >= paragraphs.length) with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            paragraphs: [paragraph], // length 1 → valid index only 0
+            groupings: [{ ...grouping, startIndex: 0, endIndex: 1 }],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/startIndex\/endIndex|span/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects an inverted grouping span (endIndex < startIndex) with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            paragraphs: [paragraph, { ...paragraph, mainIdea: 'p1' }],
+            groupings: [{ ...grouping, startIndex: 1, endIndex: 0 }],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/startIndex\/endIndex|span/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a grouping with an empty title with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({ paragraphs: [paragraph], groupings: [{ ...grouping, title: '  ' }] }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/title/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects an over-length grouping title with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            paragraphs: [paragraph],
+            groupings: [{ ...grouping, title: 'a'.repeat(201) }],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/title/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-array groupings field with 400', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ paragraphs: [paragraph], groupings: 'nope' })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/groupings must be an array/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
