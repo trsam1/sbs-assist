@@ -162,12 +162,27 @@ export interface StructureStudyInput {
   elements?: StructureElement[];
 }
 
-/** One node of the provisional outline (Step 8). Nesting is encoded by `level`, not children. */
-export interface OutlineNode {
-  title: string; // required free text (<=200)
-  level: number; // 0 = "I", 1 = "A", 2 = "1", 3 = "a"; integer 0..3
+/**
+ * One paragraph of the book — the atomic row of the Step 8 outline (the leftmost column).
+ * Paragraphs are stored in reading order; a grouping references them by index.
+ */
+export interface OutlineParagraph {
   startRef: string; // optional free text, '' when unset (<=50)
   endRef: string; // optional free text, '' when unset (<=50)
+  mainIdea: string; // required free text — the single-statement main idea / working title (<=200)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/**
+ * A grouping: a contiguous span of paragraphs merged and titled, at a given merge column.
+ * `column` 1 is the first bracket column, 2 the next, and so on to the right. `startIndex`/
+ * `endIndex` are inclusive indices into the ordered `paragraphs` array (always contiguous).
+ */
+export interface OutlineGrouping {
+  column: number; // 1 = first bracket column, 2 = next, …; integer >= 1
+  startIndex: number; // first paragraph covered (inclusive), integer >= 0
+  endIndex: number; // last paragraph covered (inclusive); startIndex <= endIndex < paragraphs.length
+  title: string; // required free text (<=200)
   notes: string; // free text, '' when unset (<=1000)
 }
 
@@ -175,12 +190,14 @@ export interface OutlineNode {
 export interface OutlineStudy {
   scrollStudyId: string;
   userId: string; // Cognito sub
-  nodes: OutlineNode[]; // ordered; levels encode nesting
+  paragraphs: OutlineParagraph[]; // ordered, reading order; the leftmost column
+  groupings: OutlineGrouping[]; // contiguous paragraph spans in columns to the right
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
 
 /** Save payload from the outline view (server sets userId/timestamps). */
 export interface OutlineStudyInput {
-  nodes?: OutlineNode[];
+  paragraphs?: OutlineParagraph[];
+  groupings?: OutlineGrouping[];
 }

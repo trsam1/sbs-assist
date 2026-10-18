@@ -27,7 +27,8 @@ function makeOutlineStudy(overrides: Partial<OutlineStudy> = {}): OutlineStudy {
   return {
     scrollStudyId: 's1',
     userId: 'u1',
-    nodes: [],
+    paragraphs: [],
+    groupings: [],
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
@@ -106,116 +107,206 @@ describe('OutlineViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('ready');
-    expect(query('[data-testid="outline-nodes"]')).not.toBeNull();
+    expect(query('[data-testid="outline-flow"]')).not.toBeNull();
     expect(query('[data-testid="outline-empty"]')).not.toBeNull();
-    expect(queryAll('[data-testid="node-row"]').length).toBe(0);
-    // no Step 7 structure → no import affordance, no standard-form box
+    expect(queryAll('[data-testid="paragraph-row"]').length).toBe(0);
     expect(query('[data-testid="outline-import"]')).toBeNull();
     expect(query('[data-testid="outline-standard-form"]')).toBeNull();
   });
 
-  it('renders a saved outline and its standard-form view', () => {
+  it('renders a saved outline (paragraphs + a bracket) and its standard-form view', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeStudy()));
     getOutlineSpy.mockReturnValue(
       of(
         makeOutlineStudy({
-          nodes: [
-            { title: 'Greeting', level: 0, startRef: '1:1', endRef: '1:2', notes: '' },
-            { title: 'Thanksgiving', level: 1, startRef: '1:3', endRef: '1:11', notes: 'n' },
+          paragraphs: [
+            { startRef: '1:1', endRef: '1:2', mainIdea: 'Greeting', notes: '' },
+            { startRef: '1:3', endRef: '1:11', mainIdea: 'Thanksgiving', notes: 'n' },
           ],
+          groupings: [{ column: 1, startIndex: 0, endIndex: 1, title: 'Opening', notes: '' }],
         }),
       ),
     );
     fixture.detectChanges();
 
-    expect(queryAll('[data-testid="node-row"]').length).toBe(2);
-    const labels = queryAll('[data-testid="node-label"]').map((e) => e.textContent?.trim());
-    expect(labels).toEqual(['I', 'A']);
-    // standard-form box present with a row per node
+    expect(queryAll('[data-testid="paragraph-row"]').length).toBe(2);
+    expect(queryAll('[data-testid="grouping-block"]').length).toBe(1);
     expect(query('[data-testid="outline-standard-form"]')).not.toBeNull();
-    expect(queryAll('[data-testid="standard-row"]').length).toBe(2);
+    // Standard form: bracket "I", paragraphs "A"/"B".
+    const rows = queryAll('[data-testid="standard-row"]').map((e) => e.textContent?.trim());
+    expect(rows.length).toBe(3);
+    expect(rows[0]).toContain('I.');
+    expect(rows[0]).toContain('Opening');
   });
 
-  it('adds a node inheriting the previous node level, titles it, and removes it', () => {
+  it('adds a paragraph, edits its fields, and removes it', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeStudy()));
     fixture.detectChanges();
 
-    component.addNode();
-    component.setNodeTitle(0, 'First');
-    expect(component.nodes()[0]).toEqual({
-      title: 'First',
-      level: 0,
-      startRef: '',
-      endRef: '',
-      notes: '',
-    });
-
-    component.indentNode(0); // level 0 → 1
-    component.addNode(); // new node inherits previous node's level (1)
-    expect(component.nodes()[1].level).toBe(1);
-
-    component.removeNode(0);
-    expect(component.nodes().length).toBe(1);
-    expect(component.nodes()[0].level).toBe(1);
-  });
-
-  it('edits title/startRef/endRef/notes on a single node only', () => {
-    configure();
-    getScrollSpy.mockReturnValue(of(makeStudy()));
-    fixture.detectChanges();
-
-    component.addNode();
-    component.addNode();
-    component.setNodeTitle(1, 'Second');
-    component.setNodeStartRef(1, '2:1');
-    component.setNodeEndRef(1, '2:4');
-    component.setNodeNotes(1, 'why');
-
-    expect(component.nodes()[0]).toEqual({
-      title: '',
-      level: 0,
-      startRef: '',
-      endRef: '',
-      notes: '',
-    });
-    expect(component.nodes()[1]).toEqual({
-      title: 'Second',
-      level: 0,
-      startRef: '2:1',
-      endRef: '2:4',
+    component.addParagraph();
+    component.setParagraphMainIdea(0, 'First idea');
+    component.setParagraphStartRef(0, '1:1');
+    component.setParagraphEndRef(0, '1:3');
+    component.setParagraphNotes(0, 'why');
+    expect(component.paragraphs()[0]).toEqual({
+      startRef: '1:1',
+      endRef: '1:3',
+      mainIdea: 'First idea',
       notes: 'why',
     });
+
+    component.removeParagraph(0);
+    expect(component.paragraphs().length).toBe(0);
   });
 
-  it('moves nodes up and down preserving level', () => {
+  it('merges a contiguous selection into a column-1 bracket and rejects a non-adjacent one', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeStudy()));
     fixture.detectChanges();
 
-    component.addNode();
-    component.setNodeTitle(0, 'A');
-    component.addNode();
-    component.setNodeTitle(1, 'B');
-    component.indentNode(1);
+    component.addParagraph();
+    component.addParagraph();
+    component.addParagraph();
+    component.setParagraphMainIdea(0, 'p0');
+    component.setParagraphMainIdea(1, 'p1');
+    component.setParagraphMainIdea(2, 'p2');
 
-    component.moveNode(1, -1);
-    expect(component.nodes().map((n) => n.title)).toEqual(['B', 'A']);
-    expect(component.nodes()[0].level).toBe(1); // B kept its level through the move
+    // non-adjacent selection {0, 2} is not mergeable
+    component.toggleSelect(0);
+    component.toggleSelect(2);
+    expect(component.canMergeSelection()).toBe(false);
+    component.mergeSelection();
+    expect(component.selectionError()).toBe(true);
+    expect(component.groupings().length).toBe(0);
+
+    // contiguous selection {0, 1} merges
+    component.clearSelection();
+    component.toggleSelect(0);
+    component.toggleSelect(1);
+    expect(component.canMergeSelection()).toBe(true);
+    component.mergeSelection();
+    expect(component.groupings()).toEqual([
+      { column: 1, startIndex: 0, endIndex: 1, title: '', notes: '' },
+    ]);
+    expect(component.selection()).toEqual([]); // cleared after merge
   });
 
-  it('clamps indent at MAX_LEVEL and outdent at 0', () => {
+  it('titles a grouping and un-merges it', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeStudy()));
     fixture.detectChanges();
+    component.addParagraph();
+    component.addParagraph();
+    component.setParagraphMainIdea(0, 'p0');
+    component.setParagraphMainIdea(1, 'p1');
+    component.toggleSelect(0);
+    component.toggleSelect(1);
+    component.mergeSelection();
 
-    component.addNode();
-    for (let i = 0; i < 10; i++) component.indentNode(0);
-    expect(component.nodes()[0].level).toBe(component.maxLevel);
+    component.setGroupingTitle(0, 'Bracket A');
+    expect(component.groupings()[0].title).toBe('Bracket A');
 
-    for (let i = 0; i < 10; i++) component.outdentNode(0);
-    expect(component.nodes()[0].level).toBe(0);
+    component.removeGrouping(0);
+    expect(component.groupings().length).toBe(0);
+    expect(component.paragraphs().length).toBe(2); // paragraphs untouched
+  });
+
+  it('groups two adjacent brackets into a column-2 grouping', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+    for (let i = 0; i < 4; i++) {
+      component.addParagraph();
+      component.setParagraphMainIdea(i, `p${i}`);
+    }
+    // bracket [0,1]
+    component.toggleSelect(0);
+    component.toggleSelect(1);
+    component.mergeSelection();
+    // bracket [2,3]
+    component.toggleSelect(2);
+    component.toggleSelect(3);
+    component.mergeSelection();
+    expect(component.groupings().length).toBe(2);
+
+    // promote the first bracket (ref 0): it has an adjacent same-column bracket at [2,3]
+    expect(component.canPromote(0)).toBe(true);
+    component.promoteGrouping(0);
+    const col2 = component.groupings().filter((g) => g.column === 2);
+    expect(col2).toEqual([{ column: 2, startIndex: 0, endIndex: 3, title: '', notes: '' }]);
+  });
+
+  it('shrinks a grouping span when a covered paragraph is removed', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+    for (let i = 0; i < 3; i++) {
+      component.addParagraph();
+      component.setParagraphMainIdea(i, `p${i}`);
+    }
+    // bracket over 0..2
+    component.toggleSelect(0);
+    component.toggleSelect(1);
+    component.toggleSelect(2);
+    component.mergeSelection();
+    expect(component.groupings()[0]).toMatchObject({ startIndex: 0, endIndex: 2 });
+
+    component.removeParagraph(1); // removes a middle covered paragraph
+    expect(component.paragraphs().length).toBe(2);
+    expect(component.groupings()[0]).toMatchObject({ startIndex: 0, endIndex: 1 });
+  });
+
+  it('drops a grouping that covered only the removed paragraph', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+    for (let i = 0; i < 2; i++) {
+      component.addParagraph();
+      component.setParagraphMainIdea(i, `p${i}`);
+    }
+    // Build a 1-paragraph grouping by merging then removing the sibling is awkward; instead place a
+    // grouping over [1,1] directly via a saved load, then remove paragraph 1.
+    getOutlineSpy.mockReturnValue(
+      of(
+        makeOutlineStudy({
+          paragraphs: [
+            { startRef: '', endRef: '', mainIdea: 'p0', notes: '' },
+            { startRef: '', endRef: '', mainIdea: 'p1', notes: '' },
+          ],
+          groupings: [{ column: 1, startIndex: 1, endIndex: 1, title: 'solo', notes: '' }],
+        }),
+      ),
+    );
+    component.load();
+    fixture.detectChanges();
+    expect(component.groupings().length).toBe(1);
+    component.removeParagraph(1);
+    expect(component.groupings().length).toBe(0);
+  });
+
+  it('does not move a paragraph when the move would split a grouping', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+    for (let i = 0; i < 3; i++) {
+      component.addParagraph();
+      component.setParagraphMainIdea(i, `p${i}`);
+    }
+    // bracket over 0..1
+    component.toggleSelect(0);
+    component.toggleSelect(1);
+    component.mergeSelection();
+
+    // moving paragraph 1 (inside) down to index 2 (outside) would split the bracket → no-op
+    component.moveParagraph(1, 1);
+    expect(component.paragraphs().map((p) => p.mainIdea)).toEqual(['p0', 'p1', 'p2']);
+
+    // moving paragraph 0 and 1 within the bracket is fine
+    component.moveParagraph(0, 1);
+    expect(component.paragraphs().map((p) => p.mainIdea)).toEqual(['p1', 'p0', 'p2']);
+    expect(component.groupings()[0]).toMatchObject({ startIndex: 0, endIndex: 1 });
   });
 
   it('offers import from Step 7 only when a structure has sections and the outline is empty', () => {
@@ -239,19 +330,17 @@ describe('OutlineViewComponent', () => {
     component.importFromStep7();
     fixture.detectChanges();
 
-    expect(component.nodes().map((n) => ({ title: n.title, level: n.level }))).toEqual([
-      { title: 'Opening', level: 0 },
-      { title: 'Body', level: 0 },
-    ]);
-    // refs/notes carry over
-    expect(component.nodes()[0].startRef).toBe('1:1');
-    expect(component.nodes()[0].notes).toBe('greet');
-    // once nodes exist, import is no longer offered and does not overwrite
+    expect(component.paragraphs().map((p) => p.mainIdea)).toEqual(['Opening', 'Body']);
+    expect(component.paragraphs()[0].startRef).toBe('1:1');
+    expect(component.paragraphs()[0].notes).toBe('greet');
+    expect(component.groupings().length).toBe(0);
+
+    // once paragraphs exist, import is no longer offered and does not overwrite
     expect(component.canImport()).toBe(false);
     fixture.detectChanges();
     expect(query('[data-testid="outline-import"]')).toBeNull();
     component.importFromStep7();
-    expect(component.nodes().length).toBe(2);
+    expect(component.paragraphs().length).toBe(2);
   });
 
   it('does not offer import when the structure has no sections', () => {
@@ -263,27 +352,56 @@ describe('OutlineViewComponent', () => {
     expect(query('[data-testid="outline-import"]')).toBeNull();
   });
 
-  it('saves, dropping empty-title nodes, and reflects the normalised result', () => {
+  it('saves, dropping empty-mainIdea paragraphs and empty-title groupings, and reflects the result', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeStudy()));
     const normalised = makeOutlineStudy({
-      nodes: [{ title: 'Kept', level: 0, startRef: '', endRef: '', notes: '' }],
+      paragraphs: [{ startRef: '', endRef: '', mainIdea: 'Kept', notes: '' }],
+      groupings: [],
     });
     saveSpy.mockReturnValue(of(normalised));
     fixture.detectChanges();
 
-    component.addNode();
-    component.setNodeTitle(0, 'Kept');
-    component.addNode(); // empty title — should be dropped before send
+    component.addParagraph();
+    component.setParagraphMainIdea(0, 'Kept');
+    component.addParagraph(); // empty mainIdea — dropped before send
     component.save();
     fixture.detectChanges();
 
     expect(saveSpy).toHaveBeenCalledWith('s1', {
-      nodes: [{ title: 'Kept', level: 0, startRef: '', endRef: '', notes: '' }],
+      paragraphs: [{ startRef: '', endRef: '', mainIdea: 'Kept', notes: '' }],
+      groupings: [],
     });
     expect(component.saved()).toBe(true);
-    expect(component.nodes()).toEqual(normalised.nodes);
+    expect(component.paragraphs()).toEqual(normalised.paragraphs);
     expect(query('[data-testid="outline-saved"]')).not.toBeNull();
+  });
+
+  it('remaps grouping spans when an empty paragraph before them is dropped on save', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    saveSpy.mockImplementation((_id: string, input: unknown) => of(input));
+    fixture.detectChanges();
+
+    // p0 (empty, dropped), p1 'a', p2 'b' with a bracket over [1,2]
+    component.addParagraph(); // index 0, empty
+    component.addParagraph();
+    component.setParagraphMainIdea(1, 'a');
+    component.addParagraph();
+    component.setParagraphMainIdea(2, 'b');
+    component.toggleSelect(1);
+    component.toggleSelect(2);
+    component.mergeSelection();
+    component.setGroupingTitle(0, 'Bracket');
+
+    component.save();
+    // On save, p0 is dropped; the bracket [1,2] should remap to [0,1].
+    const call = saveSpy.mock.calls[0][1] as {
+      paragraphs: unknown[];
+      groupings: { startIndex: number; endIndex: number }[];
+    };
+    expect(call.paragraphs.length).toBe(2);
+    expect(call.groupings[0]).toMatchObject({ startIndex: 0, endIndex: 1 });
   });
 
   it('keeps entered values and shows an error when save fails', () => {
@@ -292,13 +410,13 @@ describe('OutlineViewComponent', () => {
     saveSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
 
-    component.addNode();
-    component.setNodeTitle(0, 'Still here');
+    component.addParagraph();
+    component.setParagraphMainIdea(0, 'Still here');
     component.save();
     fixture.detectChanges();
 
     expect(component.saveError()).toBe(true);
-    expect(component.nodes()[0].title).toBe('Still here');
+    expect(component.paragraphs()[0].mainIdea).toBe('Still here');
     expect(query('[data-testid="outline-save-error"]')).not.toBeNull();
   });
 

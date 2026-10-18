@@ -1,6 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
-import type { OutlineNode, OutlineStudyRecord } from '../shared/models';
+import type { OutlineGrouping, OutlineParagraph, OutlineStudyRecord } from '../shared/models';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
 
 const client = new DynamoDBClient({});
@@ -8,12 +8,10 @@ const docClient = DynamoDBDocumentClient.from(client);
 const tableName = process.env['OUTLINE_STUDIES_TABLE_NAME'] ?? '';
 
 /** Field length caps (chars). The server rejects over-length input; it never truncates. */
+const MAIN_IDEA_MAX = 200;
 const TITLE_MAX = 200;
 const SHORT_REF_MAX = 50;
 const NOTES_MAX = 1000;
-
-/** The deepest nesting level a node may carry (0 = "I", 3 = "a"). */
-const MAX_LEVEL = 3;
 
 interface APIGatewayEvent {
   httpMethod: string;
@@ -46,16 +44,21 @@ function optionalString(value: unknown, max: number): { value: string } | { erro
 }
 
 interface ParsedBody {
-  nodes: OutlineNode[];
+  paragraphs: OutlineParagraph[];
+  groupings: OutlineGrouping[];
 }
 
 type ParseResult = ParsedBody | { error: string };
 
 /**
- * Parse and validate the PUT body. Server validation never trusts the client: `nodes` is an
- * optional array (absent → []), each node's `title` must be a non-empty string within the cap,
- * `level` must be an integer in 0..MAX_LEVEL, and the ref/notes fields are length-checked. Any
- * malformed or over-length value is rejected rather than coerced.
+ * Parse and validate the PUT body. Server validation never trusts the client:
+ * - `paragraphs` is an optional array (absent → []); each has a non-empty `mainIdea` within the cap
+ *   and length-checked ref/notes fields.
+ * - `groupings` is an optional array (absent → []); each has an integer `column >= 1`, an integer
+ *   span `0 <= startIndex <= endIndex < paragraphs.length`, a non-empty `title`, and length-checked
+ *   notes. A span out of range or inverted is rejected, so a persisted record can never carry a
+ *   non-contiguous or dangling grouping.
+ * Any malformed or over-length value is rejected rather than coerced.
  */
 function parsePutBody(body: string | null | undefined): ParseResult {
   if (!body) return { error: 'Request body is required.' };
@@ -70,46 +73,96 @@ function parsePutBody(body: string | null | undefined): ParseResult {
     return { error: 'Invalid request body.' };
   }
 
-  const nodes: OutlineNode[] = [];
-  const rawNodes = parsed['nodes'];
-  if (rawNodes !== undefined) {
-    if (!Array.isArray(rawNodes)) return { error: 'nodes must be an array.' };
-    for (const el of rawNodes) {
-      if (!isObject(el)) return { error: 'Each node must be an object.' };
+  // --- paragraphs ---
+  const paragraphs: OutlineParagraph[] = [];
+  const rawParagraphs = parsed['paragraphs'];
+  if (rawParagraphs !== undefined) {
+    if (!Array.isArray(rawParagraphs)) return { error: 'paragraphs must be an array.' };
+    for (const el of rawParagraphs) {
+      if (!isObject(el)) return { error: 'Each paragraph must be an object.' };
 
-      if (typeof el['title'] !== 'string' || el['title'].trim().length === 0) {
-        return { error: 'node.title must be a non-empty string.' };
+      if (typeof el['mainIdea'] !== 'string' || el['mainIdea'].trim().length === 0) {
+        return { error: 'paragraph.mainIdea must be a non-empty string.' };
       }
-      if (el['title'].length > TITLE_MAX) {
-        return { error: `node.title must be at most ${TITLE_MAX} characters.` };
-      }
-
-      const level = el['level'];
-      if (typeof level !== 'number' || !Number.isInteger(level) || level < 0 || level > MAX_LEVEL) {
-        return { error: `node.level must be an integer between 0 and ${MAX_LEVEL}.` };
+      if (el['mainIdea'].length > MAIN_IDEA_MAX) {
+        return { error: `paragraph.mainIdea must be at most ${MAIN_IDEA_MAX} characters.` };
       }
 
       const startRes = optionalString(el['startRef'], SHORT_REF_MAX);
       if ('error' in startRes)
-        return { error: `node.startRef must be a string of at most ${SHORT_REF_MAX} characters.` };
+        return {
+          error: `paragraph.startRef must be a string of at most ${SHORT_REF_MAX} characters.`,
+        };
       const endRes = optionalString(el['endRef'], SHORT_REF_MAX);
       if ('error' in endRes)
-        return { error: `node.endRef must be a string of at most ${SHORT_REF_MAX} characters.` };
+        return {
+          error: `paragraph.endRef must be a string of at most ${SHORT_REF_MAX} characters.`,
+        };
       const notesRes = optionalString(el['notes'], NOTES_MAX);
       if ('error' in notesRes)
-        return { error: `node.notes must be a string of at most ${NOTES_MAX} characters.` };
+        return { error: `paragraph.notes must be a string of at most ${NOTES_MAX} characters.` };
 
-      nodes.push({
-        title: el['title'],
-        level,
+      paragraphs.push({
         startRef: startRes.value,
         endRef: endRes.value,
+        mainIdea: el['mainIdea'],
         notes: notesRes.value,
       });
     }
   }
 
-  return { nodes };
+  // --- groupings (validated against the paragraph count) ---
+  const groupings: OutlineGrouping[] = [];
+  const rawGroupings = parsed['groupings'];
+  if (rawGroupings !== undefined) {
+    if (!Array.isArray(rawGroupings)) return { error: 'groupings must be an array.' };
+    for (const el of rawGroupings) {
+      if (!isObject(el)) return { error: 'Each grouping must be an object.' };
+
+      const column = el['column'];
+      if (typeof column !== 'number' || !Number.isInteger(column) || column < 1) {
+        return { error: 'grouping.column must be an integer of at least 1.' };
+      }
+
+      const startIndex = el['startIndex'];
+      const endIndex = el['endIndex'];
+      if (
+        typeof startIndex !== 'number' ||
+        !Number.isInteger(startIndex) ||
+        typeof endIndex !== 'number' ||
+        !Number.isInteger(endIndex) ||
+        startIndex < 0 ||
+        endIndex < startIndex ||
+        endIndex >= paragraphs.length
+      ) {
+        return {
+          error:
+            'grouping.startIndex/endIndex must be integers forming a span within the paragraphs.',
+        };
+      }
+
+      if (typeof el['title'] !== 'string' || el['title'].trim().length === 0) {
+        return { error: 'grouping.title must be a non-empty string.' };
+      }
+      if (el['title'].length > TITLE_MAX) {
+        return { error: `grouping.title must be at most ${TITLE_MAX} characters.` };
+      }
+
+      const gNotesRes = optionalString(el['notes'], NOTES_MAX);
+      if ('error' in gNotesRes)
+        return { error: `grouping.notes must be a string of at most ${NOTES_MAX} characters.` };
+
+      groupings.push({
+        column,
+        startIndex,
+        endIndex,
+        title: el['title'],
+        notes: gNotesRes.value,
+      });
+    }
+  }
+
+  return { paragraphs, groupings };
 }
 
 async function getOutlineStudy(
@@ -144,7 +197,8 @@ async function saveOutlineStudy(
     ...key,
     scrollStudyId,
     userId,
-    nodes: body.nodes,
+    paragraphs: body.paragraphs,
+    groupings: body.groupings,
     createdAt,
     updatedAt: now,
   };
