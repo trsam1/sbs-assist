@@ -10,6 +10,8 @@ interface OutlineStudyRecord {
   userId: string;
   paragraphs?: OutlineParagraph[];
   groupings?: OutlineGrouping[];
+  theme?: string;
+  purpose?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -20,6 +22,8 @@ function toOutlineStudy(record: OutlineStudyRecord): OutlineStudy {
     userId: record.userId,
     paragraphs: record.paragraphs ?? [],
     groupings: record.groupings ?? [],
+    theme: record.theme ?? '',
+    purpose: record.purpose ?? '',
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

@@ -59,6 +59,47 @@ function normalize(
             </div>
           }
           @case ('ready') {
+            <!-- Step 9: Theme & Purpose — pinned atop the outline, where the method states them -->
+            <div class="box" data-testid="theme-purpose-panel">
+              <h3 class="title is-5 mb-2">Theme &amp; Purpose (Step 9)</h3>
+              <p class="help mb-3" data-testid="theme-purpose-help">
+                Once your outline takes shape, state the book's <strong>theme</strong> — what it is
+                about, in a few words — and its <strong>purpose</strong> — the author's goal, in one
+                sentence. These are your own condensation of the outline below; the tool captures
+                them, it does not suggest them.
+              </p>
+              <div class="field">
+                <label class="label is-small" for="outline-theme">Theme</label>
+                <div class="control">
+                  <input
+                    id="outline-theme"
+                    class="input"
+                    type="text"
+                    maxlength="80"
+                    placeholder="What the book is about (e.g. Justification by faith)"
+                    [ngModel]="theme()"
+                    (ngModelChange)="setTheme($event)"
+                    data-testid="outline-theme"
+                  />
+                </div>
+              </div>
+              <div class="field">
+                <label class="label is-small" for="outline-purpose">Purpose</label>
+                <div class="control">
+                  <textarea
+                    id="outline-purpose"
+                    class="textarea"
+                    rows="2"
+                    maxlength="500"
+                    placeholder="The author's goal, in one sentence"
+                    [ngModel]="purpose()"
+                    (ngModelChange)="setPurpose($event)"
+                    data-testid="outline-purpose"
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+
             <p class="mb-4">
               Build your outline left to right: list the book's paragraphs on the left (each with a
               start/stop reference and a one-line main idea), then select a run of related
@@ -403,6 +444,10 @@ export class OutlineViewComponent implements OnInit {
   readonly paragraphs = signal<OutlineParagraph[]>([]);
   readonly groupings = signal<OutlineGrouping[]>([]);
 
+  // Step 9: theme & purpose — student-authored free text, pinned atop the outline.
+  readonly theme = signal('');
+  readonly purpose = signal('');
+
   // Transient UI: the current contiguous paragraph selection (sorted indices) for a merge.
   readonly selection = signal<number[]>([]);
   readonly selectionError = signal(false);
@@ -472,6 +517,8 @@ export class OutlineViewComponent implements OnInit {
         const n = normalize(saved.paragraphs, saved.groupings);
         this.paragraphs.set(n.paragraphs);
         this.groupings.set(n.groupings);
+        this.theme.set(saved.theme ?? '');
+        this.purpose.set(saved.purpose ?? '');
       },
       error: () => {
         // 404 (no saved study) or a transient error: leave the empty editable worksheet in place.
@@ -509,6 +556,15 @@ export class OutlineViewComponent implements OnInit {
     return kind === 'grouping'
       ? (this.groupings()[ref]?.title ?? '')
       : (this.paragraphs()[ref]?.mainIdea ?? '');
+  }
+
+  // --- Step 9: theme & purpose ---
+
+  setTheme(theme: string): void {
+    this.theme.set(theme);
+  }
+  setPurpose(purpose: string): void {
+    this.purpose.set(purpose);
   }
 
   // --- paragraph column ---
@@ -761,18 +817,27 @@ export class OutlineViewComponent implements OnInit {
     this.saving.set(true);
     this.saved.set(false);
     this.saveError.set(false);
-    this.outlineStudy.save(this.scrollStudyId, { paragraphs, groupings }).subscribe({
-      next: (savedStudy) => {
-        this.saving.set(false);
-        this.saved.set(true);
-        const n = normalize(savedStudy.paragraphs, savedStudy.groupings);
-        this.paragraphs.set(n.paragraphs);
-        this.groupings.set(n.groupings);
-      },
-      error: () => {
-        this.saving.set(false);
-        this.saveError.set(true);
-      },
-    });
+    this.outlineStudy
+      .save(this.scrollStudyId, {
+        paragraphs,
+        groupings,
+        theme: this.theme().trim(),
+        purpose: this.purpose().trim(),
+      })
+      .subscribe({
+        next: (savedStudy) => {
+          this.saving.set(false);
+          this.saved.set(true);
+          const n = normalize(savedStudy.paragraphs, savedStudy.groupings);
+          this.paragraphs.set(n.paragraphs);
+          this.groupings.set(n.groupings);
+          this.theme.set(savedStudy.theme ?? '');
+          this.purpose.set(savedStudy.purpose ?? '');
+        },
+        error: () => {
+          this.saving.set(false);
+          this.saveError.set(true);
+        },
+      });
   }
 }

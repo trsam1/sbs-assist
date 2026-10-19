@@ -12,6 +12,8 @@ const MAIN_IDEA_MAX = 200;
 const TITLE_MAX = 200;
 const SHORT_REF_MAX = 50;
 const NOTES_MAX = 1000;
+const THEME_MAX = 80;
+const PURPOSE_MAX = 500;
 
 interface APIGatewayEvent {
   httpMethod: string;
@@ -46,6 +48,8 @@ function optionalString(value: unknown, max: number): { value: string } | { erro
 interface ParsedBody {
   paragraphs: OutlineParagraph[];
   groupings: OutlineGrouping[];
+  theme: string;
+  purpose: string;
 }
 
 type ParseResult = ParsedBody | { error: string };
@@ -58,6 +62,8 @@ type ParseResult = ParsedBody | { error: string };
  *   span `0 <= startIndex <= endIndex < paragraphs.length`, a non-empty `title`, and length-checked
  *   notes. A span out of range or inverted is rejected, so a persisted record can never carry a
  *   non-contiguous or dangling grouping.
+ * - `theme` and `purpose` (Step 9) are optional free-text strings (absent → ''), capped at
+ *   THEME_MAX / PURPOSE_MAX. A non-string or over-length value is rejected.
  * Any malformed or over-length value is rejected rather than coerced.
  */
 function parsePutBody(body: string | null | undefined): ParseResult {
@@ -162,7 +168,15 @@ function parsePutBody(body: string | null | undefined): ParseResult {
     }
   }
 
-  return { paragraphs, groupings };
+  // --- theme & purpose (Step 9: optional free-text, length-capped) ---
+  const themeRes = optionalString(parsed['theme'], THEME_MAX);
+  if ('error' in themeRes)
+    return { error: `theme must be a string of at most ${THEME_MAX} characters.` };
+  const purposeRes = optionalString(parsed['purpose'], PURPOSE_MAX);
+  if ('error' in purposeRes)
+    return { error: `purpose must be a string of at most ${PURPOSE_MAX} characters.` };
+
+  return { paragraphs, groupings, theme: themeRes.value, purpose: purposeRes.value };
 }
 
 async function getOutlineStudy(
@@ -199,6 +213,8 @@ async function saveOutlineStudy(
     userId,
     paragraphs: body.paragraphs,
     groupings: body.groupings,
+    theme: body.theme,
+    purpose: body.purpose,
     createdAt,
     updatedAt: now,
   };

@@ -241,6 +241,8 @@ export interface OutlineStudyRecord {
   userId: string; // Cognito sub
   paragraphs: OutlineParagraph[]; // ordered, reading order; the leftmost column
   groupings: OutlineGrouping[]; // contiguous paragraph spans in columns to the right
+  theme: string; // Step 9: what the book is about, short condensation; '' when unset (<=80)
+  purpose: string; // Step 9: the author's goal, one sentence; '' when unset (<=500)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
