@@ -218,6 +218,61 @@ describe('Outline Study CRUD Lambda', () => {
       ]);
     });
 
+    // --- Step 9: theme & purpose ---
+
+    it('accepts and persists theme and purpose', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            paragraphs: [paragraph],
+            theme: 'Justification by faith',
+            purpose: 'To rebuke the Galatians for a false gospel',
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+      expect(putItem(1)['theme']).toBe('Justification by faith');
+      expect(putItem(1)['purpose']).toBe('To rebuke the Galatians for a false gospel');
+    });
+
+    it('defaults theme and purpose to empty strings when omitted', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(makePutEvent(JSON.stringify({ paragraphs: [paragraph] })));
+      expect(res.statusCode).toBe(200);
+      expect(putItem(1)['theme']).toBe('');
+      expect(putItem(1)['purpose']).toBe('');
+    });
+
+    it('rejects an over-length theme (> 80) with 400', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ paragraphs: [paragraph], theme: 'a'.repeat(81) })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/theme/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects an over-length purpose (> 500) with 400', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ paragraphs: [paragraph], purpose: 'a'.repeat(501) })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/purpose/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-string theme with 400', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ paragraphs: [paragraph], theme: 42 })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/theme/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
     // --- paragraph validation ---
 
     it('rejects an empty paragraph mainIdea with 400', async () => {

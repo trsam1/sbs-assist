@@ -29,6 +29,8 @@ function makeOutlineStudy(overrides: Partial<OutlineStudy> = {}): OutlineStudy {
     userId: 'u1',
     paragraphs: [],
     groupings: [],
+    theme: '',
+    purpose: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
@@ -371,6 +373,8 @@ describe('OutlineViewComponent', () => {
     expect(saveSpy).toHaveBeenCalledWith('s1', {
       paragraphs: [{ startRef: '', endRef: '', mainIdea: 'Kept', notes: '' }],
       groupings: [],
+      theme: '',
+      purpose: '',
     });
     expect(component.saved()).toBe(true);
     expect(component.paragraphs()).toEqual(normalised.paragraphs);
@@ -450,6 +454,86 @@ describe('OutlineViewComponent', () => {
     fixture.detectChanges();
     expect(component.state()).toBe('error');
     expect(query('[data-testid="outline-retry-button"]')).not.toBeNull();
+  });
+
+  it('renders the Theme & Purpose panel atop the worksheet in the ready state', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+    expect(component.state()).toBe('ready');
+    expect(query('[data-testid="theme-purpose-panel"]')).not.toBeNull();
+    expect(query('[data-testid="theme-purpose-help"]')).not.toBeNull();
+    expect(query('[data-testid="outline-theme"]')).not.toBeNull();
+    expect(query('[data-testid="outline-purpose"]')).not.toBeNull();
+  });
+
+  it('loads saved theme/purpose and reflects them, editing only their own fields', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getOutlineSpy.mockReturnValue(
+      of(
+        makeOutlineStudy({
+          paragraphs: [{ startRef: '', endRef: '', mainIdea: 'p0', notes: '' }],
+          groupings: [],
+          theme: 'Justification by faith',
+          purpose: 'To rebuke a false gospel',
+        }),
+      ),
+    );
+    fixture.detectChanges();
+    expect(component.theme()).toBe('Justification by faith');
+    expect(component.purpose()).toBe('To rebuke a false gospel');
+
+    component.setTheme('New theme');
+    expect(component.theme()).toBe('New theme');
+    expect(component.purpose()).toBe('To rebuke a false gospel'); // untouched
+    expect(component.paragraphs().length).toBe(1); // paragraphs untouched
+  });
+
+  it('loads a legacy record with no theme/purpose as empty fields without error', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    // Simulate a pre-R3 record: service normaliser defaults missing theme/purpose to ''.
+    getOutlineSpy.mockReturnValue(
+      of(
+        makeOutlineStudy({
+          paragraphs: [{ startRef: '', endRef: '', mainIdea: 'p0', notes: '' }],
+        }),
+      ),
+    );
+    fixture.detectChanges();
+    expect(component.state()).toBe('ready');
+    expect(component.theme()).toBe('');
+    expect(component.purpose()).toBe('');
+  });
+
+  it('sends theme/purpose (trimmed) on save and reflects the server result', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    const normalised = makeOutlineStudy({
+      paragraphs: [{ startRef: '', endRef: '', mainIdea: 'Kept', notes: '' }],
+      groupings: [],
+      theme: 'Love',
+      purpose: 'To encourage',
+    });
+    saveSpy.mockReturnValue(of(normalised));
+    fixture.detectChanges();
+
+    component.addParagraph();
+    component.setParagraphMainIdea(0, 'Kept');
+    component.setTheme('  Love  ');
+    component.setPurpose('  To encourage  ');
+    component.save();
+    fixture.detectChanges();
+
+    expect(saveSpy).toHaveBeenCalledWith('s1', {
+      paragraphs: [{ startRef: '', endRef: '', mainIdea: 'Kept', notes: '' }],
+      groupings: [],
+      theme: 'Love',
+      purpose: 'To encourage',
+    });
+    expect(component.theme()).toBe('Love');
+    expect(component.purpose()).toBe('To encourage');
   });
 
   it('calls the scroll, outline, and structure services once each on load', () => {
