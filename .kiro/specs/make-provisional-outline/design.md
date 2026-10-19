@@ -1,4 +1,11 @@
-# Design Document: Make a Provisional Outline (Step 8 — Outline Study)
+# Design Document: Make a Provisional Outline (Step 8) + State Theme & Purpose (Step 9)
+
+> **Revision (R3).** Folds **Step 9 — State a Provisional Theme and Purpose** into this tool. Adds
+> two optional free-text fields — `theme` (≤ 80) and `purpose` (≤ 500) — to the `OutlineStudy`
+> record, a **Theme & Purpose panel pinned to the top of the outline view**, and server validation
+> for the two fields. No new table, Lambda, route, or function; no migration (legacy records read
+> `theme=''`/`purpose=''`). The theme and purpose are **student-authored free text** — captured,
+> never generated. Everything in R2 below stands; R3 is purely additive.
 
 > **Revision (R2).** Replaces the flat `OutlineNode[]` (title + `level`) model shipped in PR #42
 > with a **left-to-right flow**: an ordered `paragraphs: OutlineParagraph[]` (the fixed leftmost
@@ -136,6 +143,8 @@ export interface OutlineStudy {
   userId: string;                 // Cognito sub
   paragraphs: OutlineParagraph[]; // ordered, reading order; the leftmost column
   groupings: OutlineGrouping[];   // contiguous paragraph spans in columns to the right
+  theme: string;                  // Step 9: what the book is about, short condensation; '' when unset (<=80)
+  purpose: string;                // Step 9: the author's goal, one sentence; '' when unset (<=500)
   createdAt: string;              // ISO 8601
   updatedAt: string;              // ISO 8601
 }
@@ -144,8 +153,30 @@ export interface OutlineStudy {
 export interface OutlineStudyInput {
   paragraphs?: OutlineParagraph[];
   groupings?: OutlineGrouping[];
+  theme?: string;   // Step 9; omitted/'' allowed
+  purpose?: string; // Step 9; omitted/'' allowed
 }
 ```
+
+### Step 9 — Theme & Purpose (R3)
+
+The theme and purpose are two optional free-text fields on the same record, rendered in a panel
+**pinned to the top of the outline worksheet** (where the method states them) above the
+paragraph/grouping flow. They are the student's own interpretive condensation of the outline:
+
+- **Theme** — *what the book is about*, a 1–3 word / short-phrase condensation (≤ 80). Example from
+  the method: Galatians → "Justification by faith".
+- **Purpose** — *the author's goal*, one sentence (≤ 500). Example: Galatians → "To rebuke the
+  Galatians for tolerating a false gospel of justification through faith plus works".
+
+The panel carries brief, non-prescriptive helper text framing the two definitions. The app
+**captures but never generates** either field — consistent with "assist, never replace": Step 5's
+AI summary is the method's single deliberately-assisted step, and Step 9 is explicitly the
+student's own work. Nothing from theme/purpose is sent to any AI prompt and no Bible text is
+introduced.
+
+Both fields serialize with the worksheet through the existing `PUT`; legacy records (pre-R3)
+default to `''` on read, so no migration is needed.
 
 ### Pure numbering utility (`src/app/outline-number.ts`)
 
@@ -186,8 +217,9 @@ now defaults `paragraphs` and `groupings` to `[]`.
 ### Component (`src/app/outline-view/outline-view.component.ts`)
 
 Standalone, signals-based, Bulma, routed at `scroll/:scrollStudyId/outline` (route unchanged).
-Signals: `scrollStatus`, `paragraphs`, `groupings`, `structureSections` (import affordance),
-a `selection` set of paragraph indices for the merge gesture, `saving`/`saved`/`saveError`.
+Signals: `scrollStatus`, `paragraphs`, `groupings`, `theme`, `purpose`, `structureSections`
+(import affordance), a `selection` set of paragraph indices for the merge gesture,
+`saving`/`saved`/`saveError`.
 
 Handlers:
 - Paragraph column: `addParagraph`, `setParagraphStartRef/EndRef/MainIdea/Notes`,
@@ -198,16 +230,19 @@ Handlers:
   `setGroupingTitle/Notes`, `removeGrouping(index)`.
 - `importFromStep7()` — one paragraph per Step 7 section (label → mainIdea, refs, notes), no
   groupings.
+- Theme & Purpose (Step 9): `setTheme(value)` / `setPurpose(value)` update only their own signal.
 - `save()` — drops empty-`mainIdea` paragraphs and empty-`title` groupings, re-normalises spans,
-  reflects the server result.
+  sends `theme`/`purpose` (trimmed, `''` when unset) alongside, reflects the server result.
 
 A single `normalize(paragraphs, groupings)` pure helper (unit-tested) re-clamps every grouping span
 to `[0, paragraphs.length-1]`, drops groupings whose span collapsed, and asserts contiguity — the
 one place structural invariants are maintained.
 
-View: a left-to-right flow. The leftmost column lists paragraph rows (start/stop + main idea +
-notes + reorder/remove). To its right, each merge column draws grouping blocks positioned to span
-the vertical extent of the paragraph rows they cover (CSS grid rows keyed by paragraph index), so a
+View: a left-to-right flow. **A Theme & Purpose panel is pinned to the top** (a `theme` input and a
+`purpose` textarea with brief Step 9 helper text), above the outline flow — where the method states
+them. Below it, the leftmost column lists paragraph rows (start/stop + main idea + notes +
+reorder/remove). To its right, each merge column draws grouping blocks positioned to span the
+vertical extent of the paragraph rows they cover (CSS grid rows keyed by paragraph index), so a
 grouping visibly brackets its paragraphs — the "merged cells" the student draws. The rightmost box
 renders the derived standard outline form, unchanged in spirit from R1.
 
@@ -217,9 +252,11 @@ Replace `parsePutBody`'s per-node validation with per-paragraph + per-grouping v
 `paragraphs` an array, each with a non-empty `mainIdea` ≤ 200, `startRef`/`endRef` ≤ 50,
 `notes` ≤ 1000; `groupings` an array, each with integer `column ≥ 1`, integer `startIndex`/
 `endIndex` where `0 ≤ startIndex ≤ endIndex < paragraphs.length`, non-empty `title` ≤ 200,
-`notes` ≤ 1000. The persisted record carries `paragraphs` + `groupings`. Keying
-(`PK = USER#{userId}`, `SK = OUTLINE#{scrollStudyId}`), read-before-write for `createdAt`, and the
-GET/PUT routing are unchanged.
+`notes` ≤ 1000. Add Step 9 validation: `theme` an optional string ≤ 80, `purpose` an optional
+string ≤ 500 (each defaults to `''` when omitted; a non-string → 400). The persisted record carries
+`paragraphs` + `groupings` + `theme` + `purpose`. Keying (`PK = USER#{userId}`,
+`SK = OUTLINE#{scrollStudyId}`), read-before-write for `createdAt`, and the GET/PUT routing are
+unchanged.
 
 ### CDK (`infra/lib/word-study-tool-stack.ts`)
 
@@ -235,11 +272,15 @@ from PR #42 are reused as-is.
   reorder/remove paragraph with span maintenance; contiguous-merge creates a grouping and a
   non-adjacent selection is rejected; merge groupings to the next column; remove grouping;
   import-from-Step-7 (paragraphs only, no overwrite); save drops empty paragraphs/groupings and
-  reflects the normalised result; save-error keeps values.
+  reflects the normalised result; save-error keeps values. **R3:** the top Theme & Purpose panel
+  renders; editing `theme`/`purpose` updates only those fields; save sends them and reload shows
+  them; a legacy record with no theme/purpose loads empty without error.
 - **`infra/lambda/outline-study/index.test.ts`** — rewritten: GET 404/own-item; PUT upsert of the
   new shape; PUT rejects each invalid field (mainIdea empty/too long, grouping column < 1, span
   out of range or inverted, title empty/too long, refs/notes too long, paragraphs/groupings not an
-  array); user isolation.
+  array). **R3:** PUT accepts/persists `theme`/`purpose`, defaults them to `''` when omitted, and
+  rejects a too-long `theme` (> 80), a too-long `purpose` (> 500), or a non-string value; user
+  isolation.
 - **`infra/test/word-study-tool-stack.test.ts`** — **unchanged counts** (7 tables / 9 functions);
   no new assertions needed since no infra changes.
 - **`npm run verify`** must pass end-to-end before the build PR.
