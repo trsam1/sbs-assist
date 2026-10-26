@@ -29,12 +29,18 @@ describe('ScrollStudyService', () => {
     };
     let result: typeof response | undefined;
     service
-      .createScrollStudy({ bookName: 'Genesis', filename: 'g.pdf', contentType: 'application/pdf' })
+      .createScrollStudy({
+        bookStudyId: 'b1',
+        bookName: 'Genesis',
+        filename: 'g.pdf',
+        contentType: 'application/pdf',
+      })
       .subscribe((r) => (result = r));
 
     const req = httpTesting.expectOne(`${environment.apiUrl}/scroll-studies`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toEqual({
+      bookStudyId: 'b1',
       bookName: 'Genesis',
       filename: 'g.pdf',
       contentType: 'application/pdf',

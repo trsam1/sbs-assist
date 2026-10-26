@@ -3,16 +3,42 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideHttpClient } from '@angular/common/http';
 import { provideRouter, Router, ActivatedRoute, convertToParamMap } from '@angular/router';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { of } from 'rxjs';
 import { BookStudyDetailComponent } from './book-study-detail.component';
+import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { environment } from '../environment';
 
+/** Scrolls the mocked ScrollStudyService.listScrollStudies() returns; override per test. */
+let mockScrolls: ScrollStudy[] = [];
+
+function makeScroll(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
+  return {
+    id: 's1',
+    userId: 'u1',
+    bookStudyId: 'b1',
+    bookName: 'John',
+    status: 'ready',
+    scrollText: 'text',
+    truncated: false,
+    failureReason: '',
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-02T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 function configure(bookStudyId: string) {
+  const mockScrollService: Partial<ScrollStudyService> = {
+    listScrollStudies: (() =>
+      of(mockScrolls)) as unknown as ScrollStudyService['listScrollStudies'],
+  };
   TestBed.configureTestingModule({
     imports: [BookStudyDetailComponent],
     providers: [
       provideHttpClient(),
       provideHttpClientTesting(),
       provideRouter([]),
+      { provide: ScrollStudyService, useValue: mockScrollService },
       {
         provide: ActivatedRoute,
         useValue: { snapshot: { paramMap: convertToParamMap({ bookStudyId }) } },
@@ -39,6 +65,7 @@ describe('BookStudyDetailComponent', () => {
   }
 
   beforeEach(() => {
+    mockScrolls = [];
     TestBed.resetTestingModule();
   });
 
@@ -134,6 +161,9 @@ describe('BookStudyDetailComponent', () => {
       ...(referents !== undefined ? { referents } : {}),
       ...overrides,
     });
+    fixture.detectChanges();
+    // Referents editor now lives behind the Step 6 disclosure; open it for these DOM assertions.
+    component.referentsOpen.set(true);
     fixture.detectChanges();
   }
 
@@ -319,6 +349,97 @@ describe('BookStudyDetailComponent', () => {
     flushLoad('b1'); // no referents key
 
     expect(component.referents()).toEqual([]);
+    // Referents live behind the Step 6 disclosure now; flushLoad opened it.
     expect(query('[data-testid="referents-empty"]')).not.toBeNull();
+  });
+
+  // --- Study steps hub ---
+
+  /** Flush the book GET without opening the referents disclosure (hub-level assertions). */
+  function flushBook(bookStudyId: string, overrides: Record<string, unknown> = {}) {
+    const req = httpTesting.expectOne(`${environment.apiUrl}/books/${bookStudyId}`);
+    req.flush({
+      bookStudyId,
+      userId: 'u1',
+      book: 'John',
+      title: '',
+      notes: '',
+      referents: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-02T00:00:00.000Z',
+      ...overrides,
+    });
+    fixture.detectChanges();
+  }
+
+  it('shows the upload-scroll action when no scroll is linked', () => {
+    mockScrolls = [];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="steps-section"]')).not.toBeNull();
+    expect(query('[data-testid="no-scroll"]')).not.toBeNull();
+    expect(query('[data-testid="upload-scroll-button"]')).not.toBeNull();
+    expect(query('[data-testid="scroll-linked"]')).toBeNull();
+  });
+
+  it('navigates to /scroll/new with the bookStudyId when uploading the scroll', () => {
+    mockScrolls = [];
+    createWith('b1');
+    flushBook('b1');
+
+    const router = TestBed.inject(Router);
+    const navigateSpy = vi.spyOn(router, 'navigate');
+    (query('[data-testid="upload-scroll-button"]') as HTMLButtonElement).click();
+
+    expect(navigateSpy).toHaveBeenCalledWith(['/scroll/new'], {
+      queryParams: { bookStudyId: 'b1' },
+    });
+  });
+
+  it('renders step deep-links when a ready scroll is linked', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="scroll-linked"]')).not.toBeNull();
+    expect(query('[data-testid="no-scroll"]')).toBeNull();
+    const links = query('[data-testid="step-links"]');
+    expect(links).not.toBeNull();
+    const open = query('[data-testid="open-scroll-link"]') as HTMLAnchorElement;
+    expect(open.getAttribute('href')).toBe('/scroll/s9');
+    const theme = query('[data-testid="theme-purpose-link"]') as HTMLAnchorElement;
+    expect(theme.getAttribute('href')).toBe('/scroll/s9/outline');
+  });
+
+  it('gates steps 6–9 while the linked scroll is not ready', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'extracting' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="scroll-linked"]')).not.toBeNull();
+    expect(query('[data-testid="step-links"]')).toBeNull();
+    expect(query('[data-testid="steps-pending"]')).not.toBeNull();
+  });
+
+  it('ignores a scroll linked to a different book study', () => {
+    mockScrolls = [makeScroll({ id: 'sX', bookStudyId: 'other-book' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(component.linkedScroll()).toBeNull();
+    expect(query('[data-testid="no-scroll"]')).not.toBeNull();
+  });
+
+  it('toggles the referents editor from the Step 6 entry', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="referents-section"]')).toBeNull();
+    (query('[data-testid="toggle-referents"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(component.referentsOpen()).toBe(true);
+    expect(query('[data-testid="referents-section"]')).not.toBeNull();
   });
 });

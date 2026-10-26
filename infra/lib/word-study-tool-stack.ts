@@ -480,12 +480,15 @@ export class WordStudyToolStack extends cdk.Stack {
       handler: 'handler',
       environment: {
         SCROLL_STUDIES_TABLE_NAME: this.scrollStudiesTable.tableName,
+        BOOK_STUDIES_TABLE_NAME: this.bookStudiesTable.tableName,
         UPLOADS_BUCKET_NAME: this.uploadsBucket.bucketName,
         ALLOWED_ORIGINS: allowedOriginsEnv,
       },
     });
 
     this.scrollStudiesTable.grantReadWriteData(this.scrollStudyFn);
+    // Read-only on BookStudies to validate the bookStudyId link on scroll creation.
+    this.bookStudiesTable.grantReadData(this.scrollStudyFn);
     this.scrollStudyFn.addToRolePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,

@@ -91,7 +91,8 @@ export interface ScrollStudyRecord {
   SK: string; // "SCROLL#<scrollStudyId>"
   scrollStudyId: string;
   userId: string; // Cognito sub
-  bookName: string; // <=100 chars
+  bookStudyId: string; // owning Book Study; '' on legacy orphans until backfilled
+  bookName: string; // <=100 chars; set from the owning Book Study's `book`
   objectKey: string; // "uploads/<sub>/<scrollStudyId>.<ext>"
   status: ScrollStatus;
   scrollText: string; // '' until ready

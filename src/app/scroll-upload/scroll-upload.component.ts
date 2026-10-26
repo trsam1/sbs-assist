@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ScrollStudyService } from '../scroll-study.service';
 
 /** Allowed upload extensions, lower-cased (mirrors the backend `uploadExtension`). */
@@ -93,13 +93,17 @@ type UploadState = 'idle' | 'submitting' | 'error';
     </section>
   `,
 })
-export class ScrollUploadComponent {
+export class ScrollUploadComponent implements OnInit {
   private readonly scrollStudy = inject(ScrollStudyService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly state = signal<UploadState>('idle');
   readonly errorMessage = signal('');
   readonly fileError = signal('');
+
+  /** The owning Book Study this scroll will be attached to (from the ?bookStudyId query param). */
+  readonly bookStudyId = signal('');
 
   /** The currently selected file, if valid so far. */
   private readonly selectedFile = signal<File | null>(null);
@@ -110,6 +114,10 @@ export class ScrollUploadComponent {
       validators: [Validators.required, Validators.maxLength(100)],
     }),
   });
+
+  ngOnInit(): void {
+    this.bookStudyId.set(this.route.snapshot.queryParamMap.get('bookStudyId') ?? '');
+  }
 
   showBookNameError(): boolean {
     const control = this.form.controls.bookName;
@@ -146,6 +154,15 @@ export class ScrollUploadComponent {
   onSubmit(): void {
     this.errorMessage.set('');
 
+    const bookStudyId = this.bookStudyId();
+    if (!bookStudyId) {
+      this.state.set('error');
+      this.errorMessage.set(
+        'No book study selected. Start an upload from a book study so the scroll is attached to it.',
+      );
+      return;
+    }
+
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
@@ -166,23 +183,25 @@ export class ScrollUploadComponent {
     const contentType = file.type || 'application/octet-stream';
     this.state.set('submitting');
 
-    this.scrollStudy.createScrollStudy({ bookName, filename: file.name, contentType }).subscribe({
-      next: (res) => {
-        this.scrollStudy.uploadBytes(res.uploadUrl, file).subscribe({
-          next: () => {
-            this.router.navigate(['/scroll', res.scrollStudyId]);
-          },
-          error: () => {
-            // Keep the entered book name so the student can retry.
-            this.state.set('error');
-            this.errorMessage.set('Upload failed. Please try again.');
-          },
-        });
-      },
-      error: () => {
-        this.state.set('error');
-        this.errorMessage.set('Could not start the upload. Please try again.');
-      },
-    });
+    this.scrollStudy
+      .createScrollStudy({ bookStudyId, bookName, filename: file.name, contentType })
+      .subscribe({
+        next: (res) => {
+          this.scrollStudy.uploadBytes(res.uploadUrl, file).subscribe({
+            next: () => {
+              this.router.navigate(['/scroll', res.scrollStudyId]);
+            },
+            error: () => {
+              // Keep the entered book name so the student can retry.
+              this.state.set('error');
+              this.errorMessage.set('Upload failed. Please try again.');
+            },
+          });
+        },
+        error: () => {
+          this.state.set('error');
+          this.errorMessage.set('Could not start the upload. Please try again.');
+        },
+      });
   }
 }

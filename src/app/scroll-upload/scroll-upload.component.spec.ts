@@ -1,5 +1,5 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
+import { ActivatedRoute, provideRouter, Router } from '@angular/router';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { ScrollUploadComponent } from './scroll-upload.component';
@@ -27,7 +27,14 @@ describe('ScrollUploadComponent', () => {
 
     await TestBed.configureTestingModule({
       imports: [ScrollUploadComponent],
-      providers: [provideRouter([]), { provide: ScrollStudyService, useValue: mockService }],
+      providers: [
+        provideRouter([]),
+        { provide: ScrollStudyService, useValue: mockService },
+        {
+          provide: ActivatedRoute,
+          useValue: { snapshot: { queryParamMap: new Map([['bookStudyId', 'b1']]) } },
+        },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(ScrollUploadComponent);
@@ -88,12 +95,26 @@ describe('ScrollUploadComponent', () => {
     component.onSubmit();
 
     expect(createSpy).toHaveBeenCalledWith({
+      bookStudyId: 'b1',
       bookName: 'Genesis',
       filename: 'genesis.pdf',
       contentType: 'application/pdf',
     });
     expect(uploadSpy).toHaveBeenCalledWith('https://s3/put', expect.any(File));
     expect(navigateSpy).toHaveBeenCalledWith(['/scroll', 's1']);
+  });
+
+  it('refuses to submit without a bookStudyId context and shows an error', () => {
+    // Clear the query-param-derived book context.
+    component.bookStudyId.set('');
+    component.form.controls.bookName.setValue('Genesis');
+    selectFile(makeFile('genesis.pdf'));
+    component.onSubmit();
+    fixture.detectChanges();
+
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(component.state()).toBe('error');
+    expect(query('[data-testid="upload-error"]')).not.toBeNull();
   });
 
   it('shows an error and keeps the book name when the create request fails', () => {

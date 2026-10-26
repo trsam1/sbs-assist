@@ -132,6 +132,21 @@ describe.each(['prod', 'dev'] as const)('WordStudyToolStack (%s) — shared', (s
     expect(scrollMethods.length).toBeGreaterThanOrEqual(4);
   });
 
+  it('grants the scroll-study function read on BookStudies to validate the link', () => {
+    // The scroll-study role's policy references ScrollStudies (read/write) AND BookStudies (read).
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const scrollPolicies = policies.filter((p) => {
+      const doc = JSON.stringify(p.Properties?.['PolicyDocument']);
+      // The scroll role is the one that also grants s3:PutObject on the uploads bucket.
+      return doc.includes('ScrollStudies') && doc.includes('s3:PutObject');
+    });
+    expect(scrollPolicies.length).toBeGreaterThan(0);
+    for (const policy of scrollPolicies) {
+      const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
+      expect(doc).toContain('BookStudies');
+    }
+  });
+
   it('grants AntecedentStudy read/write on only the AntecedentStudies table', () => {
     // Find the IAM policy whose statements reference an AntecedentStudies table ARN.
     const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));

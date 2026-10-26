@@ -9,7 +9,7 @@ import {
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'node:crypto';
-import type { ScrollStudyRecord } from '../shared/models';
+import type { BookStudyRecord, ScrollStudyRecord } from '../shared/models';
 import { uploadExtension } from '../shared/validation';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
 
@@ -18,13 +18,11 @@ const docClient = DynamoDBDocumentClient.from(client);
 const s3 = new S3Client({});
 
 const tableName = process.env['SCROLL_STUDIES_TABLE_NAME'] ?? '';
+const bookStudiesTableName = process.env['BOOK_STUDIES_TABLE_NAME'] ?? '';
 const uploadsBucket = process.env['UPLOADS_BUCKET_NAME'] ?? '';
 
 /** Short-lived presigned PUT TTL, in seconds. */
 const UPLOAD_URL_TTL_SECONDS = 300;
-
-/** Maximum book-name length (chars, after trim). */
-const MAX_BOOK_NAME_LENGTH = 100;
 
 interface APIGatewayEvent {
   httpMethod: string;
@@ -45,7 +43,7 @@ function getUserId(event: APIGatewayEvent): string {
 }
 
 interface CreateBody {
-  bookName: string;
+  bookStudyId: string;
   filename: string;
   contentType: string;
 }
@@ -67,27 +65,73 @@ function parseCreateBody(
   }
 
   const obj = parsed as Record<string, unknown>;
-  const bookNameRaw = typeof obj['bookName'] === 'string' ? obj['bookName'].trim() : '';
+  const bookStudyId = typeof obj['bookStudyId'] === 'string' ? obj['bookStudyId'].trim() : '';
   const filename = typeof obj['filename'] === 'string' ? obj['filename'] : '';
   const contentType =
     typeof obj['contentType'] === 'string' && obj['contentType'].length > 0
       ? obj['contentType']
       : 'application/octet-stream';
 
-  if (bookNameRaw.length < 1 || bookNameRaw.length > MAX_BOOK_NAME_LENGTH) {
-    return { ok: false, message: 'bookName is required and must be 1–100 characters.' };
+  if (bookStudyId.length < 1) {
+    return { ok: false, message: 'bookStudyId is required.' };
   }
   if (uploadExtension(filename) === null) {
     return { ok: false, message: 'Unsupported file type. Allowed: .pdf, .docx, .txt.' };
   }
 
-  return { ok: true, value: { bookName: bookNameRaw, filename, contentType } };
+  return { ok: true, value: { bookStudyId, filename, contentType } };
 }
 
-async function createScrollStudy(
-  userId: string,
-  input: CreateBody,
-): Promise<{ scrollStudyId: string; uploadUrl: string; objectKey: string }> {
+/** Fetch a Book Study owned by the caller, or null. */
+async function getBookStudy(userId: string, bookStudyId: string): Promise<BookStudyRecord | null> {
+  const result = await docClient.send(
+    new GetCommand({
+      TableName: bookStudiesTableName,
+      Key: { PK: `USER#${userId}`, SK: `BOOKSTUDY#${bookStudyId}` },
+    }),
+  );
+  return (result.Item as BookStudyRecord) ?? null;
+}
+
+/** True when the user already has a scroll linked to this book study (one-scroll-per-book). */
+async function scrollExistsForBook(userId: string, bookStudyId: string): Promise<boolean> {
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      IndexName: 'GSI1',
+      KeyConditionExpression: 'GSI1PK = :pk',
+      FilterExpression: 'bookStudyId = :bid',
+      ExpressionAttributeValues: { ':pk': `USER#${userId}`, ':bid': bookStudyId },
+    }),
+  );
+  return (result.Items?.length ?? 0) > 0;
+}
+
+type CreateResult =
+  | { ok: true; value: { scrollStudyId: string; uploadUrl: string; objectKey: string } }
+  | { ok: false; status: number; message: string };
+
+async function createScrollStudy(userId: string, input: CreateBody): Promise<CreateResult> {
+  // The owning book study must exist and belong to the caller; bookName is derived from it.
+  const bookStudy = await getBookStudy(userId, input.bookStudyId);
+  if (!bookStudy) {
+    return {
+      ok: false,
+      status: 400,
+      message: 'bookStudyId does not resolve to one of your book studies.',
+    };
+  }
+
+  // One scroll per book study (A1): block a second create defensively (the UI blocks it too).
+  if (await scrollExistsForBook(userId, input.bookStudyId)) {
+    return {
+      ok: false,
+      status: 409,
+      message:
+        'This book study already has a scroll. Open or replace it instead of adding another.',
+    };
+  }
+
   const now = new Date().toISOString();
   const scrollStudyId = randomUUID();
   const ext = uploadExtension(input.filename);
@@ -98,7 +142,8 @@ async function createScrollStudy(
     SK: `SCROLL#${scrollStudyId}`,
     scrollStudyId,
     userId,
-    bookName: input.bookName,
+    bookStudyId: input.bookStudyId,
+    bookName: bookStudy.book,
     objectKey,
     status: 'uploading',
     scrollText: '',
@@ -122,7 +167,7 @@ async function createScrollStudy(
     { expiresIn: UPLOAD_URL_TTL_SECONDS },
   );
 
-  return { scrollStudyId, uploadUrl, objectKey };
+  return { ok: true, value: { scrollStudyId, uploadUrl, objectKey } };
 }
 
 async function getScrollStudy(
@@ -191,7 +236,10 @@ export const handler = async (event: APIGatewayEvent) => {
       }
 
       const result = await createScrollStudy(userId, parsed.value);
-      return corsResponse(200, result, origin);
+      if (!result.ok) {
+        return corsResponse(result.status, { message: result.message }, origin);
+      }
+      return corsResponse(200, result.value, origin);
     }
 
     // GET /scroll-studies — list the user's scroll studies
