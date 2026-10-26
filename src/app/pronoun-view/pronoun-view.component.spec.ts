@@ -9,6 +9,7 @@ function makeStudy(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
   return {
     id: 's1',
     userId: 'u1',
+    bookStudyId: 'b1',
     bookName: 'John',
     status: 'ready',
     scrollText: 'He saw them, and they saw him.',

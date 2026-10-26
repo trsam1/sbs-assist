@@ -9,6 +9,7 @@ function makeStudy(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
   return {
     id: 's1',
     userId: 'u1',
+    bookStudyId: 'b1',
     bookName: 'John',
     status: 'ready',
     scrollText: 'In the beginning was the Word',
@@ -205,5 +206,23 @@ describe('ScrollViewComponent', () => {
     const navigateSpy = vi.spyOn(router, 'navigate');
     (query('[data-testid="reupload-button"]') as HTMLButtonElement).click();
     expect(navigateSpy).toHaveBeenCalledWith(['/scroll/new']);
+  });
+
+  it('shows a back-to-book link targeting /books/:bookStudyId when linked', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready', bookStudyId: 'b7' })));
+    fixture.detectChanges();
+
+    const link = query('[data-testid="back-to-book-link"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/books/b7');
+  });
+
+  it('omits the back-to-book link for a legacy orphan scroll with no bookStudyId', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready', bookStudyId: '' })));
+    fixture.detectChanges();
+
+    expect(query('[data-testid="back-to-book-link"]')).toBeNull();
   });
 });

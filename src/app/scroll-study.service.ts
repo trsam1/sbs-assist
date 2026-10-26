@@ -17,6 +17,7 @@ export interface CreateScrollStudyResponse {
 export interface ScrollStudy {
   id: string;
   userId: string;
+  bookStudyId: string;
   bookName: string;
   status: ScrollStatus;
   scrollText: string;
@@ -30,6 +31,7 @@ export interface ScrollStudy {
 interface ScrollStudyRecord {
   scrollStudyId: string;
   userId: string;
+  bookStudyId?: string;
   bookName: string;
   status: ScrollStatus;
   scrollText?: string;
@@ -43,6 +45,7 @@ function toScrollStudy(record: ScrollStudyRecord): ScrollStudy {
   return {
     id: record.scrollStudyId,
     userId: record.userId,
+    bookStudyId: record.bookStudyId ?? '',
     bookName: record.bookName,
     status: record.status,
     scrollText: record.scrollText ?? '',
@@ -63,6 +66,7 @@ export class ScrollStudyService {
 
   /** Create a scroll study and get a presigned upload target. User scoping via the interceptor. */
   createScrollStudy(input: {
+    bookStudyId: string;
     bookName: string;
     filename: string;
     contentType: string;

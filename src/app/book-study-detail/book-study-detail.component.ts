@@ -3,6 +3,7 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { BookStudyService } from '../book-study.service';
+import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { BookStudy, Referent } from '../models';
 
 type DetailState = 'loading' | 'loaded' | 'notfound' | 'error';
@@ -73,220 +74,309 @@ const REFERENT_LONG_MAX = 1000;
             {{ bs.updatedAt | date: 'medium' }}
           </p>
 
-          <section class="mt-5" aria-label="Referents" data-testid="referents-section">
-            <h3 class="title is-5">Referents</h3>
+          <section class="mt-5" aria-label="Study steps" data-testid="steps-section">
+            <h3 class="title is-5">Study steps</h3>
             <p class="is-size-7 has-text-grey mb-4">
-              Document the descriptive phrases you find and what each one refers to.
+              Your work for this book, collected by step. Upload the scroll first; the later steps
+              read from it.
             </p>
 
-            @if (referents().length === 0) {
-              <p class="has-text-grey mb-4" data-testid="referents-empty">
-                No referents yet. Add one below.
-              </p>
-            } @else {
-              <div class="mb-4">
-                @for (ref of referents(); track $index) {
-                  <div class="box" data-testid="referent-row">
-                    <div class="field">
-                      <label class="label is-small" [for]="'referent-phrase-' + $index"
-                        >Phrase</label
-                      >
-                      <div class="control">
-                        <input
-                          class="input"
-                          type="text"
-                          [id]="'referent-phrase-' + $index"
-                          [attr.maxlength]="REFERENT_FIELD_MAX"
-                          [value]="ref.phrase"
-                          (change)="updateReferent($index, 'phrase', $any($event.target).value)"
-                          data-testid="referent-phrase"
-                        />
-                      </div>
-                    </div>
+            @if (linkedScroll(); as scroll) {
+              <div class="box" data-testid="scroll-linked">
+                <div class="is-flex is-justify-content-space-between is-align-items-center mb-3">
+                  <span>
+                    <strong>Step 4 — Scroll</strong>
+                    <span class="tag ml-2" [class.is-success]="scroll.status === 'ready'">
+                      {{ scroll.status }}
+                    </span>
+                  </span>
+                  <a
+                    [routerLink]="['/scroll', scroll.id]"
+                    class="button is-link is-light is-small"
+                    data-testid="open-scroll-link"
+                    >Open scroll</a
+                  >
+                </div>
 
-                    <div class="field">
-                      <label class="label is-small" [for]="'referent-refersto-' + $index"
-                        >Refers to</label
-                      >
-                      <div class="control">
-                        <input
-                          class="input"
-                          type="text"
-                          [id]="'referent-refersto-' + $index"
-                          [attr.maxlength]="REFERENT_FIELD_MAX"
-                          [value]="ref.refersTo"
-                          (change)="updateReferent($index, 'refersTo', $any($event.target).value)"
-                          data-testid="referent-refersto"
-                        />
-                      </div>
-                    </div>
-
-                    <div class="field">
-                      <label class="label is-small" [for]="'referent-notes-' + $index">Notes</label>
-                      <div class="control">
-                        <textarea
-                          class="textarea"
-                          rows="2"
-                          [id]="'referent-notes-' + $index"
-                          [attr.maxlength]="REFERENT_LONG_MAX"
-                          [value]="ref.notes"
-                          (change)="updateReferent($index, 'notes', $any($event.target).value)"
-                          data-testid="referent-notes"
-                        ></textarea>
-                      </div>
-                    </div>
-
-                    <div class="field">
-                      <label class="label is-small" [for]="'referent-scrollref-' + $index"
-                        >Scroll text reference (optional)</label
-                      >
-                      <div class="control">
-                        <input
-                          class="input"
-                          type="text"
-                          [id]="'referent-scrollref-' + $index"
-                          [attr.maxlength]="REFERENT_LONG_MAX"
-                          [value]="ref.scrollRef"
-                          (change)="updateReferent($index, 'scrollRef', $any($event.target).value)"
-                          data-testid="referent-scrollref"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      class="button is-danger is-outlined is-small"
-                      type="button"
-                      (click)="removeReferent($index)"
-                      data-testid="remove-referent-button"
+                @if (scrollReady()) {
+                  <div class="buttons are-small" data-testid="step-links">
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'pronouns']"
+                      class="button is-link is-outlined"
+                      >Step 6 — Pronouns</a
                     >
-                      Remove
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'antecedents']"
+                      class="button is-link is-outlined"
+                      >Step 6 — Antecedents</a
+                    >
+                    <button
+                      type="button"
+                      class="button is-link is-outlined"
+                      (click)="toggleReferents()"
+                      [attr.aria-expanded]="referentsOpen()"
+                      data-testid="toggle-referents"
+                    >
+                      Step 6 — Referents
                     </button>
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'structure']"
+                      class="button is-link is-outlined"
+                      >Step 7 — Structure</a
+                    >
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'outline']"
+                      class="button is-link is-outlined"
+                      >Step 8 — Outline</a
+                    >
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'outline']"
+                      class="button is-link is-outlined"
+                      data-testid="theme-purpose-link"
+                      >Step 9 — Theme &amp; Purpose</a
+                    >
                   </div>
+                } @else {
+                  <p class="is-size-7 has-text-grey" data-testid="steps-pending">
+                    Steps 6–9 become available once the scroll finishes processing.
+                  </p>
                 }
               </div>
-            }
-
-            <form
-              class="box"
-              (ngSubmit)="addReferent()"
-              data-testid="add-referent-form"
-              aria-label="Add referent"
-            >
-              <div class="field">
-                <label class="label is-small" for="add-referent-phrase">Phrase</label>
-                <div class="control">
-                  <input
-                    class="input"
-                    type="text"
-                    id="add-referent-phrase"
-                    name="draftPhrase"
-                    [attr.maxlength]="REFERENT_FIELD_MAX"
-                    [(ngModel)]="draftPhrase"
-                    data-testid="add-referent-phrase"
-                  />
-                </div>
-              </div>
-
-              <div class="field">
-                <label class="label is-small" for="add-referent-refersto">Refers to</label>
-                <div class="control">
-                  <input
-                    class="input"
-                    type="text"
-                    id="add-referent-refersto"
-                    name="draftRefersTo"
-                    [attr.maxlength]="REFERENT_FIELD_MAX"
-                    [(ngModel)]="draftRefersTo"
-                    data-testid="add-referent-refersto"
-                  />
-                </div>
-              </div>
-
-              <div class="field">
-                <label class="label is-small" for="add-referent-notes">Notes (optional)</label>
-                <div class="control">
-                  <textarea
-                    class="textarea"
-                    rows="2"
-                    id="add-referent-notes"
-                    name="draftNotes"
-                    [attr.maxlength]="REFERENT_LONG_MAX"
-                    [(ngModel)]="draftNotes"
-                    data-testid="add-referent-notes"
-                  ></textarea>
-                </div>
-              </div>
-
-              <div class="field">
-                <label class="label is-small" for="add-referent-scrollref"
-                  >Scroll text reference (optional)</label
-                >
-                <div class="control">
-                  <input
-                    class="input"
-                    type="text"
-                    id="add-referent-scrollref"
-                    name="draftScrollRef"
-                    [attr.maxlength]="REFERENT_LONG_MAX"
-                    [(ngModel)]="draftScrollRef"
-                    data-testid="add-referent-scrollref"
-                  />
-                </div>
-              </div>
-
-              @if (addError()) {
-                <p
-                  class="help is-danger"
-                  role="alert"
-                  aria-live="assertive"
-                  data-testid="add-referent-error"
-                >
-                  {{ addError() }}
-                </p>
-              }
-
-              <div class="control">
+            } @else {
+              <div class="box" data-testid="no-scroll">
+                <p class="mb-3">No scroll yet. Upload the book's text to begin.</p>
                 <button
-                  class="button is-link is-small"
-                  type="submit"
-                  data-testid="add-referent-button"
-                >
-                  Add referent
-                </button>
-              </div>
-            </form>
-
-            <div class="field is-grouped is-align-items-center mt-3">
-              <div class="control">
-                <button
-                  class="button is-primary"
                   type="button"
-                  [class.is-loading]="saveState() === 'saving'"
-                  [disabled]="saveState() === 'saving'"
-                  (click)="saveReferents()"
-                  data-testid="save-referents-button"
+                  class="button is-primary is-small"
+                  (click)="uploadScroll()"
+                  data-testid="upload-scroll-button"
                 >
-                  Save referents
+                  Upload the scroll (Step 4)
                 </button>
-              </div>
-              @if (saveState() === 'saved') {
-                <p class="help is-success" aria-live="polite" data-testid="referents-saved">
-                  Referents saved.
-                </p>
-              }
-            </div>
-
-            @if (saveState() === 'error') {
-              <div
-                class="notification is-danger mt-3"
-                role="alert"
-                aria-live="assertive"
-                data-testid="referents-save-error"
-              >
-                {{ saveError() }}
               </div>
             }
           </section>
+
+          @if (referentsOpen()) {
+            <section class="mt-5" aria-label="Referents" data-testid="referents-section">
+              <h3 class="title is-5">Referents</h3>
+              <p class="is-size-7 has-text-grey mb-4">
+                Document the descriptive phrases you find and what each one refers to.
+              </p>
+
+              @if (referents().length === 0) {
+                <p class="has-text-grey mb-4" data-testid="referents-empty">
+                  No referents yet. Add one below.
+                </p>
+              } @else {
+                <div class="mb-4">
+                  @for (ref of referents(); track $index) {
+                    <div class="box" data-testid="referent-row">
+                      <div class="field">
+                        <label class="label is-small" [for]="'referent-phrase-' + $index"
+                          >Phrase</label
+                        >
+                        <div class="control">
+                          <input
+                            class="input"
+                            type="text"
+                            [id]="'referent-phrase-' + $index"
+                            [attr.maxlength]="REFERENT_FIELD_MAX"
+                            [value]="ref.phrase"
+                            (change)="updateReferent($index, 'phrase', $any($event.target).value)"
+                            data-testid="referent-phrase"
+                          />
+                        </div>
+                      </div>
+
+                      <div class="field">
+                        <label class="label is-small" [for]="'referent-refersto-' + $index"
+                          >Refers to</label
+                        >
+                        <div class="control">
+                          <input
+                            class="input"
+                            type="text"
+                            [id]="'referent-refersto-' + $index"
+                            [attr.maxlength]="REFERENT_FIELD_MAX"
+                            [value]="ref.refersTo"
+                            (change)="updateReferent($index, 'refersTo', $any($event.target).value)"
+                            data-testid="referent-refersto"
+                          />
+                        </div>
+                      </div>
+
+                      <div class="field">
+                        <label class="label is-small" [for]="'referent-notes-' + $index"
+                          >Notes</label
+                        >
+                        <div class="control">
+                          <textarea
+                            class="textarea"
+                            rows="2"
+                            [id]="'referent-notes-' + $index"
+                            [attr.maxlength]="REFERENT_LONG_MAX"
+                            [value]="ref.notes"
+                            (change)="updateReferent($index, 'notes', $any($event.target).value)"
+                            data-testid="referent-notes"
+                          ></textarea>
+                        </div>
+                      </div>
+
+                      <div class="field">
+                        <label class="label is-small" [for]="'referent-scrollref-' + $index"
+                          >Scroll text reference (optional)</label
+                        >
+                        <div class="control">
+                          <input
+                            class="input"
+                            type="text"
+                            [id]="'referent-scrollref-' + $index"
+                            [attr.maxlength]="REFERENT_LONG_MAX"
+                            [value]="ref.scrollRef"
+                            (change)="
+                              updateReferent($index, 'scrollRef', $any($event.target).value)
+                            "
+                            data-testid="referent-scrollref"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        class="button is-danger is-outlined is-small"
+                        type="button"
+                        (click)="removeReferent($index)"
+                        data-testid="remove-referent-button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+
+              <form
+                class="box"
+                (ngSubmit)="addReferent()"
+                data-testid="add-referent-form"
+                aria-label="Add referent"
+              >
+                <div class="field">
+                  <label class="label is-small" for="add-referent-phrase">Phrase</label>
+                  <div class="control">
+                    <input
+                      class="input"
+                      type="text"
+                      id="add-referent-phrase"
+                      name="draftPhrase"
+                      [attr.maxlength]="REFERENT_FIELD_MAX"
+                      [(ngModel)]="draftPhrase"
+                      data-testid="add-referent-phrase"
+                    />
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label class="label is-small" for="add-referent-refersto">Refers to</label>
+                  <div class="control">
+                    <input
+                      class="input"
+                      type="text"
+                      id="add-referent-refersto"
+                      name="draftRefersTo"
+                      [attr.maxlength]="REFERENT_FIELD_MAX"
+                      [(ngModel)]="draftRefersTo"
+                      data-testid="add-referent-refersto"
+                    />
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label class="label is-small" for="add-referent-notes">Notes (optional)</label>
+                  <div class="control">
+                    <textarea
+                      class="textarea"
+                      rows="2"
+                      id="add-referent-notes"
+                      name="draftNotes"
+                      [attr.maxlength]="REFERENT_LONG_MAX"
+                      [(ngModel)]="draftNotes"
+                      data-testid="add-referent-notes"
+                    ></textarea>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label class="label is-small" for="add-referent-scrollref"
+                    >Scroll text reference (optional)</label
+                  >
+                  <div class="control">
+                    <input
+                      class="input"
+                      type="text"
+                      id="add-referent-scrollref"
+                      name="draftScrollRef"
+                      [attr.maxlength]="REFERENT_LONG_MAX"
+                      [(ngModel)]="draftScrollRef"
+                      data-testid="add-referent-scrollref"
+                    />
+                  </div>
+                </div>
+
+                @if (addError()) {
+                  <p
+                    class="help is-danger"
+                    role="alert"
+                    aria-live="assertive"
+                    data-testid="add-referent-error"
+                  >
+                    {{ addError() }}
+                  </p>
+                }
+
+                <div class="control">
+                  <button
+                    class="button is-link is-small"
+                    type="submit"
+                    data-testid="add-referent-button"
+                  >
+                    Add referent
+                  </button>
+                </div>
+              </form>
+
+              <div class="field is-grouped is-align-items-center mt-3">
+                <div class="control">
+                  <button
+                    class="button is-primary"
+                    type="button"
+                    [class.is-loading]="saveState() === 'saving'"
+                    [disabled]="saveState() === 'saving'"
+                    (click)="saveReferents()"
+                    data-testid="save-referents-button"
+                  >
+                    Save referents
+                  </button>
+                </div>
+                @if (saveState() === 'saved') {
+                  <p class="help is-success" aria-live="polite" data-testid="referents-saved">
+                    Referents saved.
+                  </p>
+                }
+              </div>
+
+              @if (saveState() === 'error') {
+                <div
+                  class="notification is-danger mt-3"
+                  role="alert"
+                  aria-live="assertive"
+                  data-testid="referents-save-error"
+                >
+                  {{ saveError() }}
+                </div>
+              }
+            </section>
+          }
 
           <div class="buttons mt-4">
             <button
@@ -360,9 +450,15 @@ export class BookStudyDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly bookStudyService = inject(BookStudyService);
+  private readonly scrollStudyService = inject(ScrollStudyService);
 
   readonly state = signal<DetailState>('loading');
   readonly bookStudy = signal<BookStudy | null>(null);
+
+  /** The scroll linked to this book study (resolved by matching bookStudyId), or null. */
+  readonly linkedScroll = signal<ScrollStudy | null>(null);
+  /** Whether the Referents editor (Step 6) is expanded in the steps section. */
+  readonly referentsOpen = signal(false);
 
   readonly showDeleteModal = signal(false);
   readonly deleting = signal(false);
@@ -400,11 +496,43 @@ export class BookStudyDetailComponent implements OnInit {
         this.bookStudy.set(bookStudy);
         this.referents.set(bookStudy.referents ?? []);
         this.state.set('loaded');
+        this.resolveLinkedScroll();
       },
       error: (err: { status?: number }) => {
         this.state.set(err?.status === 404 ? 'notfound' : 'error');
       },
     });
+  }
+
+  /**
+   * Find the scroll linked to this book study by listing the user's scrolls and matching
+   * bookStudyId. Best-effort: a failure leaves linkedScroll null (the hub shows the upload
+   * action), it does not fail the page.
+   */
+  private resolveLinkedScroll(): void {
+    this.scrollStudyService.listScrollStudies().subscribe({
+      next: (scrolls) => {
+        this.linkedScroll.set(scrolls.find((s) => s.bookStudyId === this.bookStudyId) ?? null);
+      },
+      error: () => {
+        this.linkedScroll.set(null);
+      },
+    });
+  }
+
+  /** Begin uploading the scroll for this book study (Step 4), carrying the bookStudyId. */
+  uploadScroll(): void {
+    this.router.navigate(['/scroll/new'], { queryParams: { bookStudyId: this.bookStudyId } });
+  }
+
+  /** Toggle the Referents (Step 6) editor disclosure in the steps section. */
+  toggleReferents(): void {
+    this.referentsOpen.update((v) => !v);
+  }
+
+  /** True once the linked scroll's text is extracted, so steps 6–9 are usable. */
+  scrollReady(): boolean {
+    return this.linkedScroll()?.status === 'ready';
   }
 
   /** Append a new referent from the draft form. Phrase and refers-to are required (after trim). */

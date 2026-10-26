@@ -24,6 +24,15 @@ const MAX_POLLS = 20;
     <section class="section" aria-label="Scroll study">
       <div class="container">
         @if (study(); as s) {
+          @if (s.bookStudyId) {
+            <a
+              [routerLink]="['/books', s.bookStudyId]"
+              class="button is-light is-small mb-4"
+              data-testid="back-to-book-link"
+            >
+              ← Back to book study
+            </a>
+          }
           <h2 class="title is-4" data-testid="scroll-book">{{ s.bookName }}</h2>
         }
 
