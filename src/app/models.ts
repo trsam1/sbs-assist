@@ -205,3 +205,38 @@ export interface OutlineStudyInput {
   theme?: string; // Step 9; omitted/'' allowed
   purpose?: string; // Step 9; omitted/'' allowed
 }
+
+/** Which of the two Step 10 groupings a figure type belongs to. */
+export type FigureGroup = 'parallelism' | 'figure';
+
+/** One figure of speech / parallelism the student tagged and interpreted in Step 10. */
+export interface FigureEntry {
+  figureType: string; // a FIGURE_TYPES id, or 'other'
+  otherLabel: string; // free text when figureType === 'other', else '' (<=100)
+  group: FigureGroup; // derived from figureType
+  reference: string; // required free-text location, no verse text (<=200)
+  text: string; // optional student transcription/paraphrase, '' when unset (<=2000)
+  interpretation: string; // student's sense of the figure, '' when unset (<=2000)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** The persisted Step 10 worksheet for one scroll study, owned by the current user. */
+export interface FiguresStudy {
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  entries: FigureEntry[]; // ordered
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/** Save payload from the figures view (server sets userId/timestamps). */
+export interface FiguresStudyInput {
+  entries?: FigureEntry[];
+}
+
+/** A transient AI candidate (NOT persisted) — surfaced by the Step 10 suggest action. */
+export interface FigureCandidate {
+  reference: string; // location to look at
+  suggestedType: string; // a FIGURE_TYPES id to consider (never auto-applied)
+  reason: string; // one-line why-look-here (never an interpretation)
+}

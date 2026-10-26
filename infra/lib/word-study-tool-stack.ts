@@ -88,6 +88,15 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Outline Study CRUD */
   public readonly outlineStudyFn: nodejs.NodejsFunction;
 
+  /** DynamoDB table for user figures studies (Step 10) */
+  public readonly figuresStudiesTable: dynamodb.Table;
+
+  /** Lambda: Figures Study CRUD */
+  public readonly figuresStudyFn: nodejs.NodejsFunction;
+
+  /** Lambda: Figures Assist (Bedrock; Step 10 candidates + tag-check) */
+  public readonly figuresAssistFn: nodejs.NodejsFunction;
+
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
 
@@ -220,6 +229,18 @@ export class WordStudyToolStack extends cdk.Stack {
     // GSI is needed (and no PITR, consistent with StructureStudies — no new StageConfig field).
     this.outlineStudiesTable = new dynamodb.Table(this, 'OutlineStudies', {
       tableName: n('OutlineStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    // Figures studies (Step 10). One record per scroll per user, fetched by exact key, so no
+    // GSI is needed (and no PITR, consistent with the sibling study tables — the one new
+    // StageConfig field, figuresAssistModelId, is a model-id string, not a table property).
+    this.figuresStudiesTable = new dynamodb.Table(this, 'FiguresStudies', {
+      tableName: n('FiguresStudies'),
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -542,6 +563,51 @@ export class WordStudyToolStack extends cdk.Stack {
 
     this.outlineStudiesTable.grantReadWriteData(this.outlineStudyFn);
 
+    // --- Figures Study CRUD Lambda (Step 10) ---
+    this.figuresStudyFn = new nodejs.NodejsFunction(this, 'FiguresStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('FiguresStudy'),
+      logGroup: fnLogs('FiguresStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'figures-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        FIGURES_STUDIES_TABLE_NAME: this.figuresStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.figuresStudiesTable.grantReadWriteData(this.figuresStudyFn);
+
+    // --- Figures Assist Lambda (Step 10; Bedrock candidate scan + tag-check) ---
+    // The assist model is per-stage (prod Opus 5.5, dev Sonnet 5.5) via config.figuresAssistModelId.
+    // The IAM grant is derived from that same id so model and grant never drift. The id is the full
+    // cross-Region inference profile (e.g. 'us.anthropic.claude-opus-5-5'); the foundation-model ARN
+    // drops the regional prefix, the inference-profile ARN keeps the id as configured.
+    const assistModelId = config.figuresAssistModelId;
+    const foundationModelId = assistModelId.replace(/^(us|eu|apac|global)\./, '');
+    this.figuresAssistFn = new nodejs.NodejsFunction(this, 'FiguresAssistFn', {
+      ...commonLambdaProps,
+      functionName: n('FiguresAssist'),
+      logGroup: fnLogs('FiguresAssistFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'figures-assist', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        FIGURES_ASSIST_MODEL_ID: assistModelId,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.figuresAssistFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['bedrock:InvokeModel'],
+        resources: [
+          `arn:aws:bedrock:*::foundation-model/${foundationModelId}`,
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/${assistModelId}`,
+        ],
+      }),
+    );
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -678,6 +744,25 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // PUT /scroll-studies/{scrollStudyId}/outline
     outlineResource.addMethod('PUT', outlineStudyIntegration, authMethodOptions);
+
+    // --- Figures Study routes (nested under a scroll study, Step 10) ---
+    const figuresStudyIntegration = new apigateway.LambdaIntegration(this.figuresStudyFn);
+
+    const figuresResource = scrollStudyByIdResource.addResource('figures');
+
+    // GET /scroll-studies/{scrollStudyId}/figures
+    figuresResource.addMethod('GET', figuresStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/{scrollStudyId}/figures
+    figuresResource.addMethod('PUT', figuresStudyIntegration, authMethodOptions);
+
+    // --- Figures Assist route (Bedrock; Step 10 candidates + tag-check) ---
+    const figuresAssistIntegration = new apigateway.LambdaIntegration(this.figuresAssistFn);
+
+    const figuresAssistResource = aiResource.addResource('figures-assist');
+
+    // POST /ai/figures-assist
+    figuresAssistResource.addMethod('POST', figuresAssistIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json

@@ -255,7 +255,7 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(10);
+    expect(groups).toHaveLength(12);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
   });
 
@@ -396,6 +396,102 @@ describe('WordStudyToolStack (prod)', () => {
     expect(httpMethods).toEqual(['GET', 'PUT']);
   });
 
+  it('adds an additive FiguresStudies table (on-demand, AWS-managed, PK/SK, no GSI, no PITR)', () => {
+    const table = tableByName(t, 'FiguresStudies');
+    expect(table.Properties?.['KeySchema']).toEqual([
+      { AttributeName: 'PK', KeyType: 'HASH' },
+      { AttributeName: 'SK', KeyType: 'RANGE' },
+    ]);
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.Properties?.['SSESpecification']).toEqual({ SSEEnabled: true });
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    expect(table.Properties?.['PointInTimeRecoverySpecification']).toBeUndefined();
+    expect(table.DeletionPolicy).toBe('Retain');
+  });
+
+  it('runs FiguresStudy on Node 22 with its own log group and table env', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'FiguresStudy',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({ FIGURES_STUDIES_TABLE_NAME: Match.anyValue() }),
+      },
+    });
+  });
+
+  it('runs FiguresAssist on Node 22 with the per-stage model env (prod Opus 5.5) and no table', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'FiguresAssist',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({ FIGURES_ASSIST_MODEL_ID: 'us.anthropic.claude-opus-5-5' }),
+      },
+    });
+  });
+
+  it('grants FiguresStudy read/write on only the FiguresStudies table', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const matching = policies.filter((p) =>
+      JSON.stringify(p.Properties?.['PolicyDocument']).includes('FiguresStudies'),
+    );
+    expect(matching.length).toBeGreaterThan(0);
+    for (const policy of matching) {
+      const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
+      expect(doc).not.toContain('StructureStudies');
+      expect(doc).not.toContain('OutlineStudies');
+      expect(doc).not.toContain('ScrollStudies');
+      expect(doc).not.toContain('WordStudies');
+    }
+  });
+
+  it('scopes the FiguresAssist Bedrock grant to the per-stage Opus 5.5 model + inference profile', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const bedrock = policies.filter((p) =>
+      JSON.stringify(p.Properties?.['PolicyDocument']).includes('bedrock:InvokeModel'),
+    );
+    expect(bedrock.length).toBeGreaterThan(0);
+    const figures = bedrock.filter((p) =>
+      JSON.stringify(p.Properties?.['PolicyDocument']).includes('claude-opus-5-5'),
+    );
+    expect(figures.length, 'a bedrock policy scoped to opus-5-5').toBe(1);
+    const doc = JSON.stringify(figures[0].Properties?.['PolicyDocument']);
+    // Foundation-model ARN drops the region prefix; inference-profile ARN keeps it.
+    expect(doc).toContain('foundation-model/anthropic.claude-opus-5-5');
+    expect(doc).toContain('inference-profile/us.anthropic.claude-opus-5-5');
+    // No stray Sonnet (dev) id leaks into the prod grant.
+    expect(doc).not.toContain('sonnet-5-5');
+  });
+
+  it('authorizes GET and PUT under scroll-studies/{scrollStudyId}/figures', () => {
+    const figuresResource = Object.entries(resourcesOfType(t, 'AWS::ApiGateway::Resource')).find(
+      ([, r]) => r.Properties?.['PathPart'] === 'figures',
+    );
+    expect(figuresResource, 'figures resource').toBeDefined();
+    const resourceId = figuresResource![0];
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['GET', 'PUT']);
+  });
+
+  it('authorizes POST under /ai/figures-assist', () => {
+    const resource = Object.entries(resourcesOfType(t, 'AWS::ApiGateway::Resource')).find(
+      ([, r]) => r.Properties?.['PathPart'] === 'figures-assist',
+    );
+    expect(resource, 'figures-assist resource').toBeDefined();
+    const resourceId = resource![0];
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['POST']);
+  });
+
   it('adds an additive BookStudies table (on-demand, AWS-managed, GSI1, no PITR)', () => {
     const table = tableByName(t, 'BookStudies');
     expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
@@ -524,7 +620,7 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(10);
+    expect(groups).toHaveLength(12);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
@@ -553,6 +649,31 @@ describe('WordStudyToolStack (dev)', () => {
     expect(table.DeletionPolicy).toBe('Delete');
     expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
     t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'OutlineStudy-dev' });
+  });
+
+  it('creates a FiguresStudies-dev table and FiguresStudy-dev function', () => {
+    const table = tableByName(t, 'FiguresStudies-dev');
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.DeletionPolicy).toBe('Delete');
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'FiguresStudy-dev' });
+  });
+
+  it('runs FiguresAssist-dev with the per-stage Sonnet 5.5 model env and Bedrock grant', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'FiguresAssist-dev',
+      Environment: {
+        Variables: Match.objectLike({ FIGURES_ASSIST_MODEL_ID: 'us.anthropic.claude-sonnet-5-5' }),
+      },
+    });
+    const bedrock = Object.values(resourcesOfType(t, 'AWS::IAM::Policy')).filter((p) =>
+      JSON.stringify(p.Properties?.['PolicyDocument']).includes('claude-sonnet-5-5'),
+    );
+    expect(bedrock.length, 'dev bedrock policy scoped to sonnet-5-5').toBe(1);
+    const doc = JSON.stringify(bedrock[0].Properties?.['PolicyDocument']);
+    expect(doc).toContain('foundation-model/anthropic.claude-sonnet-5-5');
+    expect(doc).toContain('inference-profile/us.anthropic.claude-sonnet-5-5');
+    expect(doc).not.toContain('opus-5-5');
   });
 
   it('creates a BookStudies-dev table and BookStudyCRUD-dev function', () => {

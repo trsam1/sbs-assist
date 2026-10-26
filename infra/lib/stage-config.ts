@@ -38,6 +38,15 @@ export interface StageConfig {
   certificate: 'wildcard' | 'site';
   /** RestApi cloudWatchRole: owns the account-level API Gateway CloudWatch setting (prod only). */
   apiCloudWatchRole: boolean;
+  /**
+   * Bedrock model id the Step 10 Figures assist (FiguresAssistFn) invokes. A stronger tier than
+   * Step 5's Haiku because candidate-spotting and tag-checking are judgment tasks. Per-stage by
+   * decision: prod runs the strongest tier, dev runs one tier down as an evaluation surface. The
+   * full cross-Region inference-profile id (prefix included) is stored; the CDK wires it into both
+   * the Lambda's MODEL_ID env and its Bedrock IAM ARNs so model and grant never drift. This is a
+   * behavior setting, not a frozen physical name, so it may be changed later with an explicit edit.
+   */
+  figuresAssistModelId: string;
 }
 
 export const HOSTED_ZONE = { zoneName: 'teksnextdoor.com' } as const;
@@ -58,6 +67,7 @@ export const STAGES: Record<Stage, StageConfig> = {
     throttle: { rateLimit: 50, burstLimit: 100 },
     certificate: 'wildcard',
     apiCloudWatchRole: true,
+    figuresAssistModelId: 'us.anthropic.claude-opus-5-5',
   },
   dev: {
     stage: 'dev',
@@ -74,5 +84,6 @@ export const STAGES: Record<Stage, StageConfig> = {
     throttle: { rateLimit: 5, burstLimit: 10 },
     certificate: 'site',
     apiCloudWatchRole: false,
+    figuresAssistModelId: 'us.anthropic.claude-sonnet-5-5',
   },
 };

@@ -135,10 +135,16 @@ const REFERENT_LONG_MAX = 1000;
                       data-testid="theme-purpose-link"
                       >Step 9 — Theme &amp; Purpose</a
                     >
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'figures']"
+                      class="button is-link is-outlined"
+                      data-testid="figures-link"
+                      >Step 10 — Figures of Speech</a
+                    >
                   </div>
                 } @else {
                   <p class="is-size-7 has-text-grey" data-testid="steps-pending">
-                    Steps 6–9 become available once the scroll finishes processing.
+                    Steps 6–10 become available once the scroll finishes processing.
                   </p>
                 }
               </div>
