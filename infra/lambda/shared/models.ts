@@ -247,3 +247,35 @@ export interface OutlineStudyRecord {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+/** Which of the two Step 10 groupings a figure type belongs to. */
+export type FigureGroup = 'parallelism' | 'figure';
+
+/** One figure of speech / parallelism the student tagged and interpreted in Step 10. */
+export interface FigureEntry {
+  figureType: string; // a FIGURE_TYPES id, or 'other'
+  otherLabel: string; // free text when figureType === 'other', else '' (<=100)
+  group: FigureGroup; // derived from figureType (server recomputes it; never trusts the body)
+  reference: string; // required free-text location, no verse text (<=200)
+  text: string; // optional student transcription/paraphrase, '' when unset (<=2000)
+  interpretation: string; // student's sense of the figure, '' when unset (<=2000)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** DynamoDB record shape for the FiguresStudies table (one per scroll per user, Step 10). */
+export interface FiguresStudyRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "FIGURES#<scrollStudyId>"
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  entries: FigureEntry[]; // ordered
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/** A transient AI candidate (NOT persisted) — surfaced by the Step 10 suggest action. */
+export interface FigureCandidate {
+  reference: string; // location to look at
+  suggestedType: string; // a FIGURE_TYPES id to consider (never auto-applied)
+  reason: string; // one-line why-look-here (never an interpretation)
+}
