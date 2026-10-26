@@ -66,6 +66,13 @@ pattern already shipped in Step 5's AI summary (`.kiro/specs/word-study-tool/`),
 - **A6 — one focused tool for one step; changes nothing earlier.** This increment delivers only
   Step 10 and does not alter the Step 4–9 tools, the Book hub's existing step entries, or the Word
   Study (Out of Scope). It adds one step entry to the hub and one additive route.
+- **A7 — the assist model is a per-stage config value, no UI picker (locked with the user).** Because
+  candidate-spotting and tag-checking are judgment tasks (not Step 5's synthesis), the assist runs a
+  stronger tier than Haiku, set per stage in `stage-config.ts` as `figuresAssistModelId` — **prod
+  Claude Opus 4.1, dev Claude Sonnet 4.5** — so the live student gets the strongest model while dev
+  is a one-tier-down evaluation surface. There is no student-facing model picker and no runtime
+  model-selection plumbing; promoting the eventual winner is a one-line `stage-config.ts` edit. Model
+  access for both ids is available on the account.
 
 ---
 
@@ -228,11 +235,18 @@ As a Bible student, I want my Figures Study saved so I can close the app and ret
    the app SHALL NOT fetch, embed, or serve any Bible text the student did not provide, and the
    canned glossary SHALL contain no scripture quotations.
 4. **AI usage posture.** All Bedrock calls SHALL be user-initiated only (no automatic/background
-   invocation), reuse the Step 5 Claude Haiku model and graceful-degrade error pattern, and add no
-   always-on resources. The category glossary uses no AI.
+   invocation), reuse the Step 5 **graceful-degrade error pattern and `InvokeModel` shape**, and add
+   no always-on resources. The assist model is a **per-stage `StageConfig` value** —
+   `figuresAssistModelId`, prod **Claude Opus 4.1** and dev **Claude Sonnet 4.5** (a stronger tier
+   than Step 5's Haiku, because figure candidate-spotting and tag-checking are judgment tasks) — wired
+   into both the Lambda's `MODEL_ID` env and its Bedrock IAM grant so the two never drift. There is
+   **no** student-facing model picker. The category glossary uses no AI.
 5. **Cost.** Persistence reuses DynamoDB on-demand billing (negligible). Bedrock is the only variable
-   cost and remains user-initiated and bounded (short `max_tokens`), consistent with the Step 5 AI
-   summary cost profile; no test or smoke step calls Bedrock.
+   cost and remains user-initiated and bounded (short `max_tokens`). The assist runs a stronger,
+   costlier tier than Step 5 (Opus/Sonnet vs. Haiku) — a deliberate trade for a low-traffic judgment
+   step — so per-call cost is higher but total cost stays small and variable (few, short, on-demand
+   calls); no test or smoke step calls Bedrock. A cheaper tier can be adopted later via a one-line
+   `stage-config.ts` change.
 6. **Accessibility.** New UI SHALL be keyboard operable and screen-reader labeled, matching existing
    ARIA patterns (`aria-label`, `aria-live` for AI results, `aria-pressed`, `role="alertdialog"` for
    destructive confirms, `is-sr-only`).
