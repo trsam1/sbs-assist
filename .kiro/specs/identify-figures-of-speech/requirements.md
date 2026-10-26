@@ -69,7 +69,7 @@ pattern already shipped in Step 5's AI summary (`.kiro/specs/word-study-tool/`),
 - **A7 — the assist model is a per-stage config value, no UI picker (locked with the user).** Because
   candidate-spotting and tag-checking are judgment tasks (not Step 5's synthesis), the assist runs a
   stronger tier than Haiku, set per stage in `stage-config.ts` as `figuresAssistModelId` — **prod
-  Claude Opus 4.1, dev Claude Sonnet 4.5** — so the live student gets the strongest model while dev
+  Claude Opus 5.5, dev Claude Sonnet 5.5** — so the live student gets the strongest model while dev
   is a one-tier-down evaluation surface. There is no student-facing model picker and no runtime
   model-selection plumbing; promoting the eventual winner is a one-line `stage-config.ts` edit. Model
   access for both ids is available on the account.
@@ -237,7 +237,7 @@ As a Bible student, I want my Figures Study saved so I can close the app and ret
 4. **AI usage posture.** All Bedrock calls SHALL be user-initiated only (no automatic/background
    invocation), reuse the Step 5 **graceful-degrade error pattern and `InvokeModel` shape**, and add
    no always-on resources. The assist model is a **per-stage `StageConfig` value** —
-   `figuresAssistModelId`, prod **Claude Opus 4.1** and dev **Claude Sonnet 4.5** (a stronger tier
+   `figuresAssistModelId`, prod **Claude Opus 5.5** and dev **Claude Sonnet 5.5** (a stronger tier
    than Step 5's Haiku, because figure candidate-spotting and tag-checking are judgment tasks) — wired
    into both the Lambda's `MODEL_ID` env and its Bedrock IAM grant so the two never drift. There is
    **no** student-facing model picker. The category glossary uses no AI.

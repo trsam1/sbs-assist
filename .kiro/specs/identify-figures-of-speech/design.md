@@ -16,7 +16,7 @@ It is the first tool to combine the shipped **persisted-worksheet** pattern with
 **on-demand Amazon Bedrock assist** pattern (Step 5's AI summary). Because the figures assist does
 *judgment* work (does this passage contain a figure? does the student's chosen type fit?) rather than
 Step 5's synthesis, the assist model is a **per-stage `StageConfig` value** — **dev uses Claude
-Sonnet 4.5, prod uses Claude Opus 4.1** — so the stronger model serves the live student while dev is
+Sonnet 5.5, prod uses Claude Opus 5.5** — so the stronger model serves the live student while dev is
 free to evaluate a different tier, with no UI picker and no model-selection plumbing (see Decisions).
 The AI acts as a **consultant, never a grader**, through three on-demand actions:
 
@@ -59,7 +59,7 @@ graph TD
         APIGW[API Gateway + Cognito authorizer]
         FigFn[FiguresStudy Lambda<br/>new CRUD]
         AssistFn[FiguresAssist Lambda<br/>new Bedrock]
-        Bedrock[(Amazon Bedrock<br/>Sonnet 4.5 dev / Opus 4.1 prod<br/>per-stage config)]
+        Bedrock[(Amazon Bedrock<br/>Sonnet 5.5 dev / Opus 5.5 prod<br/>per-stage config)]
         DDBS[(DynamoDB: ScrollStudies<br/>existing)]
         DDBF[(DynamoDB: FiguresStudies<br/>new)]
     end
@@ -139,18 +139,23 @@ model or ship a student-facing picker (which would add a config knob unrelated t
 the "assist, never replace" line), the model id is a new `StageConfig` field, `figuresAssistModelId`,
 so each stage runs a different tier with **no UI**:
 
-- **prod → Claude Opus 4.1** (`us.anthropic.claude-opus-4-1-20250805-v1:0`) — the live student gets
-  the strongest judgment.
-- **dev → Claude Sonnet 4.5** (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`) — a one-tier-down
-  evaluation surface to compare against Opus on real scroll text before committing.
+- **prod → Claude Opus 5.5** (Bedrock foundation model `anthropic.claude-opus-5-5`) — the live
+  student gets the strongest judgment.
+- **dev → Claude Sonnet 5.5** (Bedrock foundation model `anthropic.claude-sonnet-5-5`) — a
+  one-tier-down evaluation surface to compare against Opus on real scroll text before committing.
 
 The CDK wires `FiguresAssistFn`'s `MODEL_ID` env and its Bedrock IAM ARNs from `config
 .figuresAssistModelId`, so the grant always matches the model the stage actually invokes. Changing
 the winner later is a one-line `stage-config.ts` edit (a deliberate maintainer change, exactly the
-kind of value that belongs there). Model access was confirmed available on the account; the two
-model/inference-profile ARN pairs are derived from the configured id. This is the only place the two
-stages intentionally diverge in behavior; the assist Lambda code and prompts are identical across
-stages.
+kind of value that belongs there). This is the only place the two stages intentionally diverge in
+behavior; the assist Lambda code and prompts are identical across stages.
+
+The invoked id is the standard cross-Region **US inference profile** for each model —
+`us.anthropic.claude-opus-5-5` (prod) and `us.anthropic.claude-sonnet-5-5` (dev) — the same `us.`
+profile shape the shipped Haiku summary uses. The 5.5 generation dropped the snapshot date and the
+`-v1` suffix (per Anthropic's model-ID versioning), so the ids are dateless; the IAM-ARN helper
+derives the foundation-model and inference-profile ARNs from the configured id exactly as the
+AISummary grant does. (Model access for both confirmed available on the account.)
 
 **Category help is canned, not AI (locked with the user).** The taxonomy is fixed and a definition of
 "metonymy" does not need a live model, so the explanations are a client-owned glossary constant:
@@ -287,7 +292,7 @@ the student as the final judge.
   `infra/lambda/shared/models.ts`.
 - **`FiguresAssistFn`** (`infra/lambda/figures-assist/index.ts`), structured like `ai-summary/
   index.ts`: a `BedrockRuntimeClient`, `MODEL_ID = process.env['FIGURES_ASSIST_MODEL_ID'] ?? ''`
-  (injected by the stack from `config.figuresAssistModelId` — **Opus 4.1 in prod, Sonnet 4.5 in
+  (injected by the stack from `config.figuresAssistModelId` — **Opus 5.5 in prod, Sonnet 5.5 in
   dev**, not hard-coded Haiku), an `InvokeModelCommand` with `anthropic_version: 'bedrock-2023-05-31'`
   and a short `max_tokens`, and the **graceful-degrade** `try/catch` that returns a friendly
   "assist unavailable, please try again" payload rather than a 500 on a Bedrock error. It dispatches
@@ -373,11 +378,12 @@ interface FiguresStudyRecord {
   ALLOWED_ORIGINS, FIGURES_ASSIST_MODEL_ID: config.figuresAssistModelId }` (no table env — it is
   stateless). It gets a **Bedrock IAM policy shaped like `AISummaryFn`'s but scoped to the
   per-stage model** — `bedrock:InvokeModel` on the foundation-model ARN and the region/account
-  inference-profile ARN **derived from `config.figuresAssistModelId`** (prod → Opus 4.1, dev →
-  Sonnet 4.5), so the grant always matches the model the stage invokes. A small helper derives the
-  two ARNs from the configured id (`arn:aws:bedrock:*::foundation-model/<id-without-us-prefix>` and
-  `arn:aws:bedrock:${region}:${account}:inference-profile/<id>`), the same ARN shapes the AISummary
-  grant uses.
+  inference-profile ARN **derived from `config.figuresAssistModelId`** (prod → Opus 5.5, dev →
+  Sonnet 5.5), so the grant always matches the model the stage invokes. A small helper derives the
+  two ARNs from the configured id (`arn:aws:bedrock:*::foundation-model/<id with the `us.` region
+  prefix stripped>` and `arn:aws:bedrock:${region}:${account}:inference-profile/<id as configured>`),
+  the same ARN shapes the AISummary grant uses — the 5.5 models use the standard `us.` cross-Region
+  profile, so no prefix special-casing is needed.
 - Routes: a `figures` sub-resource on the existing `scrollStudyByIdResource`
   (`.../{scrollStudyId}/figures`) with `GET`/`PUT` carrying `authMethodOptions` (like `antecedents`/
   `structure`); and a `figures-assist` sub-resource on the existing `aiResource`
@@ -417,8 +423,13 @@ Values:
 
 | Stage | `figuresAssistModelId` | Rationale |
 |---|---|---|
-| prod | `us.anthropic.claude-opus-4-1-20250805-v1:0` | strongest judgment for the live student |
-| dev | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | one tier down; evaluate against Opus on real text |
+| prod | `us.anthropic.claude-opus-5-5` | strongest judgment for the live student |
+| dev | `us.anthropic.claude-sonnet-5-5` | one tier down; evaluate against Opus on real text |
+
+The id stored is the full **cross-Region inference-profile** id the Lambda actually invokes. Both 5.5
+models use the standard `us.` regional profile (dateless — the 4.6+ generation dropped the snapshot
+date and the `-v1` suffix), so the IAM-ARN helper derives both ARNs from the configured id with no
+prefix special-casing.
 
 This is **not** a frozen stateful/identity value (it is a behavior setting, not a physical name), so
 editing it later — e.g. to promote the dev winner to prod, or to drop prod to Sonnet — is a sanctioned
@@ -550,8 +561,8 @@ is mocked exactly as `ai-summary`'s tests mock it.
   and `/ai/figures-assist` `POST`, all guarded by the Cognito authorizer; and the `FiguresAssistFn`
   role has a `bedrock:InvokeModel` statement scoped to the **per-stage** model + inference-profile
   ARNs — asserted the same way the existing AISummary Bedrock test asserts it, but against
-  `config.figuresAssistModelId`: the **prod** synthesized template references the **Opus 4.1** ARNs
-  and the **dev** template references the **Sonnet 4.5** ARNs (so the test proves the grant tracks the
+  `config.figuresAssistModelId`: the **prod** synthesized template references the **Opus 5.5** ARNs
+  and the **dev** template references the **Sonnet 5.5** ARNs (so the test proves the grant tracks the
   configured model per stage, and that dev and prod intentionally differ here).
 - **Existing assertions that MUST change (two new functions make the function-log-group count 11, not
   9):**
@@ -585,7 +596,7 @@ is mocked exactly as `ai-summary`'s tests mock it.
   scripture.
 - **Bedrock availability/cost.** AI is user-initiated only, short-token, and graceful-degrades to a
   recoverable message — so an outage or throttle never breaks manual tagging. The assist runs a
-  **stronger, costlier tier than Step 5's Haiku** (prod Opus 4.1, dev Sonnet 4.5), a deliberate
+  **stronger, costlier tier than Step 5's Haiku** (prod Opus 5.5, dev Sonnet 5.5), a deliberate
   trade the user accepted for better judgment on a low-traffic step: per-call cost is higher, but
   calls are few, user-initiated, short-token, and capped by `max_tokens`, so it stays a small
   variable cost rather than an always-on one. No test or smoke step calls Bedrock, so CI/smoke cost
