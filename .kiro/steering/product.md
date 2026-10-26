@@ -92,7 +92,7 @@ Use these terms with their study-specific meanings:
 
 ## Guiding constraints
 
-- **No copyrighted Bible text.** The app serves verse *locations* only; the student reads verses in their own Bible and records observations. AI prompts contain only Strong's data and the student's notes.
+- **Student Provided Bible text.** The app can use Bible text as long as the student provided it. For example, either by copy and paste, or the full scroll text upload of a book.
 - **Student-driven observation.** Tools guide and capture the student's own work; they don't replace it.
 - **One step, one focused tool.** Each tool supports a single step of the method with a guided, savable worksheet.
 
