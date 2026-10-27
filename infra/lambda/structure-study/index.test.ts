@@ -162,6 +162,7 @@ describe('Structure Study CRUD Lambda', () => {
       expect(item['markers']).toEqual([]);
       expect(item['sections']).toEqual([]);
       expect(item['elements']).toEqual([]);
+      expect(item['secondaryGenres']).toEqual([]);
     });
 
     it('ignores a userId supplied in the body (taken only from the claim)', async () => {
@@ -276,6 +277,79 @@ describe('Structure Study CRUD Lambda', () => {
       );
       expect(res.statusCode).toBe(400);
       expect(JSON.parse(res.body).message).toMatch(/element/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    // --- secondary genres (in-book genre shifts) ---
+
+    it('round-trips secondaryGenres and preserves their order', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const secondaryGenres = [
+        { genre: 'poetry', startRef: '15:1', endRef: '15:21', notes: 'the Song of the Sea' },
+        { genre: 'law', startRef: '20:1', endRef: '', notes: '' },
+      ];
+      const res = await handler(makePutEvent(JSON.stringify({ secondaryGenres })));
+      expect(res.statusCode).toBe(200);
+      expect(putItem(1)['secondaryGenres']).toEqual(secondaryGenres);
+    });
+
+    it('tolerates a record read back without a secondaryGenres field (legacy)', async () => {
+      // GET echoes the stored record verbatim; a pre-feature record simply lacks the field.
+      const legacy = {
+        PK: 'USER#u1',
+        SK: 'STRUCTURE#s1',
+        scrollStudyId: 's1',
+        userId: 'u1',
+        genre: 'historical narrative',
+        tone: '',
+        markers: [],
+        sections: [],
+        elements: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      };
+      mockSend.mockResolvedValueOnce({ Item: legacy });
+      const res = await handler(makeGetEvent('u1', 's1'));
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).secondaryGenres).toBeUndefined();
+    });
+
+    it('rejects a secondary genre with a blank genre with 400', async () => {
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            secondaryGenres: [{ genre: '   ', startRef: '', endRef: '', notes: '' }],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/secondaryGenre\.genre/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects an over-length secondary-genre genre/startRef/endRef/notes with 400', async () => {
+      for (const field of [
+        { genre: 'a'.repeat(201) },
+        { startRef: 'a'.repeat(51) },
+        { endRef: 'a'.repeat(51) },
+        { notes: 'a'.repeat(1001) },
+      ]) {
+        mockSend.mockReset();
+        const base = { genre: 'poetry', startRef: '', endRef: '', notes: '' };
+        const res = await handler(
+          makePutEvent(JSON.stringify({ secondaryGenres: [{ ...base, ...field }] })),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).message).toMatch(/secondaryGenre/i);
+        expect(mockSend).not.toHaveBeenCalled();
+      }
+    });
+
+    it('rejects a non-array secondaryGenres with 400', async () => {
+      const res = await handler(makePutEvent(JSON.stringify({ secondaryGenres: 'poetry' })));
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/secondaryGenres must be an array/i);
       expect(mockSend).not.toHaveBeenCalled();
     });
 

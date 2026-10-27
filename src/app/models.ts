@@ -140,15 +140,27 @@ export interface StructureElement {
   sectionRefs: string[]; // labels/positions of sections where it occurs; [] allowed
 }
 
+/**
+ * One span where a genre other than the book's dominant genre appears (Step 7) — e.g. poetry
+ * inside a narrative, a hymn inside a letter. Student-authored; locations only, never verse text.
+ */
+export interface SecondaryGenre {
+  genre: string; // required; from the shared genre list or free text (<=200)
+  startRef: string; // optional free-text location, '' when unset (<=50)
+  endRef: string; // optional free-text location, '' when unset (<=50)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
 /** The persisted Step 7 worksheet for one scroll study, owned by the current user. */
 export interface StructureStudy {
   scrollStudyId: string;
   userId: string; // Cognito sub
-  genre: string; // '' when unset
+  genre: string; // '' when unset — the book's dominant genre
   tone: string; // '' when unset
   markers: StructureMarker[];
   sections: StructureSection[]; // ordered; feeds Step 8 (Provisional Outline)
   elements: StructureElement[]; // optional elements chart; [] when unset
+  secondaryGenres: SecondaryGenre[]; // ordered; [] when unset — ADDITIVE (in-book genre shifts)
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
@@ -160,6 +172,7 @@ export interface StructureStudyInput {
   markers?: StructureMarker[];
   sections?: StructureSection[];
   elements?: StructureElement[];
+  secondaryGenres?: SecondaryGenre[];
 }
 
 /**

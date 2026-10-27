@@ -5,6 +5,7 @@ import {
   StructureElement,
   StructureMarker,
   StructureSection,
+  SecondaryGenre,
   StructureStudy,
   StructureStudyInput,
 } from './models';
@@ -19,6 +20,7 @@ interface StructureStudyRecord {
   markers?: StructureMarker[];
   sections?: StructureSection[];
   elements?: StructureElement[];
+  secondaryGenres?: SecondaryGenre[];
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +34,8 @@ function toStructureStudy(record: StructureStudyRecord): StructureStudy {
     markers: record.markers ?? [],
     sections: record.sections ?? [],
     elements: record.elements ?? [],
+    // Legacy records saved before this feature have no field; coerce to an empty list.
+    secondaryGenres: record.secondaryGenres ?? [],
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

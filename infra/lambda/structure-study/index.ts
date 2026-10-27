@@ -4,6 +4,7 @@ import type {
   StructureMarker,
   StructureSection,
   StructureElement,
+  SecondaryGenre,
   StructureStudyRecord,
 } from '../shared/models';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
@@ -66,6 +67,7 @@ interface ParsedBody {
   markers: StructureMarker[];
   sections: StructureSection[];
   elements: StructureElement[];
+  secondaryGenres: SecondaryGenre[];
 }
 
 type ParseResult = ParsedBody | { error: string };
@@ -184,7 +186,51 @@ function parsePutBody(body: string | null | undefined): ParseResult {
     }
   }
 
-  return { genre: genreRes.value, tone: toneRes.value, markers, sections, elements };
+  // secondaryGenres (order preserved as sent) — in-book genre shifts; locations only
+  const secondaryGenres: SecondaryGenre[] = [];
+  const rawSecondary = parsed['secondaryGenres'];
+  if (rawSecondary !== undefined) {
+    if (!Array.isArray(rawSecondary)) return { error: 'secondaryGenres must be an array.' };
+    for (const el of rawSecondary) {
+      if (!isObject(el)) return { error: 'Each secondary genre must be an object.' };
+      if (typeof el['genre'] !== 'string' || el['genre'].trim().length === 0) {
+        return { error: 'secondaryGenre.genre must be a non-empty string.' };
+      }
+      if (el['genre'].length > GENRE_MAX) {
+        return { error: `secondaryGenre.genre must be at most ${GENRE_MAX} characters.` };
+      }
+      const startRes = optionalString(el['startRef'], SHORT_REF_MAX);
+      if ('error' in startRes)
+        return {
+          error: `secondaryGenre.startRef must be a string of at most ${SHORT_REF_MAX} characters.`,
+        };
+      const endRes = optionalString(el['endRef'], SHORT_REF_MAX);
+      if ('error' in endRes)
+        return {
+          error: `secondaryGenre.endRef must be a string of at most ${SHORT_REF_MAX} characters.`,
+        };
+      const notesRes = optionalString(el['notes'], NOTES_MAX);
+      if ('error' in notesRes)
+        return {
+          error: `secondaryGenre.notes must be a string of at most ${NOTES_MAX} characters.`,
+        };
+      secondaryGenres.push({
+        genre: el['genre'],
+        startRef: startRes.value,
+        endRef: endRes.value,
+        notes: notesRes.value,
+      });
+    }
+  }
+
+  return {
+    genre: genreRes.value,
+    tone: toneRes.value,
+    markers,
+    sections,
+    elements,
+    secondaryGenres,
+  };
 }
 
 async function getStructureStudy(
@@ -224,6 +270,7 @@ async function saveStructureStudy(
     markers: body.markers,
     sections: body.sections,
     elements: body.elements,
+    secondaryGenres: body.secondaryGenres,
     createdAt,
     updatedAt: now,
   };
