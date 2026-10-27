@@ -32,6 +32,7 @@ function makeStructureStudy(overrides: Partial<StructureStudy> = {}): StructureS
     markers: [],
     sections: [],
     elements: [],
+    secondaryGenres: [],
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
@@ -293,6 +294,122 @@ describe('StructureViewComponent', () => {
     fixture.detectChanges();
     expect(component.state()).toBe('error');
     expect(query('[data-testid="structure-retry-button"]')).not.toBeNull();
+  });
+
+  // --- secondary genres (in-book genre shifts) ---
+
+  it('renders saved secondary-genre rows in order and offers the shared datalist', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getStructSpy.mockReturnValue(
+      of(
+        makeStructureStudy({
+          secondaryGenres: [
+            { genre: 'poetry', startRef: '15:1', endRef: '15:21', notes: 'Song of the Sea' },
+            { genre: 'law', startRef: '20:1', endRef: '', notes: '' },
+          ],
+        }),
+      ),
+    );
+    fixture.detectChanges();
+
+    expect(component.secondaryGenres().map((g) => g.genre)).toEqual(['poetry', 'law']);
+    expect(queryAll('[data-testid="secondary-genre-row"]').length).toBe(2);
+    expect(query('[data-testid="structure-secondary-genres"]')).not.toBeNull();
+    // the dominant genre field and the span rows share one datalist of genre suggestions
+    expect(query('#biblical-genres')).not.toBeNull();
+    expect(queryAll('#biblical-genres option').length).toBeGreaterThan(0);
+  });
+
+  it('coerces a missing secondaryGenres field to an empty list (backward compatibility)', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getStructSpy.mockReturnValue(
+      of({
+        scrollStudyId: 's1',
+        userId: 'u1',
+        genre: 'historical narrative',
+        tone: '',
+        markers: [],
+        sections: [],
+        elements: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      } as unknown as StructureStudy),
+    );
+    fixture.detectChanges();
+
+    expect(component.secondaryGenres()).toEqual([]);
+    expect(queryAll('[data-testid="secondary-genre-row"]').length).toBe(0);
+  });
+
+  it('adds, edits, reorders, and removes secondary-genre rows preserving order', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    component.addSecondaryGenre();
+    component.setSecondaryGenre(0, 'poetry');
+    component.setSecondaryStartRef(0, '15:1');
+    component.addSecondaryGenre();
+    component.setSecondaryGenre(1, 'law');
+    expect(component.secondaryGenres().map((g) => g.genre)).toEqual(['poetry', 'law']);
+
+    component.moveSecondaryGenre(1, -1);
+    expect(component.secondaryGenres().map((g) => g.genre)).toEqual(['law', 'poetry']);
+
+    component.removeSecondaryGenre(0);
+    expect(component.secondaryGenres().map((g) => g.genre)).toEqual(['poetry']);
+    expect(component.secondaryGenres()[0].startRef).toBe('15:1');
+  });
+
+  it('saves secondary-genre spans, trimming the genre and dropping blank-genre rows', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    saveSpy.mockReturnValue(of(makeStructureStudy()));
+    fixture.detectChanges();
+
+    component.addSecondaryGenre();
+    component.setSecondaryGenre(0, '  poetry  ');
+    component.setSecondaryStartRef(0, '15:1');
+    component.addSecondaryGenre(); // left blank — dropped on save
+    component.save();
+
+    expect(saveSpy).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({
+        secondaryGenres: [{ genre: 'poetry', startRef: '15:1', endRef: '', notes: '' }],
+      }),
+    );
+  });
+
+  it('flags a blank-genre secondary row inline until a genre is entered', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    fixture.detectChanges();
+
+    component.addSecondaryGenre();
+    fixture.detectChanges();
+    expect(query('[data-testid="secondary-genre-blank"]')).not.toBeNull();
+
+    component.setSecondaryGenre(0, 'poetry');
+    fixture.detectChanges();
+    expect(query('[data-testid="secondary-genre-blank"]')).toBeNull();
+  });
+
+  it('leaves the dominant genre/tone fields and other surfaces unchanged (regression)', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeStudy()));
+    getStructSpy.mockReturnValue(of(makeStructureStudy({ genre: 'letter', tone: 'joyful' })));
+    fixture.detectChanges();
+
+    expect(component.genre()).toBe('letter');
+    expect(component.tone()).toBe('joyful');
+    expect(query('[data-testid="genre-input"]')).not.toBeNull();
+    expect(query('[data-testid="tone-input"]')).not.toBeNull();
+    expect(query('[data-testid="structure-frequency"]')).not.toBeNull();
+    expect(query('[data-testid="structure-markers"]')).not.toBeNull();
+    expect(query('[data-testid="structure-sections"]')).not.toBeNull();
   });
 
   it('calls only the scroll and structure services (no unexpected API dependency)', () => {

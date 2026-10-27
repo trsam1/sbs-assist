@@ -10,7 +10,8 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { StructureStudyService } from '../structure-study.service';
-import { StructureElement, StructureMarker, StructureSection } from '../models';
+import { StructureElement, StructureMarker, StructureSection, SecondaryGenre } from '../models';
+import { BIBLICAL_GENRES } from '../structure-genres';
 import { wordFrequency, suggestMarkers, type MarkerCandidate } from '../structure-analyze';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
@@ -100,6 +101,11 @@ const FREQUENCY_PAGE = 25;
             <!-- Genre & tone -->
             <div class="box">
               <h3 class="title is-5">Genre &amp; tone</h3>
+              <datalist id="biblical-genres">
+                @for (g of biblicalGenres; track g) {
+                  <option [value]="g"></option>
+                }
+              </datalist>
               <div class="field">
                 <label class="label" for="genre">Genre</label>
                 <div class="control">
@@ -108,6 +114,7 @@ const FREQUENCY_PAGE = 25;
                     class="input"
                     type="text"
                     maxlength="200"
+                    list="biblical-genres"
                     placeholder="e.g. letter, historical narrative, poetry"
                     [ngModel]="genre()"
                     (ngModelChange)="genre.set($event)"
@@ -129,6 +136,139 @@ const FREQUENCY_PAGE = 25;
                   ></textarea>
                 </div>
               </div>
+            </div>
+
+            <!-- Secondary genres: where the genre shifts inside the book -->
+            <div class="box" data-testid="structure-secondary-genres">
+              <h3 class="title is-5">Secondary genres (where the genre shifts)</h3>
+              <p class="help mb-3" data-testid="secondary-genre-help">
+                Record a passage whose genre differs from the book's dominant genre — e.g. poetry
+                inside a narrative, a hymn inside a letter. The reference is a location you type; no
+                verse text is stored.
+              </p>
+              @for (sg of secondaryGenres(); track $index) {
+                <div class="box p-3 mb-2" data-testid="secondary-genre-row">
+                  <!-- Genre + reorder/remove controls -->
+                  <div class="field has-addons mb-2">
+                    <div class="control is-expanded">
+                      <input
+                        class="input is-small"
+                        type="text"
+                        maxlength="200"
+                        list="biblical-genres"
+                        placeholder="Genre, e.g. poetry"
+                        [ngModel]="sg.genre"
+                        (ngModelChange)="setSecondaryGenre($index, $event)"
+                        [attr.aria-label]="'Secondary genre ' + ($index + 1) + ' genre'"
+                        data-testid="secondary-genre-input"
+                      />
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        [disabled]="$index === 0"
+                        (click)="moveSecondaryGenre($index, -1)"
+                        [attr.aria-label]="'Move secondary genre ' + ($index + 1) + ' up'"
+                        data-testid="secondary-genre-up"
+                      >
+                        ↑
+                      </button>
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        [disabled]="$index === secondaryGenres().length - 1"
+                        (click)="moveSecondaryGenre($index, 1)"
+                        [attr.aria-label]="'Move secondary genre ' + ($index + 1) + ' down'"
+                        data-testid="secondary-genre-down"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small is-danger is-outlined"
+                        type="button"
+                        (click)="removeSecondaryGenre($index)"
+                        [attr.aria-label]="'Remove secondary genre ' + ($index + 1)"
+                        data-testid="secondary-genre-remove"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+
+                  @if (sg.genre.trim().length === 0) {
+                    <p class="help is-danger" data-testid="secondary-genre-blank">
+                      Name the genre, or remove this row.
+                    </p>
+                  }
+
+                  <!-- Passage location: where this genre span starts and stops -->
+                  <div class="field is-grouped mb-2">
+                    <div class="control is-expanded">
+                      <label class="label is-small mb-1" [attr.for]="'secondary-start-' + $index">
+                        Starts at
+                      </label>
+                      <input
+                        [id]="'secondary-start-' + $index"
+                        class="input is-small"
+                        type="text"
+                        maxlength="50"
+                        placeholder="e.g. 15:1"
+                        [ngModel]="sg.startRef"
+                        (ngModelChange)="setSecondaryStartRef($index, $event)"
+                        [attr.aria-label]="'Secondary genre ' + ($index + 1) + ' starts at'"
+                        data-testid="secondary-genre-startref"
+                      />
+                    </div>
+                    <div class="control is-expanded">
+                      <label class="label is-small mb-1" [attr.for]="'secondary-end-' + $index">
+                        Stops at
+                      </label>
+                      <input
+                        [id]="'secondary-end-' + $index"
+                        class="input is-small"
+                        type="text"
+                        maxlength="50"
+                        placeholder="e.g. 15:21"
+                        [ngModel]="sg.endRef"
+                        (ngModelChange)="setSecondaryEndRef($index, $event)"
+                        [attr.aria-label]="'Secondary genre ' + ($index + 1) + ' stops at'"
+                        data-testid="secondary-genre-endref"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- Optional notes -->
+                  <div class="field">
+                    <label class="label is-small mb-1" [attr.for]="'secondary-notes-' + $index">
+                      Notes
+                    </label>
+                    <textarea
+                      [id]="'secondary-notes-' + $index"
+                      class="textarea is-small"
+                      rows="2"
+                      maxlength="1000"
+                      placeholder="e.g. the Song of the Sea"
+                      [ngModel]="sg.notes"
+                      (ngModelChange)="setSecondaryNotes($index, $event)"
+                      [attr.aria-label]="'Secondary genre ' + ($index + 1) + ' notes'"
+                      data-testid="secondary-genre-notes"
+                    ></textarea>
+                  </div>
+                </div>
+              }
+              <button
+                class="button is-small"
+                type="button"
+                (click)="addSecondaryGenre()"
+                data-testid="secondary-genre-add"
+              >
+                Add secondary genre
+              </button>
             </div>
 
             <!-- Markers -->
@@ -443,11 +583,13 @@ export class StructureViewComponent implements OnInit {
   readonly markers = signal<StructureMarker[]>([]);
   readonly sections = signal<StructureSection[]>([]);
   readonly elements = signal<StructureElement[]>([]);
+  readonly secondaryGenres = signal<SecondaryGenre[]>([]);
 
   // Add-marker form
   readonly newMarkerPhrase = signal('');
   readonly newMarkerKind = signal<StructureMarker['kind']>('transition');
   readonly markerKinds = MARKER_KINDS;
+  readonly biblicalGenres = BIBLICAL_GENRES;
 
   readonly saving = signal(false);
   readonly saved = signal(false);
@@ -496,6 +638,8 @@ export class StructureViewComponent implements OnInit {
         this.markers.set(saved.markers);
         this.sections.set(saved.sections);
         this.elements.set(saved.elements);
+        // Backward compatibility: records saved before this feature have no secondaryGenres field.
+        this.secondaryGenres.set(saved.secondaryGenres ?? []);
       },
       error: () => {
         // 404 (no saved study) or a transient error: leave the empty editable worksheet in place.
@@ -581,11 +725,54 @@ export class StructureViewComponent implements OnInit {
     });
   }
 
+  // --- secondary genres (in-book genre shifts) ---
+
+  addSecondaryGenre(): void {
+    this.secondaryGenres.update((s) => [...s, { genre: '', startRef: '', endRef: '', notes: '' }]);
+  }
+
+  setSecondaryGenre(index: number, genre: string): void {
+    this.secondaryGenres.update((s) => s.map((sg, i) => (i === index ? { ...sg, genre } : sg)));
+  }
+
+  setSecondaryStartRef(index: number, startRef: string): void {
+    this.secondaryGenres.update((s) => s.map((sg, i) => (i === index ? { ...sg, startRef } : sg)));
+  }
+
+  setSecondaryEndRef(index: number, endRef: string): void {
+    this.secondaryGenres.update((s) => s.map((sg, i) => (i === index ? { ...sg, endRef } : sg)));
+  }
+
+  setSecondaryNotes(index: number, notes: string): void {
+    this.secondaryGenres.update((s) => s.map((sg, i) => (i === index ? { ...sg, notes } : sg)));
+  }
+
+  removeSecondaryGenre(index: number): void {
+    this.secondaryGenres.update((s) => s.filter((_, i) => i !== index));
+  }
+
+  moveSecondaryGenre(index: number, delta: number): void {
+    const target = index + delta;
+    this.secondaryGenres.update((s) => {
+      if (target < 0 || target >= s.length) {
+        return s;
+      }
+      const next = [...s];
+      const [moved] = next.splice(index, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+  }
+
   // --- save ---
 
   save(): void {
     // Drop sections the student left with an empty label before persisting.
     const sections = this.sections().filter((s) => s.label.trim().length > 0);
+    // Drop secondary-genre rows left with a blank genre; trim the genre on the rest.
+    const secondaryGenres = this.secondaryGenres()
+      .map((sg) => ({ ...sg, genre: sg.genre.trim() }))
+      .filter((sg) => sg.genre.length > 0);
     this.saving.set(true);
     this.saved.set(false);
     this.saveError.set(false);
@@ -596,6 +783,7 @@ export class StructureViewComponent implements OnInit {
         markers: this.markers(),
         sections,
         elements: this.elements(),
+        secondaryGenres,
       })
       .subscribe({
         next: (savedStudy) => {
@@ -603,6 +791,7 @@ export class StructureViewComponent implements OnInit {
           this.saved.set(true);
           // Reflect the server-normalised worksheet (e.g. dropped empty-label sections).
           this.sections.set(savedStudy.sections);
+          this.secondaryGenres.set(savedStudy.secondaryGenres ?? []);
         },
         error: () => {
           this.saving.set(false);
