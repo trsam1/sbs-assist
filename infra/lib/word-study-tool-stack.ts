@@ -97,6 +97,12 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Figures Assist (Bedrock; Step 10 candidates + tag-check) */
   public readonly figuresAssistFn: nodejs.NodejsFunction;
 
+  /** DynamoDB: Interrogation Studies (Step 12 — Interrogate the Text) */
+  public readonly interrogationStudiesTable: dynamodb.Table;
+
+  /** Lambda: Interrogation Study CRUD */
+  public readonly interrogationStudyFn: nodejs.NodejsFunction;
+
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
 
@@ -241,6 +247,17 @@ export class WordStudyToolStack extends cdk.Stack {
     // StageConfig field, figuresAssistModelId, is a model-id string, not a table property).
     this.figuresStudiesTable = new dynamodb.Table(this, 'FiguresStudies', {
       tableName: n('FiguresStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    // Step 12 — Interrogate the Text: one Q&A worksheet per scroll per user. Additive,
+    // same layout as the sibling study tables (no GSI, no PITR, stage removal policy).
+    this.interrogationStudiesTable = new dynamodb.Table(this, 'InterrogationStudies', {
+      tableName: n('InterrogationStudies'),
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -608,6 +625,21 @@ export class WordStudyToolStack extends cdk.Stack {
       }),
     );
 
+    // --- Interrogation Study Lambda (Step 12; CRUD only, no Bedrock) ---
+    this.interrogationStudyFn = new nodejs.NodejsFunction(this, 'InterrogationStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('InterrogationStudy'),
+      logGroup: fnLogs('InterrogationStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'interrogation-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        INTERROGATION_STUDIES_TABLE_NAME: this.interrogationStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.interrogationStudiesTable.grantReadWriteData(this.interrogationStudyFn);
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -763,6 +795,19 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // POST /ai/figures-assist
     figuresAssistResource.addMethod('POST', figuresAssistIntegration, authMethodOptions);
+
+    // --- Interrogation Study routes (Step 12; CRUD) ---
+    const interrogationStudyIntegration = new apigateway.LambdaIntegration(
+      this.interrogationStudyFn,
+    );
+
+    const interrogateResource = scrollStudyByIdResource.addResource('interrogate');
+
+    // GET /scroll-studies/{scrollStudyId}/interrogate
+    interrogateResource.addMethod('GET', interrogationStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/{scrollStudyId}/interrogate
+    interrogateResource.addMethod('PUT', interrogationStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json

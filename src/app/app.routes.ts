@@ -57,6 +57,13 @@ export const routes: Routes = [
       import('./figures-view/figures-view.component').then((m) => m.FiguresViewComponent),
   },
   {
+    path: 'scroll/:scrollStudyId/interrogate',
+    loadComponent: () =>
+      import('./interrogate-view/interrogate-view.component').then(
+        (m) => m.InterrogateViewComponent,
+      ),
+  },
+  {
     path: 'books',
     loadComponent: () =>
       import('./book-study-list/book-study-list.component').then((m) => m.BookStudyListComponent),
