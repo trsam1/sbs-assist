@@ -412,6 +412,8 @@ describe('BookStudyDetailComponent', () => {
     expect(theme.getAttribute('href')).toBe('/scroll/s9/outline');
     const figures = query('[data-testid="figures-link"]') as HTMLAnchorElement;
     expect(figures.getAttribute('href')).toBe('/scroll/s9/figures');
+    const interrogate = query('[data-testid="interrogate-link"]') as HTMLAnchorElement;
+    expect(interrogate.getAttribute('href')).toBe('/scroll/s9/interrogate');
   });
 
   it('gates steps 6–9 while the linked scroll is not ready', () => {

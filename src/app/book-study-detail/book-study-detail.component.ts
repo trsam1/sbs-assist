@@ -141,6 +141,12 @@ const REFERENT_LONG_MAX = 1000;
                       data-testid="figures-link"
                       >Step 10 — Figures of Speech</a
                     >
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'interrogate']"
+                      class="button is-link is-outlined"
+                      data-testid="interrogate-link"
+                      >Step 12 — Interrogate the Text</a
+                    >
                   </div>
                 } @else {
                   <p class="is-size-7 has-text-grey" data-testid="steps-pending">

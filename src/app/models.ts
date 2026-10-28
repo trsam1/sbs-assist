@@ -253,3 +253,27 @@ export interface FigureCandidate {
   suggestedType: string; // a FIGURE_TYPES id to consider (never auto-applied)
   reason: string; // one-line why-look-here (never an interpretation)
 }
+
+/** One interrogation Q&A the student recorded in Step 12 (Interrogate the Text). */
+export interface InterrogationEntry {
+  question: string; // required free text (<=500)
+  category: string; // one of who|what|when|where|why|how|other
+  tags: string[]; // 0..N normalized subject tags (each <=40, array <=20)
+  passageRef: string; // optional free-text location, '' when unset (<=50) — NO verse text
+  answer: string; // student's answer from the text, '' when unset (<=4000)
+  notes: string; // free text, '' when unset (<=1000)
+}
+
+/** The persisted Step 12 worksheet for one scroll study, owned by the current user. */
+export interface InterrogationStudy {
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  entries: InterrogationEntry[]; // ordered
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/** Save payload from the interrogate view (server sets userId/timestamps). */
+export interface InterrogationStudyInput {
+  entries?: InterrogationEntry[];
+}
