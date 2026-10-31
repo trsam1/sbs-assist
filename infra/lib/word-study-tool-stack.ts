@@ -103,6 +103,12 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Interrogation Study CRUD */
   public readonly interrogationStudyFn: nodejs.NodejsFunction;
 
+  /** DynamoDB: Memorization Studies (Memorize the Scroll companion) */
+  public readonly memorizationStudiesTable: dynamodb.Table;
+
+  /** Lambda: Memorization Study CRUD */
+  public readonly memorizationStudyFn: nodejs.NodejsFunction;
+
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
 
@@ -258,6 +264,15 @@ export class WordStudyToolStack extends cdk.Stack {
     // same layout as the sibling study tables (no GSI, no PITR, stage removal policy).
     this.interrogationStudiesTable = new dynamodb.Table(this, 'InterrogationStudies', {
       tableName: n('InterrogationStudies'),
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: config.statefulRemovalPolicy,
+    });
+
+    this.memorizationStudiesTable = new dynamodb.Table(this, 'MemorizationStudies', {
+      tableName: n('MemorizationStudies'),
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -640,6 +655,20 @@ export class WordStudyToolStack extends cdk.Stack {
 
     this.interrogationStudiesTable.grantReadWriteData(this.interrogationStudyFn);
 
+    this.memorizationStudyFn = new nodejs.NodejsFunction(this, 'MemorizationStudyFn', {
+      ...commonLambdaProps,
+      functionName: n('MemorizationStudy'),
+      logGroup: fnLogs('MemorizationStudyFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'memorization-study', 'index.ts'),
+      handler: 'handler',
+      environment: {
+        MEMORIZATION_STUDIES_TABLE_NAME: this.memorizationStudiesTable.tableName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    this.memorizationStudiesTable.grantReadWriteData(this.memorizationStudyFn);
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -808,6 +837,17 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // PUT /scroll-studies/{scrollStudyId}/interrogate
     interrogateResource.addMethod('PUT', interrogationStudyIntegration, authMethodOptions);
+
+    // --- Memorization Study routes (Memorize the Scroll companion; CRUD) ---
+    const memorizationStudyIntegration = new apigateway.LambdaIntegration(this.memorizationStudyFn);
+
+    const memorizeResource = scrollStudyByIdResource.addResource('memorize');
+
+    // GET /scroll-studies/{scrollStudyId}/memorize
+    memorizeResource.addMethod('GET', memorizationStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/{scrollStudyId}/memorize
+    memorizeResource.addMethod('PUT', memorizationStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json

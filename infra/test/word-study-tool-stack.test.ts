@@ -255,7 +255,7 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(13);
+    expect(groups).toHaveLength(14);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
   });
 
@@ -555,6 +555,69 @@ describe('WordStudyToolStack (prod)', () => {
     expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['GET', 'PUT']);
   });
 
+  it('adds an additive MemorizationStudies table (on-demand, AWS-managed, PK/SK, no GSI, no PITR)', () => {
+    const table = tableByName(t, 'MemorizationStudies');
+    expect(table.Properties?.['KeySchema']).toEqual([
+      { AttributeName: 'PK', KeyType: 'HASH' },
+      { AttributeName: 'SK', KeyType: 'RANGE' },
+    ]);
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.Properties?.['SSESpecification']).toEqual({ SSEEnabled: true });
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    expect(table.Properties?.['PointInTimeRecoverySpecification']).toBeUndefined();
+    expect(table.DeletionPolicy).toBe('Retain');
+  });
+
+  it('runs MemorizationStudy on Node 22 with its own log group and table env', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'MemorizationStudy',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({ MEMORIZATION_STUDIES_TABLE_NAME: Match.anyValue() }),
+      },
+    });
+  });
+
+  it('grants MemorizationStudy read/write on only the MemorizationStudies table', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const matching = policies.filter((p) =>
+      JSON.stringify(p.Properties?.['PolicyDocument']).includes('MemorizationStudies'),
+    );
+    expect(matching.length).toBeGreaterThan(0);
+    for (const policy of matching) {
+      const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
+      expect(doc).not.toContain('InterrogationStudies');
+      expect(doc).not.toContain('FiguresStudies');
+      expect(doc).not.toContain('ScrollStudies');
+      expect(doc).not.toContain('WordStudies');
+    }
+  });
+
+  it('gives MemorizationStudy NO Bedrock grant (no AI in this tool)', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    for (const policy of policies) {
+      const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
+      if (doc.includes('MemorizationStudies')) {
+        expect(doc).not.toContain('bedrock:InvokeModel');
+      }
+    }
+  });
+
+  it('authorizes GET and PUT under scroll-studies/{scrollStudyId}/memorize', () => {
+    const resource = Object.entries(resourcesOfType(t, 'AWS::ApiGateway::Resource')).find(
+      ([, r]) => r.Properties?.['PathPart'] === 'memorize',
+    );
+    expect(resource, 'memorize resource').toBeDefined();
+    const resourceId = resource![0];
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['GET', 'PUT']);
+  });
+
   it('adds an additive BookStudies table (on-demand, AWS-managed, GSI1, no PITR)', () => {
     const table = tableByName(t, 'BookStudies');
     expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
@@ -683,7 +746,7 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(13);
+    expect(groups).toHaveLength(14);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
@@ -728,6 +791,14 @@ describe('WordStudyToolStack (dev)', () => {
     expect(table.DeletionPolicy).toBe('Delete');
     expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
     t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'InterrogationStudy-dev' });
+  });
+
+  it('creates a MemorizationStudies-dev table and MemorizationStudy-dev function', () => {
+    const table = tableByName(t, 'MemorizationStudies-dev');
+    expect(table.Properties?.['BillingMode']).toBe('PAY_PER_REQUEST');
+    expect(table.DeletionPolicy).toBe('Delete');
+    expect(table.Properties?.['GlobalSecondaryIndexes']).toBeUndefined();
+    t.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'MemorizationStudy-dev' });
   });
 
   it('runs FiguresAssist-dev with the per-stage Sonnet 5.5 model env and Bedrock grant', () => {

@@ -147,6 +147,12 @@ const REFERENT_LONG_MAX = 1000;
                       data-testid="interrogate-link"
                       >Step 12 — Interrogate the Text</a
                     >
+                    <a
+                      [routerLink]="['/scroll', scroll.id, 'memorize']"
+                      class="button is-primary is-outlined"
+                      data-testid="memorize-link"
+                      >Memorize the Scroll</a
+                    >
                   </div>
                 } @else {
                   <p class="is-size-7 has-text-grey" data-testid="steps-pending">
