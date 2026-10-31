@@ -64,6 +64,11 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'scroll/:scrollStudyId/memorize',
+    loadComponent: () =>
+      import('./memorize-view/memorize-view.component').then((m) => m.MemorizeViewComponent),
+  },
+  {
     path: 'books',
     loadComponent: () =>
       import('./book-study-list/book-study-list.component').then((m) => m.BookStudyListComponent),

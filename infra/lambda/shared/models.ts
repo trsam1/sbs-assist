@@ -312,3 +312,29 @@ export interface InterrogationStudyRecord {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+/** Learned-progress ladder for one memorization chunk (Memorize the Scroll companion). */
+export type MemorizationChunkState = 'new' | 'learning' | 'chained' | 'solid';
+
+/**
+ * One paragraph chunk the student memorizes, stored as character offsets into the scroll text — it
+ * does NOT copy any verse text. The view slices scrollText[start, end) to render. `verseRef` is a
+ * kept reference anchor label (location only, never verse text).
+ */
+export interface MemorizationChunk {
+  start: number; // inclusive char offset into scrollText (>=0)
+  end: number; // exclusive char offset (> start)
+  verseRef: string; // kept reference anchor label, '' when unset (<=50) — NO verse text
+  state: MemorizationChunkState;
+}
+
+/** DynamoDB record shape for the MemorizationStudies table (one per scroll per user). */
+export interface MemorizationStudyRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "MEMORIZE#<scrollStudyId>"
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  chunks: MemorizationChunk[]; // ordered; offsets only, no verse text
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}

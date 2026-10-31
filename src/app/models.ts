@@ -277,3 +277,32 @@ export interface InterrogationStudy {
 export interface InterrogationStudyInput {
   entries?: InterrogationEntry[];
 }
+
+/** Learned-progress ladder for one memorization chunk (Memorize the Scroll companion). */
+export type MemorizationChunkState = 'new' | 'learning' | 'chained' | 'solid';
+
+/**
+ * One paragraph chunk the student memorizes, stored as character offsets into the scroll text — it
+ * does NOT copy any verse text. The view slices scrollText[start, end) to render. `verseRef` is a
+ * kept reference anchor label (location only, never verse text).
+ */
+export interface MemorizationChunk {
+  start: number; // inclusive char offset into scrollText (>=0)
+  end: number; // exclusive char offset (> start)
+  verseRef: string; // kept reference anchor label, '' when unset (<=50) — NO verse text
+  state: MemorizationChunkState;
+}
+
+/** The persisted memorization worksheet for one scroll study, owned by the current user. */
+export interface MemorizationStudy {
+  scrollStudyId: string;
+  userId: string; // Cognito sub
+  chunks: MemorizationChunk[]; // ordered
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/** Save payload from the memorize view (server sets userId/timestamps). */
+export interface MemorizationStudyInput {
+  chunks?: MemorizationChunk[];
+}
