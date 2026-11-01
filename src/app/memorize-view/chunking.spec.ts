@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  seedChunks,
+  seedByVerses,
+  seedFromParagraphs,
+  findVerseMarkers,
   chunkText,
   chunkOutOfRange,
   firstLetters,
@@ -8,42 +10,97 @@ import {
   blankKeyWords,
   clozeMatches,
 } from './chunking';
+import { OutlineParagraph } from '../models';
+
+const para = (startRef: string, endRef = startRef): OutlineParagraph => ({
+  startRef,
+  endRef,
+  mainIdea: 'idea',
+  notes: '',
+});
 
 describe('chunking helpers', () => {
-  describe('seedChunks', () => {
-    it('splits on blank lines into ordered, non-overlapping offset chunks', () => {
-      const text = 'First paragraph.\n\nSecond paragraph.\n\nThird.';
-      const chunks = seedChunks(text);
+  describe('findVerseMarkers', () => {
+    it('finds standalone and chapter:verse markers in order', () => {
+      const text = '1 In the beginning 2 and also 2:7 nested here';
+      expect(findVerseMarkers(text).map((m) => m.ref)).toEqual(['1', '2', '2:7']);
+    });
+
+    it('ignores digits embedded in words', () => {
+      const text = 'Psalm119 is long but 3 stands alone';
+      expect(findVerseMarkers(text).map((m) => m.ref)).toEqual(['3']);
+    });
+
+    it('returns [] for text with no markers', () => {
+      expect(findVerseMarkers('no numbers here at all')).toEqual([]);
+    });
+  });
+
+  describe('seedByVerses', () => {
+    it('groups every N verse markers into one ordered, non-overlapping chunk', () => {
+      const text = '1 alpha 2 bravo 3 charlie 4 delta 5 echo 6 foxtrot';
+      const chunks = seedByVerses(text, 2);
       expect(chunks.length).toBe(3);
-      // ordered and non-overlapping
+      expect(chunks.map((c) => c.verseRef)).toEqual(['1-2', '3-4', '5-6']);
       for (let i = 1; i < chunks.length; i++) {
         expect(chunks[i].start).toBeGreaterThanOrEqual(chunks[i - 1].end);
       }
-      // slicing reproduces each paragraph verbatim
-      expect(chunkText(text, chunks[0])).toBe('First paragraph.');
-      expect(chunkText(text, chunks[1])).toBe('Second paragraph.');
-      expect(chunkText(text, chunks[2])).toBe('Third.');
-      // all seeded as 'new'
+      // slicing reproduces each group's text (markers included)
+      expect(chunkText(text, chunks[0])).toBe('1 alpha 2 bravo');
       expect(chunks.every((c) => c.state === 'new')).toBe(true);
     });
 
-    it('lifts a leading verse marker into the chunk verseRef label', () => {
-      const text = '1 In the beginning.\n\n2 And the earth.\n\n2:7 A nested marker.';
-      const chunks = seedChunks(text);
-      expect(chunks.map((c) => c.verseRef)).toEqual(['1', '2', '2:7']);
+    it('labels a single-verse chunk without a range', () => {
+      const text = '1 alpha 2 bravo 3 charlie';
+      const chunks = seedByVerses(text, 1);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['1', '2', '3']);
     });
 
-    it('seeds a text with no blank lines as a single chunk', () => {
-      const text = 'One continuous paragraph with no breaks at all.';
-      const chunks = seedChunks(text);
+    it('folds preamble before the first marker into chunk 0', () => {
+      const text = 'A title line 1 alpha 2 bravo';
+      const chunks = seedByVerses(text, 5);
       expect(chunks.length).toBe(1);
-      expect(chunkText(text, chunks[0])).toBe(text);
-      expect(chunks[0].verseRef).toBe('');
+      expect(chunkText(text, chunks[0])).toBe('A title line 1 alpha 2 bravo');
     });
 
-    it('returns no chunks for empty text', () => {
-      expect(seedChunks('')).toEqual([]);
-      expect(seedChunks('\n\n   \n\n')).toEqual([]);
+    it('returns [] when the scroll carries no verse markers', () => {
+      expect(seedByVerses('just prose with no markers', 5)).toEqual([]);
+    });
+
+    it('clamps the verse count into [1,50]', () => {
+      const text = '1 a 2 b 3 c';
+      expect(seedByVerses(text, 0).length).toBe(3); // 0 → 1 verse per chunk
+      expect(seedByVerses(text, 999).length).toBe(1); // 999 → capped, all in one
+    });
+  });
+
+  describe('seedFromParagraphs', () => {
+    it('maps each paragraph startRef/endRef to an offset chunk', () => {
+      const text = '1 alpha 2 bravo 3 charlie 4 delta';
+      const { chunks, unmapped } = seedFromParagraphs(text, [para('1', '2'), para('3', '4')]);
+      expect(unmapped).toEqual([]);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['1-2', '3-4']);
+      expect(chunkText(text, chunks[0])).toBe('1 alpha 2 bravo');
+      expect(chunkText(text, chunks[1])).toBe('3 charlie 4 delta');
+    });
+
+    it('reports a paragraph whose ref is not found in the text as unmapped', () => {
+      const text = '1 alpha 2 bravo';
+      const { chunks, unmapped } = seedFromParagraphs(text, [para('1'), para('9:9')]);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['1']);
+      expect(unmapped).toEqual([1]);
+    });
+
+    it('handles chapter:verse refs', () => {
+      const text = '2:1 alpha 2:2 bravo 2:3 charlie';
+      const { chunks } = seedFromParagraphs(text, [para('2:1', '2:2'), para('2:3')]);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['2:1-2:2', '2:3']);
+    });
+
+    it('returns [] with all unmapped when no paragraph ref is locatable', () => {
+      const { chunks, unmapped } = seedFromParagraphs('1 alpha', [para('5'), para('6')]);
+      expect(chunks).toEqual([]);
+      expect(unmapped).toEqual([0, 1]);
     });
   });
 
