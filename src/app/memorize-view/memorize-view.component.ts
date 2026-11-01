@@ -10,9 +10,12 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
-import { MemorizationChunk, MemorizationChunkState } from '../models';
+import { OutlineStudyService } from '../outline-study.service';
+import { MemorizationChunk, MemorizationChunkState, OutlineParagraph } from '../models';
 import {
-  seedChunks,
+  seedByVerses,
+  seedFromParagraphs,
+  findVerseMarkers,
   chunkText,
   chunkOutOfRange,
   firstLetters,
@@ -20,6 +23,9 @@ import {
   clozeMatches,
   ClozeToken,
   VERSE_REF_MAX,
+  DEFAULT_VERSES_PER_CHUNK,
+  VERSES_PER_CHUNK_MIN,
+  VERSES_PER_CHUNK_MAX,
 } from './chunking';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
@@ -53,9 +59,10 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
           }
           @case ('ready') {
             <p class="mb-4">
-              Memorize the book from your own scroll. Break it into the paragraphs you learn (verse
-              references are kept as labels), then drill chunk by chunk — chaining each onto the
-              run, revealing progressively, or filling the blanks. Your progress is saved.
+              Memorize the book from your own scroll. Seed chunks either by a verse count (learn N
+              verses at a time) or from your Step 8 paragraphs, then drill chunk by chunk — chaining
+              each onto the run, revealing progressively, or filling the blanks. Verse references
+              are kept as labels. Your progress is saved.
             </p>
 
             <!-- Progress summary + chunking controls -->
@@ -64,22 +71,79 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                 <div class="level-left">
                   <p class="is-size-6" data-testid="memorize-progress">{{ progressLabel() }}</p>
                 </div>
-                <div class="level-right">
+              </div>
+
+              <!-- Seed methods -->
+              <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
+                <div class="control">
+                  <label class="label is-small mb-1" for="verses-per-chunk">Verses per chunk</label>
+                  <input
+                    id="verses-per-chunk"
+                    class="input is-small"
+                    type="number"
+                    [min]="VERSES_PER_CHUNK_MIN"
+                    [max]="VERSES_PER_CHUNK_MAX"
+                    [ngModel]="versesPerChunk()"
+                    (ngModelChange)="setVersesPerChunk(+$event)"
+                    data-testid="verses-per-chunk"
+                    style="width: 6rem"
+                  />
+                </div>
+                <div class="control">
                   <button
                     class="button is-small"
                     type="button"
-                    (click)="seed()"
-                    data-testid="memorize-seed"
+                    [disabled]="!hasVerseMarkers()"
+                    (click)="seedByVerseCount()"
+                    data-testid="seed-by-verses"
                   >
-                    {{ chunks().length === 0 ? 'Seed chunks from the scroll' : 'Re-seed chunks' }}
+                    {{ chunks().length === 0 ? 'Seed by verses' : 'Re-seed by verses' }}
                   </button>
                 </div>
+                @if (outlineParagraphs().length > 0) {
+                  <div class="control">
+                    <button
+                      class="button is-small"
+                      type="button"
+                      (click)="seedFromOutline()"
+                      data-testid="seed-from-step8"
+                    >
+                      {{
+                        chunks().length === 0
+                          ? 'Seed from Step 8 paragraphs'
+                          : 'Re-seed from Step 8'
+                      }}
+                    </button>
+                  </div>
+                }
               </div>
 
-              @if (chunks().length === 0) {
+              @if (!hasVerseMarkers() && outlineParagraphs().length === 0) {
+                <div
+                  class="notification is-warning is-light"
+                  role="status"
+                  data-testid="seed-blocked"
+                >
+                  This scroll has no verse markers and no Step 8 outline yet, so chunks can't be
+                  seeded. Add verse references to your scroll text, or complete Step 8 (Outline),
+                  then come back.
+                </div>
+              } @else if (chunks().length === 0) {
                 <div role="status" data-testid="memorize-empty">
-                  No chunks yet. Seed a best-guess split from your scroll, then adjust the
-                  boundaries.
+                  No chunks yet. Seed by a verse count, or from your Step 8 paragraphs, then adjust
+                  the boundaries.
+                </div>
+              }
+
+              @if (seedUnmapped().length > 0) {
+                <div
+                  class="notification is-warning is-light"
+                  role="alert"
+                  data-testid="seed-unmapped"
+                >
+                  {{ seedUnmapped().length }} Step 8 paragraph(s) referenced a location not found in
+                  the scroll text and were skipped. Check those paragraphs' references, or adjust
+                  the chunks below by hand.
                 </div>
               }
 
@@ -418,12 +482,18 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
 export class MemorizeViewComponent implements OnInit {
   private readonly scrollStudy = inject(ScrollStudyService);
   private readonly memorizationStudy = inject(MemorizationStudyService);
+  private readonly outlineStudy = inject(OutlineStudyService);
   private readonly route = inject(ActivatedRoute);
 
   readonly state = signal<ViewState>('loading');
   readonly study = signal<ScrollStudy | null>(null);
 
   readonly chunks = signal<MemorizationChunk[]>([]);
+
+  // Seed state.
+  readonly versesPerChunk = signal(DEFAULT_VERSES_PER_CHUNK);
+  readonly outlineParagraphs = signal<OutlineParagraph[]>([]);
+  readonly seedUnmapped = signal<number[]>([]);
 
   // Drill UI state (view-only, not persisted).
   readonly mode = signal<DrillMode>('chain');
@@ -439,6 +509,8 @@ export class MemorizeViewComponent implements OnInit {
   readonly saveError = signal(false);
 
   protected readonly VERSE_REF_MAX = VERSE_REF_MAX;
+  protected readonly VERSES_PER_CHUNK_MIN = VERSES_PER_CHUNK_MIN;
+  protected readonly VERSES_PER_CHUNK_MAX = VERSES_PER_CHUNK_MAX;
   protected readonly stateLabels = STATE_LABELS;
   protected readonly stateOrder = STATE_ORDER;
 
@@ -447,6 +519,9 @@ export class MemorizeViewComponent implements OnInit {
   private scrollText(): string {
     return this.study()?.scrollText ?? '';
   }
+
+  /** True when the scroll carries at least one verse marker (enables the by-verses seed). */
+  readonly hasVerseMarkers = computed(() => findVerseMarkers(this.scrollText()).length > 0);
 
   readonly progressLabel = computed(() => {
     const cs = this.chunks();
@@ -503,6 +578,7 @@ export class MemorizeViewComponent implements OnInit {
         if (s.status === 'ready') {
           this.state.set('ready');
           this.loadSaved();
+          this.loadOutline();
         } else if (s.status === 'failed') {
           this.state.set('failed');
         } else {
@@ -527,6 +603,18 @@ export class MemorizeViewComponent implements OnInit {
     });
   }
 
+  /** Fetch the Step 8 outline (if any) so the "seed from paragraphs" action can be offered. */
+  private loadOutline(): void {
+    this.outlineStudy.get(this.scrollStudyId).subscribe({
+      next: (outline) => {
+        this.outlineParagraphs.set(outline.paragraphs ?? []);
+      },
+      error: () => {
+        // 404 (no outline yet) or transient: leave paragraphs empty → Step 8 seed not offered.
+      },
+    });
+  }
+
   failedMessage(): string {
     const s = this.study();
     if (s?.status === 'failed') {
@@ -537,8 +625,28 @@ export class MemorizeViewComponent implements OnInit {
 
   // --- chunk editing ---
 
-  seed(): void {
-    this.chunks.set(seedChunks(this.scrollText()));
+  setVersesPerChunk(n: number): void {
+    this.versesPerChunk.set(
+      Math.max(
+        VERSES_PER_CHUNK_MIN,
+        Math.min(VERSES_PER_CHUNK_MAX, Math.floor(n || DEFAULT_VERSES_PER_CHUNK)),
+      ),
+    );
+  }
+
+  /** Seed by grouping every N verse markers into a chunk. No-op if the scroll has no markers. */
+  seedByVerseCount(): void {
+    const seeded = seedByVerses(this.scrollText(), this.versesPerChunk());
+    this.chunks.set(seeded);
+    this.seedUnmapped.set([]);
+    this.activeIndex.set(0);
+  }
+
+  /** Seed one chunk per Step 8 paragraph, mapping each paragraph's refs to scroll offsets. */
+  seedFromOutline(): void {
+    const { chunks, unmapped } = seedFromParagraphs(this.scrollText(), this.outlineParagraphs());
+    this.chunks.set(chunks);
+    this.seedUnmapped.set(unmapped);
     this.activeIndex.set(0);
   }
 

@@ -5,9 +5,11 @@ import { of, throwError } from 'rxjs';
 import { MemorizeViewComponent } from './memorize-view.component';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
-import { MemorizationChunk, MemorizationStudy } from '../models';
+import { OutlineStudyService } from '../outline-study.service';
+import { MemorizationChunk, MemorizationStudy, OutlineStudy, OutlineParagraph } from '../models';
 
-const SCROLL_TEXT = '1 In the beginning.\n\n2 And the earth was formless.\n\n3 Let there be light.';
+// A scroll whose text carries verse markers 1,2,3 — the boundaries the by-verses seed walks.
+const SCROLL_TEXT = '1 In the beginning. 2 And the earth was formless. 3 Let there be light.';
 
 function makeScroll(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
   return {
@@ -40,16 +42,31 @@ function makeStudy(overrides: Partial<MemorizationStudy> = {}): MemorizationStud
   };
 }
 
+function makeOutline(paragraphs: OutlineParagraph[]): OutlineStudy {
+  return {
+    scrollStudyId: 's1',
+    userId: 'u1',
+    paragraphs,
+    groupings: [],
+    theme: '',
+    purpose: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-02T00:00:00.000Z',
+  };
+}
+
 describe('MemorizeViewComponent', () => {
   let fixture: ComponentFixture<MemorizeViewComponent>;
   let component: MemorizeViewComponent;
   let getScrollSpy: ReturnType<typeof vi.fn>;
   let getStudySpy: ReturnType<typeof vi.fn>;
   let saveSpy: ReturnType<typeof vi.fn>;
+  let getOutlineSpy: ReturnType<typeof vi.fn>;
 
   function configure(): void {
     getScrollSpy = vi.fn();
     getStudySpy = vi.fn().mockReturnValue(throwError(() => ({ status: 404 })));
+    getOutlineSpy = vi.fn().mockReturnValue(throwError(() => ({ status: 404 })));
     saveSpy = vi
       .fn()
       .mockImplementation((_id: string, input: { chunks?: MemorizationChunk[] }) =>
@@ -62,12 +79,16 @@ describe('MemorizeViewComponent', () => {
       get: getStudySpy as unknown as MemorizationStudyService['get'],
       save: saveSpy as unknown as MemorizationStudyService['save'],
     };
+    const outlineService: Partial<OutlineStudyService> = {
+      get: getOutlineSpy as unknown as OutlineStudyService['get'],
+    };
     TestBed.configureTestingModule({
       imports: [MemorizeViewComponent],
       providers: [
         provideRouter([]),
         { provide: ScrollStudyService, useValue: scrollService },
         { provide: MemorizationStudyService, useValue: studyService },
+        { provide: OutlineStudyService, useValue: outlineService },
         {
           provide: ActivatedRoute,
           useValue: { snapshot: { paramMap: new Map([['scrollStudyId', 's1']]) } },
@@ -76,6 +97,12 @@ describe('MemorizeViewComponent', () => {
     });
     fixture = TestBed.createComponent(MemorizeViewComponent);
     component = fixture.componentInstance;
+  }
+
+  // Seed three chunks (one verse each) for drill/edit tests.
+  function seedThree(): void {
+    component.setVersesPerChunk(1);
+    component.seedByVerseCount();
   }
 
   function query(sel: string): HTMLElement | null {
@@ -91,25 +118,77 @@ describe('MemorizeViewComponent', () => {
 
   // --- state model ---
 
-  it('shows an empty worksheet with a seed action for a ready scroll with no saved study', () => {
+  it('shows an empty worksheet with seed actions for a ready scroll with no saved study', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
     expect(component.state()).toBe('ready');
     expect(query('[data-testid="memorize-empty"]')).toBeTruthy();
-    expect(query('[data-testid="memorize-seed"]')).toBeTruthy();
+    expect(query('[data-testid="seed-by-verses"]')).toBeTruthy();
   });
 
-  it('seeds editable chunks from the scroll text', () => {
+  it('offers the Step 8 seed only when an outline with paragraphs exists', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    // no outline → button absent
+    expect(query('[data-testid="seed-from-step8"]')).toBeFalsy();
+
+    TestBed.resetTestingModule();
+    configure();
+    getScrollSpy.mockReturnValue(of(makeScroll()));
+    getOutlineSpy.mockReturnValue(
+      of(makeOutline([{ startRef: '1', endRef: '2', mainIdea: 'x', notes: '' }])),
+    );
+    fixture.detectChanges();
+    expect(query('[data-testid="seed-from-step8"]')).toBeTruthy();
+  });
+
+  it('blocks seeding when the scroll has no markers and no outline', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeScroll({ scrollText: 'prose with no markers at all' })));
+    fixture.detectChanges();
+    expect(component.hasVerseMarkers()).toBe(false);
+    expect(query('[data-testid="seed-blocked"]')).toBeTruthy();
+  });
+
+  it('seeds editable chunks by verse count', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeScroll()));
+    fixture.detectChanges();
+    seedThree();
     fixture.detectChanges();
     expect(component.chunks().length).toBe(3);
-    // lifted verse markers as labels
     expect(component.chunks().map((c) => c.verseRef)).toEqual(['1', '2', '3']);
     expect(queryAll('[data-testid="memorize-chunk-row"]').length).toBe(3);
+  });
+
+  it('groups multiple verses per chunk when the count is raised', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeScroll()));
+    fixture.detectChanges();
+    component.setVersesPerChunk(2);
+    component.seedByVerseCount();
+    expect(component.chunks().map((c) => c.verseRef)).toEqual(['1-2', '3']);
+  });
+
+  it('seeds from Step 8 paragraphs, flagging any unmapped paragraph', () => {
+    configure();
+    getScrollSpy.mockReturnValue(of(makeScroll()));
+    getOutlineSpy.mockReturnValue(
+      of(
+        makeOutline([
+          { startRef: '1', endRef: '2', mainIdea: 'a', notes: '' },
+          { startRef: '9', endRef: '9', mainIdea: 'b', notes: '' }, // ref not in text
+        ]),
+      ),
+    );
+    fixture.detectChanges();
+    component.seedFromOutline();
+    fixture.detectChanges();
+    expect(component.chunks().map((c) => c.verseRef)).toEqual(['1-2']);
+    expect(component.seedUnmapped()).toEqual([1]);
+    expect(query('[data-testid="seed-unmapped"]')).toBeTruthy();
   });
 
   it('renders saved chunks in order with their verseRef/state', () => {
@@ -167,7 +246,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
 
     component.setVerseRef(0, '1:1');
     expect(component.chunks()[0].verseRef).toBe('1:1');
@@ -195,11 +274,11 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
     component.setMode('chain');
     component.setActive(1);
     fixture.detectChanges();
-    // active text is the 2nd paragraph; chained run includes the 1st too
+    // active text is the 2nd verse; chained run includes the 1st too
     expect(component.activeText()).toContain('And the earth');
     expect(component.chainRun()).toContain('In the beginning');
     expect(component.chainRun()).toContain('And the earth');
@@ -209,7 +288,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
     component.setMode('reveal');
     component.setActive(0);
 
@@ -226,7 +305,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
     component.setMode('cloze');
     component.setActive(0);
     component.setClozeN(2);
@@ -256,7 +335,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
     component.setState(0, 'learning');
     component.save();
 
@@ -274,7 +353,7 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll()));
     saveSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
     const count = component.chunks().length;
     component.save();
     fixture.detectChanges();
@@ -282,13 +361,13 @@ describe('MemorizeViewComponent', () => {
     expect(component.chunks().length).toBe(count); // values kept
   });
 
-  it('depends only on ScrollStudyService and MemorizationStudyService (no AI call)', () => {
+  it('depends only on scroll/memorization/outline services (no AI call)', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.seed();
+    seedThree();
     component.save();
-    // The only services touched are the scroll loader and the memorization CRUD.
+    // The only services touched are the scroll loader, outline reader, and the memorization CRUD.
     expect(getScrollSpy).toHaveBeenCalled();
     expect(saveSpy).toHaveBeenCalled();
   });
