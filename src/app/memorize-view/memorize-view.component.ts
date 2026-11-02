@@ -27,6 +27,7 @@ import {
   VERSES_PER_CHUNK_MIN,
   VERSES_PER_CHUNK_MAX,
 } from './chunking';
+import { readSchedule, isDue, applyGrade, dueLabel, Grade } from './srs';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
 type DrillMode = 'chain' | 'reveal' | 'cloze';
@@ -72,6 +73,41 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                   <p class="is-size-6" data-testid="memorize-progress">{{ progressLabel() }}</p>
                 </div>
               </div>
+
+              <!-- Due-today review queue (SM-2). Derived client-side; never persisted. -->
+              @if (chunks().length > 0) {
+                <div class="box p-3 mb-3" data-testid="memorize-due-queue">
+                  <p class="is-size-6 mb-2">
+                    <strong data-testid="memorize-due-count">{{ dueCount() }}</strong>
+                    {{ dueCount() === 1 ? 'chunk' : 'chunks' }} due for review today
+                  </p>
+                  @if (dueQueue().length > 0) {
+                    <ul>
+                      @for (row of dueQueue(); track row.index) {
+                        <li class="mb-1" data-testid="memorize-due-row">
+                          <button
+                            class="button is-small is-link is-light"
+                            type="button"
+                            (click)="setActive(row.index)"
+                            [attr.aria-label]="
+                              'Review chunk ' +
+                              (row.index + 1) +
+                              (row.verseRef ? ' (' + row.verseRef + ')' : '')
+                            "
+                          >
+                            {{ row.index + 1 }}{{ row.verseRef ? ' — ' + row.verseRef : '' }}
+                          </button>
+                          <span class="is-size-7 has-text-grey ml-2">{{ row.dueLabel }}</span>
+                        </li>
+                      }
+                    </ul>
+                  } @else {
+                    <p class="is-size-7 has-text-grey" data-testid="memorize-due-empty">
+                      Nothing due today — well memorized. Come back when the next review falls due.
+                    </p>
+                  }
+                </div>
+              }
 
               <!-- Seed methods -->
               <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
@@ -290,6 +326,56 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                         </option>
                       }
                     </select>
+                  </div>
+                </div>
+
+                <!-- Review schedule: next-due label + three-button grade (SM-2). Separate axis
+                     from the learned-state ladder — grading never changes the state value. -->
+                <div class="field" data-testid="memorize-grade">
+                  <p class="is-size-7 has-text-grey mb-2">
+                    Next review: <span data-testid="chunk-next-due">{{ activeDueLabel() }}</span>
+                  </p>
+                  <div
+                    class="buttons has-addons are-small"
+                    role="group"
+                    aria-label="Grade your recall"
+                  >
+                    <button
+                      type="button"
+                      class="button is-danger is-light"
+                      [disabled]="saving()"
+                      (click)="grade('again')"
+                      data-testid="grade-again"
+                    >
+                      Again
+                    </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [disabled]="saving()"
+                      (click)="grade('hard')"
+                      data-testid="grade-hard"
+                    >
+                      Hard
+                    </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [disabled]="saving()"
+                      (click)="grade('good')"
+                      data-testid="grade-good"
+                    >
+                      Good
+                    </button>
+                    <button
+                      type="button"
+                      class="button is-success is-light"
+                      [disabled]="saving()"
+                      (click)="grade('easy')"
+                      data-testid="grade-easy"
+                    >
+                      Easy
+                    </button>
                   </div>
                 </div>
 
@@ -563,6 +649,50 @@ export class MemorizeViewComponent implements OnInit {
     blankEveryNth(this.activeText(), this.clozeN()),
   );
 
+  /**
+   * "Today" for all SM-2 date math, read once at construction (local date-only). Grading reads it
+   * live via a getter so a long-open session still schedules against the current day; the helpers
+   * take it as an argument so the math stays pure and testable. Overridable in tests via `setToday`.
+   */
+  private todayValue = new Date();
+  protected today(): Date {
+    return this.todayValue;
+  }
+  /** Test seam: pin "today" so the due-queue / grade math is deterministic under test. */
+  setToday(d: Date): void {
+    this.todayValue = d;
+  }
+
+  /** The chunks due for review today, soonest-due first then by chunk order (derived, not saved). */
+  readonly dueQueue = computed(() => {
+    const today = this.today();
+    return this.chunks()
+      .map((c, index) => ({ chunk: c, index, schedule: readSchedule(c) }))
+      .filter((row) => isDue(row.schedule, today))
+      .sort((a, b) => {
+        // soonest due first (empty dueDate = never reviewed = earliest), then chunk order
+        const ad = a.schedule.dueDate || '';
+        const bd = b.schedule.dueDate || '';
+        if (ad !== bd) return ad < bd ? -1 : 1;
+        return a.index - b.index;
+      })
+      .map((row) => ({
+        index: row.index,
+        verseRef: row.chunk.verseRef,
+        dueLabel: dueLabel(row.schedule, today),
+      }));
+  });
+
+  readonly dueCount = computed(() => this.dueQueue().length);
+
+  /** The next-due label for the active chunk (e.g. "due today" / "due in 6 days"). */
+  readonly activeDueLabel = computed(() => {
+    const cs = this.chunks();
+    const i = this.activeIndex();
+    if (i < 0 || i >= cs.length) return '';
+    return dueLabel(readSchedule(cs[i]), this.today());
+  });
+
   ngOnInit(): void {
     this.scrollStudyId = this.route.snapshot.paramMap.get('scrollStudyId') ?? '';
     this.load();
@@ -762,5 +892,34 @@ export class MemorizeViewComponent implements OnInit {
         this.saveError.set(true);
       },
     });
+  }
+
+  /**
+   * Grade the active chunk's recall (SM-2) and persist. Updates ONLY the scheduling fields —
+   * never the learned-`state` ladder (the two axes stay orthogonal). The schedule is updated
+   * optimistically in memory before the save confirms; a save failure keeps it and shows the
+   * inline error so a retry re-sends it.
+   */
+  grade(g: Grade): void {
+    const i = this.activeIndex();
+    const cs = this.chunks();
+    if (i < 0 || i >= cs.length) return;
+
+    const next = applyGrade(readSchedule(cs[i]), g, this.today());
+    this.chunks.update((list) =>
+      list.map((c, idx) =>
+        idx === i
+          ? {
+              ...c,
+              easeFactor: next.easeFactor,
+              intervalDays: next.intervalDays,
+              repetitions: next.repetitions,
+              dueDate: next.dueDate,
+              lastReviewed: next.lastReviewed,
+            }
+          : c,
+      ),
+    );
+    this.save();
   }
 }

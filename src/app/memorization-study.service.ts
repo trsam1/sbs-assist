@@ -18,11 +18,18 @@ function toMemorizationStudy(record: MemorizationStudyRecord): MemorizationStudy
     scrollStudyId: record.scrollStudyId,
     userId: record.userId,
     // Coerce absent chunks / per-chunk fields so a partial record never throws client-side.
+    // v2 scheduling fields are optional — a v1 chunk (none present) reads as "due now, ease 2.5"
+    // once srs.readSchedule applies its defaults; we only pass through what the server stored.
     chunks: (record.chunks ?? []).map((c) => ({
       start: c.start,
       end: c.end,
       verseRef: c.verseRef ?? '',
       state: c.state ?? 'new',
+      ...(c.easeFactor !== undefined ? { easeFactor: c.easeFactor } : {}),
+      ...(c.intervalDays !== undefined ? { intervalDays: c.intervalDays } : {}),
+      ...(c.repetitions !== undefined ? { repetitions: c.repetitions } : {}),
+      ...(c.dueDate !== undefined ? { dueDate: c.dueDate } : {}),
+      ...(c.lastReviewed !== undefined ? { lastReviewed: c.lastReviewed } : {}),
     })),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,

@@ -371,4 +371,138 @@ describe('MemorizeViewComponent', () => {
     expect(getScrollSpy).toHaveBeenCalled();
     expect(saveSpy).toHaveBeenCalled();
   });
+
+  // --- v2: spaced-repetition scheduler (SM-2) ---
+
+  describe('review scheduler', () => {
+    const TODAY = new Date(2026, 10, 2); // 2026-11-02 local
+    const isoDay = (offset: number): string => {
+      const d = new Date(2026, 10, 2 + offset);
+      const m = `${d.getMonth() + 1}`.padStart(2, '0');
+      const day = `${d.getDate()}`.padStart(2, '0');
+      return `${d.getFullYear()}-${m}-${day}`;
+    };
+
+    it('renders the due-today queue with the correct count and soonest-first order', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(
+          makeStudy({
+            chunks: [
+              chunk({ verseRef: '1', dueDate: isoDay(5) }), // not due
+              chunk({ start: 21, end: 48, verseRef: '2', dueDate: isoDay(-1) }), // overdue
+              chunk({ start: 50, end: 70, verseRef: '3', dueDate: isoDay(0) }), // due today
+            ],
+          }),
+        ),
+      );
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      fixture.detectChanges();
+
+      expect(component.dueCount()).toBe(2);
+      // overdue (dueDate earliest) before due-today
+      expect(component.dueQueue().map((r) => r.verseRef)).toEqual(['2', '3']);
+      expect(query('[data-testid="memorize-due-count"]')?.textContent).toContain('2');
+      expect(queryAll('[data-testid="memorize-due-row"]').length).toBe(2);
+    });
+
+    it('shows the nothing-due state when every chunk is scheduled ahead', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk({ dueDate: isoDay(10) })] })));
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      fixture.detectChanges();
+      expect(component.dueCount()).toBe(0);
+      expect(query('[data-testid="memorize-due-empty"]')).toBeTruthy();
+    });
+
+    it('treats a v1 chunk (no schedule fields) as due now', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(makeStudy({ chunks: [chunk(), chunk({ start: 21, end: 48 })] })),
+      );
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      fixture.detectChanges();
+      expect(component.dueCount()).toBe(2);
+    });
+
+    it('grading Good updates the active chunk schedule, persists, and advances the next-due label', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk()] })));
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setActive(0);
+
+      component.grade('good');
+      // first successful recall → interval 1, reps 1, dueDate = tomorrow
+      const graded = component.chunks()[0];
+      expect(graded.repetitions).toBe(1);
+      expect(graded.intervalDays).toBe(1);
+      expect(graded.dueDate).toBe(isoDay(1));
+      expect(graded.lastReviewed).toBe(isoDay(0));
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      // the grade's new fields were included in the save payload
+      const [, input] = saveSpy.mock.calls[0];
+      expect((input.chunks as MemorizationChunk[])[0].intervalDays).toBe(1);
+
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      expect(component.activeDueLabel()).toBe('due tomorrow');
+    });
+
+    it('grading Again resets the chunk to a 1-day interval', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(
+          makeStudy({
+            chunks: [
+              chunk({ easeFactor: 2.6, intervalDays: 40, repetitions: 5, dueDate: isoDay(0) }),
+            ],
+          }),
+        ),
+      );
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setActive(0);
+
+      component.grade('again');
+      const graded = component.chunks()[0];
+      expect(graded.repetitions).toBe(0);
+      expect(graded.intervalDays).toBe(1);
+      expect(graded.dueDate).toBe(isoDay(1));
+    });
+
+    it('grading does NOT change the learned-state ladder (axes stay orthogonal)', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk({ state: 'chained' })] })));
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setActive(0);
+      component.grade('easy');
+      expect(component.chunks()[0].state).toBe('chained'); // untouched
+    });
+
+    it('keeps the optimistic schedule and shows the error when a graded save fails', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk()] })));
+      saveSpy.mockReturnValue(throwError(() => ({ status: 500 })));
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setActive(0);
+      component.grade('good');
+      fixture.detectChanges();
+      expect(component.saveError()).toBe(true);
+      // schedule was applied optimistically and is kept for the retry
+      expect(component.chunks()[0].intervalDays).toBe(1);
+    });
+  });
 });
