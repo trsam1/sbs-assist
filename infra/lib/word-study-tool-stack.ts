@@ -13,6 +13,8 @@ import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as scheduler from 'aws-cdk-lib/aws-scheduler';
+import * as ses from 'aws-cdk-lib/aws-ses';
 import { S3EventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as path from 'path';
 import { Construct } from 'constructs';
@@ -108,6 +110,9 @@ export class WordStudyToolStack extends cdk.Stack {
 
   /** Lambda: Memorization Study CRUD */
   public readonly memorizationStudyFn: nodejs.NodejsFunction;
+
+  /** Lambda: Reminder dispatch (EventBridge-scheduled; Memorize the Scroll daily due reminder) */
+  public readonly reminderDispatchFn: nodejs.NodejsFunction;
 
   /** Lambda: Extract Text (S3-triggered) */
   public readonly extractTextFn: nodejs.NodejsFunction;
@@ -669,6 +674,70 @@ export class WordStudyToolStack extends cdk.Stack {
 
     this.memorizationStudiesTable.grantReadWriteData(this.memorizationStudyFn);
 
+    // --- Memorize the Scroll: daily due-review reminder (first outbound infra) ---
+    // Additive: a verified SES sender, an EventBridge-scheduled dispatch Lambda, and its log group.
+    // No new table — the per-user opt-in preference rides MemorizationStudies as an SK=PREFS item.
+
+    // SES verified sender. The address is a per-stage behavior value the maintainer fills in and
+    // verifies in SES; the placeholder is non-functional until replaced.
+    new ses.EmailIdentity(this, 'ReminderSenderIdentity', {
+      identity: ses.Identity.email(config.reminderSender),
+    });
+
+    this.reminderDispatchFn = new nodejs.NodejsFunction(this, 'ReminderDispatchFn', {
+      ...commonLambdaProps,
+      functionName: n('ReminderDispatch'),
+      logGroup: fnLogs('ReminderDispatchFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'reminder-dispatch', 'index.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(60),
+      environment: {
+        MEMORIZATION_STUDIES_TABLE_NAME: this.memorizationStudiesTable.tableName,
+        SCROLL_STUDIES_TABLE_NAME: this.scrollStudiesTable.tableName,
+        USER_POOL_ID: this.userPool.userPoolId,
+        REMINDER_SENDER: config.reminderSender,
+        SITE_URL: `https://${config.siteDomain}`,
+      },
+    });
+
+    // Least privilege: scan the memorization table + read scroll book names, resolve emails from
+    // Cognito, and send from the verified SES identity only.
+    this.memorizationStudiesTable.grantReadData(this.reminderDispatchFn);
+    this.scrollStudiesTable.grantReadData(this.reminderDispatchFn);
+    this.reminderDispatchFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cognito-idp:AdminGetUser'],
+        resources: [this.userPool.userPoolArn],
+      }),
+    );
+    this.reminderDispatchFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ses:SendEmail'],
+        resources: [
+          cdk.Stack.of(this).formatArn({
+            service: 'ses',
+            resource: 'identity',
+            resourceName: config.reminderSender,
+          }),
+        ],
+      }),
+    );
+
+    // EventBridge Scheduler role → invoke the dispatch Lambda once a day.
+    const reminderScheduleRole = new iam.Role(this, 'ReminderScheduleRole', {
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+    });
+    this.reminderDispatchFn.grantInvoke(reminderScheduleRole);
+
+    new scheduler.CfnSchedule(this, 'ReminderSchedule', {
+      scheduleExpression: config.reminderScheduleExpression,
+      flexibleTimeWindow: { mode: 'OFF' },
+      target: {
+        arn: this.reminderDispatchFn.functionArn,
+        roleArn: reminderScheduleRole.roleArn,
+      },
+    });
+
     // --- Extract Text Lambda (S3-triggered; sole writer of post-upload status) ---
     // Heavier than the other handlers (PDF/Word parsing), so more memory and a longer timeout.
     this.extractTextFn = new nodejs.NodejsFunction(this, 'ExtractTextFn', {
@@ -848,6 +917,16 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // PUT /scroll-studies/{scrollStudyId}/memorize
     memorizeResource.addMethod('PUT', memorizationStudyIntegration, authMethodOptions);
+
+    // --- Reminder preference routes (per-user; NOT scroll-scoped) ---
+    // Sibling of {scrollStudyId} under /scroll-studies so the handler keys on event.resource.
+    const reminderPrefsResource = scrollStudiesResource.addResource('memorize-reminder-prefs');
+
+    // GET /scroll-studies/memorize-reminder-prefs
+    reminderPrefsResource.addMethod('GET', memorizationStudyIntegration, authMethodOptions);
+
+    // PUT /scroll-studies/memorize-reminder-prefs
+    reminderPrefsResource.addMethod('PUT', memorizationStudyIntegration, authMethodOptions);
 
     // -------------------------------------------------------
     // Frontend deploy: built app + runtime /config.json

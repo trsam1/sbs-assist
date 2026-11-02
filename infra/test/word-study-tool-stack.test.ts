@@ -255,7 +255,7 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(14);
+    expect(groups).toHaveLength(15);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
   });
 
@@ -581,9 +581,16 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('grants MemorizationStudy read/write on only the MemorizationStudies table', () => {
     const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
-    const matching = policies.filter((p) =>
-      JSON.stringify(p.Properties?.['PolicyDocument']).includes('MemorizationStudies'),
-    );
+    const matching = policies.filter((p) => {
+      const doc = JSON.stringify(p.Properties?.['PolicyDocument']);
+      // The CRUD role; NOT the reminder-dispatch role (which legitimately also reads ScrollStudies
+      // for book names and carries SES/Cognito grants).
+      return (
+        doc.includes('MemorizationStudies') &&
+        !doc.includes('ses:SendEmail') &&
+        !doc.includes('cognito-idp:AdminGetUser')
+      );
+    });
     expect(matching.length).toBeGreaterThan(0);
     for (const policy of matching) {
       const doc = JSON.stringify(policy.Properties?.['PolicyDocument']);
@@ -616,6 +623,57 @@ describe('WordStudyToolStack (prod)', () => {
         m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
     );
     expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['GET', 'PUT']);
+  });
+
+  it('authorizes GET and PUT under scroll-studies/memorize-reminder-prefs', () => {
+    const resource = Object.entries(resourcesOfType(t, 'AWS::ApiGateway::Resource')).find(
+      ([, r]) => r.Properties?.['PathPart'] === 'memorize-reminder-prefs',
+    );
+    expect(resource, 'memorize-reminder-prefs resource').toBeDefined();
+    const resourceId = resource![0];
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['GET', 'PUT']);
+  });
+
+  it('adds the reminder-dispatch Lambda (Node 22, own log group, env wired) and SES identity', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'ReminderDispatch',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({
+          MEMORIZATION_STUDIES_TABLE_NAME: Match.anyValue(),
+          USER_POOL_ID: Match.anyValue(),
+          REMINDER_SENDER: Match.anyValue(),
+        }),
+      },
+    });
+    t.resourceCountIs('AWS::SES::EmailIdentity', 1);
+  });
+
+  it('adds a daily EventBridge schedule targeting the dispatch Lambda', () => {
+    t.resourceCountIs('AWS::Scheduler::Schedule', 1);
+    t.hasResourceProperties('AWS::Scheduler::Schedule', {
+      ScheduleExpression: 'cron(0 13 * * ? *)',
+      FlexibleTimeWindow: { Mode: 'OFF' },
+    });
+  });
+
+  it('grants the dispatch Lambda the scan + Cognito + SES send it needs, and no Bedrock', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    const dispatch = policies.filter((p) => {
+      const doc = JSON.stringify(p.Properties?.['PolicyDocument']);
+      return doc.includes('cognito-idp:AdminGetUser') || doc.includes('ses:SendEmail');
+    });
+    expect(dispatch.length).toBeGreaterThan(0);
+    const combined = dispatch.map((p) => JSON.stringify(p.Properties?.['PolicyDocument'])).join('');
+    expect(combined).toContain('cognito-idp:AdminGetUser');
+    expect(combined).toContain('ses:SendEmail');
+    expect(combined).not.toContain('bedrock:InvokeModel');
   });
 
   it('adds an additive BookStudies table (on-demand, AWS-managed, GSI1, no PITR)', () => {
@@ -746,7 +804,7 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(14);
+    expect(groups).toHaveLength(15);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');
