@@ -221,6 +221,104 @@ describe('Memorization Study CRUD Lambda', () => {
       }
     });
 
+    // --- v2 SM-2 scheduling fields (optional, additive) ---
+
+    it('round-trips a chunk carrying valid schedule fields (stored as given)', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const scheduled = chunk({
+        easeFactor: 2.36,
+        intervalDays: 6,
+        repetitions: 2,
+        dueDate: '2026-11-08',
+        lastReviewed: '2026-11-02',
+      });
+      const res = await handler(makePutEvent(JSON.stringify({ chunks: [scheduled] })));
+      expect(res.statusCode).toBe(200);
+      const saved = (putItem(1)['chunks'] as Array<Record<string, unknown>>)[0];
+      expect(saved).toEqual(scheduled);
+    });
+
+    it('still saves a v1 chunk with NO schedule fields (they are optional)', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(makePutEvent(JSON.stringify({ chunks: [chunk()] })));
+      expect(res.statusCode).toBe(200);
+      // byte-identical to v1 — no schedule keys added when the client sent none
+      const saved = (putItem(1)['chunks'] as Array<Record<string, unknown>>)[0];
+      expect(Object.keys(saved).sort()).toEqual(['end', 'start', 'state', 'verseRef']);
+    });
+
+    it('accepts a full ISO timestamp for the date fields', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(
+        makePutEvent(JSON.stringify({ chunks: [chunk({ dueDate: '2026-11-08T00:00:00.000Z' })] })),
+      );
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('accepts empty-string date fields', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(
+        makePutEvent(JSON.stringify({ chunks: [chunk({ dueDate: '', lastReviewed: '' })] })),
+      );
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('rejects an easeFactor below 1.3 with 400', async () => {
+      const res = await handler(
+        makePutEvent(JSON.stringify({ chunks: [chunk({ easeFactor: 1.0 })] })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/easeFactor/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-finite easeFactor with 400', async () => {
+      // JSON can't carry NaN/Infinity, so a string stands in for a malformed client value.
+      const res = await handler(
+        makePutEvent(JSON.stringify({ chunks: [chunk({ easeFactor: 'lots' })] })),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('rejects a negative/non-integer intervalDays with 400', async () => {
+      for (const intervalDays of [-1, 2.5]) {
+        mockSend.mockReset();
+        const res = await handler(
+          makePutEvent(JSON.stringify({ chunks: [chunk({ intervalDays })] })),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).message).toMatch(/intervalDays/i);
+        expect(mockSend).not.toHaveBeenCalled();
+      }
+    });
+
+    it('rejects a negative/non-integer repetitions with 400', async () => {
+      for (const repetitions of [-3, 1.1]) {
+        mockSend.mockReset();
+        const res = await handler(
+          makePutEvent(JSON.stringify({ chunks: [chunk({ repetitions })] })),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).message).toMatch(/repetitions/i);
+        expect(mockSend).not.toHaveBeenCalled();
+      }
+    });
+
+    it('rejects a non-string / over-long / malformed date field with 400', async () => {
+      for (const dueDate of [123, 'a'.repeat(41), 'yesterday']) {
+        mockSend.mockReset();
+        const res = await handler(makePutEvent(JSON.stringify({ chunks: [chunk({ dueDate })] })));
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).message).toMatch(/dueDate/i);
+        expect(mockSend).not.toHaveBeenCalled();
+      }
+    });
+
     // --- validation ---
 
     it('rejects start >= end with 400', async () => {

@@ -10,9 +10,16 @@ const tableName = process.env['MEMORIZATION_STUDIES_TABLE_NAME'] ?? '';
 /** Field caps. The server rejects over-limit input; it never truncates. */
 const VERSE_REF_MAX = 50;
 const CHUNKS_MAX = 2000;
+/** SM-2 ease floor; mirrors the client srs.ts MIN_EASE. */
+const MIN_EASE = 1.3;
+/** Max length of an ISO date / timestamp string on a schedule field. */
+const DATE_MAX = 40;
 
 /** The learned-progress ladder. Mirrors the client type. */
 const STATES: ReadonlySet<string> = new Set(['new', 'learning', 'chained', 'solid']);
+
+/** Accepts a date-only (YYYY-MM-DD) or a full ISO timestamp; used only for structural validation. */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T ].*)?$/;
 
 interface APIGatewayEvent {
   httpMethod: string;
@@ -46,7 +53,9 @@ type ParseResult = { chunks: MemorizationChunk[] } | { error: string };
  * Parse and validate the PUT body. `chunks` is optional (absent → []); the array is capped and each
  * chunk validated: integer offsets with start < end, a `verseRef` string within cap (location only,
  * never verse text — the server never fetches scrollText to check offsets against it), and a
- * `state` in the fixed ladder. Any malformed value is rejected rather than coerced. Order is
+ * `state` in the fixed ladder. The v2 SM-2 scheduling fields (easeFactor/intervalDays/repetitions/
+ * dueDate/lastReviewed) are OPTIONAL and validated only when present; the server stores them as
+ * given and computes no schedule. Any malformed value is rejected rather than coerced. Order is
  * preserved as sent.
  */
 function parsePutBody(body: string | null | undefined): ParseResult {
@@ -87,12 +96,46 @@ function parsePutBody(body: string | null | undefined): ParseResult {
         return { error: 'chunk.state must be one of the allowed values.' };
       }
 
-      chunks.push({
+      // --- v2 SM-2 scheduling fields: all OPTIONAL, validated only when present. The server
+      // stores them as given and computes NO schedule (SM-2 is owned by the client srs.ts). A v1
+      // chunk carrying none of these stays valid. ---
+      if (el['easeFactor'] !== undefined) {
+        if (
+          typeof el['easeFactor'] !== 'number' ||
+          !Number.isFinite(el['easeFactor']) ||
+          (el['easeFactor'] as number) < MIN_EASE
+        ) {
+          return { error: `chunk.easeFactor must be a finite number >= ${MIN_EASE}.` };
+        }
+      }
+      if (el['intervalDays'] !== undefined && !isNonNegativeInt(el['intervalDays'])) {
+        return { error: 'chunk.intervalDays must be a non-negative integer.' };
+      }
+      if (el['repetitions'] !== undefined && !isNonNegativeInt(el['repetitions'])) {
+        return { error: 'chunk.repetitions must be a non-negative integer.' };
+      }
+      for (const dateKey of ['dueDate', 'lastReviewed'] as const) {
+        const v = el[dateKey];
+        if (v !== undefined) {
+          if (typeof v !== 'string' || v.length > DATE_MAX || (v !== '' && !ISO_DATE_RE.test(v))) {
+            return { error: `chunk.${dateKey} must be '' or an ISO date string.` };
+          }
+        }
+      }
+
+      const chunk: MemorizationChunk = {
         start: el['start'] as number,
         end: el['end'] as number,
         verseRef: el['verseRef'],
         state: el['state'] as MemorizationChunk['state'],
-      });
+      };
+      // Pass the optional fields through only when present — keeps v1 items byte-identical.
+      if (el['easeFactor'] !== undefined) chunk.easeFactor = el['easeFactor'] as number;
+      if (el['intervalDays'] !== undefined) chunk.intervalDays = el['intervalDays'] as number;
+      if (el['repetitions'] !== undefined) chunk.repetitions = el['repetitions'] as number;
+      if (el['dueDate'] !== undefined) chunk.dueDate = el['dueDate'] as string;
+      if (el['lastReviewed'] !== undefined) chunk.lastReviewed = el['lastReviewed'] as string;
+      chunks.push(chunk);
     }
   }
 

@@ -291,6 +291,12 @@ export interface MemorizationChunk {
   end: number; // exclusive char offset (> start)
   verseRef: string; // kept reference anchor label, '' when unset (<=50) — NO verse text
   state: MemorizationChunkState;
+  // --- v2 SM-2 scheduling (all optional/additive; absent = never reviewed → due now) ---
+  easeFactor?: number; // SM-2 ease, default 2.5, floored at 1.3
+  intervalDays?: number; // current interval in days; 0 = due immediately
+  repetitions?: number; // consecutive successful recalls; resets to 0 on a miss
+  dueDate?: string; // ISO date next due; '' / absent = due now
+  lastReviewed?: string; // ISO date of last graded review; '' / absent = never
 }
 
 /** The persisted memorization worksheet for one scroll study, owned by the current user. */
