@@ -415,6 +415,109 @@ describe('Memorization Study CRUD Lambda', () => {
     });
   });
 
+  describe('reminder preference PREFS route', () => {
+    function makePrefsGet(userId: UserId = 'user-1') {
+      return {
+        httpMethod: 'GET',
+        resource: '/scroll-studies/memorize-reminder-prefs',
+        headers: {},
+        pathParameters: null,
+        body: null,
+        requestContext: authContext(userId),
+      };
+    }
+    function makePrefsPut(body: string | null, userId: UserId = 'user-1') {
+      return {
+        httpMethod: 'PUT',
+        resource: '/scroll-studies/memorize-reminder-prefs',
+        headers: {},
+        pathParameters: null,
+        body,
+        requestContext: authContext(userId),
+      };
+    }
+
+    it('GET returns the default off preference when no item exists', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      const res = await handler(makePrefsGet());
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({ reminderOptIn: false });
+    });
+
+    it('GET returns the stored preference after a PUT', async () => {
+      mockSend.mockResolvedValueOnce({
+        Item: {
+          PK: 'USER#user-1',
+          SK: 'PREFS',
+          reminderOptIn: true,
+          reminderHour: 8,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+      });
+      const res = await handler(makePrefsGet());
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({ reminderOptIn: true, reminderHour: 8 });
+    });
+
+    it('GET returns 400 without auth', async () => {
+      const res = await handler(makePrefsGet(null));
+      expect(res.statusCode).toBe(400);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('PUT upserts a valid preference under PK=USER / SK=PREFS and stores no email', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined }); // read-before-write
+      mockSend.mockResolvedValueOnce({}); // put
+      const res = await handler(
+        makePrefsPut(JSON.stringify({ reminderOptIn: true, reminderHour: 6 })),
+      );
+      expect(res.statusCode).toBe(200);
+      const item = putItem(1);
+      expect(item['PK']).toBe('USER#user-1');
+      expect(item['SK']).toBe('PREFS');
+      expect(item['reminderOptIn']).toBe(true);
+      expect(item['reminderHour']).toBe(6);
+      expect(Object.keys(item)).not.toContain('email');
+      expect(item['createdAt']).toBe(item['updatedAt']); // first save
+    });
+
+    it('PUT accepts a bare opt-in with no hour', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(makePrefsPut(JSON.stringify({ reminderOptIn: false })));
+      expect(res.statusCode).toBe(200);
+      const item = putItem(1);
+      expect(item['reminderOptIn']).toBe(false);
+      expect(Object.keys(item)).not.toContain('reminderHour');
+    });
+
+    it('PUT rejects a non-boolean reminderOptIn with 400', async () => {
+      const res = await handler(makePrefsPut(JSON.stringify({ reminderOptIn: 'yes' })));
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toMatch(/reminderOptIn/i);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('PUT rejects an out-of-range / non-integer reminderHour with 400', async () => {
+      for (const reminderHour of [-1, 24, 2.5]) {
+        mockSend.mockReset();
+        const res = await handler(
+          makePrefsPut(JSON.stringify({ reminderOptIn: true, reminderHour })),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).message).toMatch(/reminderHour/i);
+        expect(mockSend).not.toHaveBeenCalled();
+      }
+    });
+
+    it('PUT returns 400 without auth', async () => {
+      const res = await handler(makePrefsPut(JSON.stringify({ reminderOptIn: true }), null));
+      expect(res.statusCode).toBe(400);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
+
   // --- unknown routes / error handling ---
 
   describe('routing and errors', () => {

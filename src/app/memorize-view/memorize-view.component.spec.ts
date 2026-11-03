@@ -62,11 +62,17 @@ describe('MemorizeViewComponent', () => {
   let getStudySpy: ReturnType<typeof vi.fn>;
   let saveSpy: ReturnType<typeof vi.fn>;
   let getOutlineSpy: ReturnType<typeof vi.fn>;
+  let getPrefSpy: ReturnType<typeof vi.fn>;
+  let putPrefSpy: ReturnType<typeof vi.fn>;
 
   function configure(): void {
     getScrollSpy = vi.fn();
     getStudySpy = vi.fn().mockReturnValue(throwError(() => ({ status: 404 })));
     getOutlineSpy = vi.fn().mockReturnValue(throwError(() => ({ status: 404 })));
+    getPrefSpy = vi.fn().mockReturnValue(of({ reminderOptIn: false }));
+    putPrefSpy = vi
+      .fn()
+      .mockImplementation((pref: { reminderOptIn: boolean; reminderHour?: number }) => of(pref));
     saveSpy = vi
       .fn()
       .mockImplementation((_id: string, input: { chunks?: MemorizationChunk[] }) =>
@@ -78,6 +84,8 @@ describe('MemorizeViewComponent', () => {
     const studyService: Partial<MemorizationStudyService> = {
       get: getStudySpy as unknown as MemorizationStudyService['get'],
       save: saveSpy as unknown as MemorizationStudyService['save'],
+      getReminderPref: getPrefSpy as unknown as MemorizationStudyService['getReminderPref'],
+      putReminderPref: putPrefSpy as unknown as MemorizationStudyService['putReminderPref'],
     };
     const outlineService: Partial<OutlineStudyService> = {
       get: getOutlineSpy as unknown as OutlineStudyService['get'],
@@ -503,6 +511,62 @@ describe('MemorizeViewComponent', () => {
       expect(component.saveError()).toBe(true);
       // schedule was applied optimistically and is kept for the retry
       expect(component.chunks()[0].intervalDays).toBe(1);
+    });
+  });
+
+  // --- daily reminder preference ---
+
+  describe('reminder preference toggle', () => {
+    it('renders the toggle off by default', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      const toggle = query('[data-testid="reminder-optin"]') as HTMLInputElement | null;
+      expect(toggle).toBeTruthy();
+      expect(component.reminderOptIn()).toBe(false);
+      expect(toggle!.checked).toBe(false);
+      // hour selector hidden while off
+      expect(query('[data-testid="reminder-hour"]')).toBeFalsy();
+    });
+
+    it('reads an opted-in preference and renders on, showing the hour', () => {
+      configure();
+      getPrefSpy.mockReturnValue(of({ reminderOptIn: true, reminderHour: 8 }));
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      expect(component.reminderOptIn()).toBe(true);
+      expect(component.reminderHour()).toBe(8);
+      expect(query('[data-testid="reminder-hour"]')).toBeTruthy();
+    });
+
+    it('persists the preference when toggled on', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      component.setReminderOptIn(true);
+      expect(putPrefSpy).toHaveBeenCalledWith({ reminderOptIn: true });
+      expect(component.reminderOptIn()).toBe(true);
+    });
+
+    it('persists the hour, clamped to 0–23', () => {
+      configure();
+      getPrefSpy.mockReturnValue(of({ reminderOptIn: true }));
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      component.setReminderHour(99);
+      expect(component.reminderHour()).toBe(23);
+      expect(putPrefSpy).toHaveBeenCalledWith({ reminderOptIn: true, reminderHour: 23 });
+    });
+
+    it('surfaces an inline error on a save failure, keeping the chosen state', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      putPrefSpy.mockReturnValue(throwError(() => ({ status: 500 })));
+      fixture.detectChanges();
+      component.setReminderOptIn(true);
+      fixture.detectChanges();
+      expect(component.reminderError()).toMatch(/could not save/i);
+      expect(component.reminderOptIn()).toBe(true);
     });
   });
 });

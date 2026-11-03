@@ -312,3 +312,13 @@ export interface MemorizationStudy {
 export interface MemorizationStudyInput {
   chunks?: MemorizationChunk[];
 }
+
+/**
+ * Per-user daily-reminder preference for Memorize the Scroll (opt-in, default off). Holds no email
+ * address — the recipient is resolved from Cognito at send time. Stored per user (SK=PREFS) on the
+ * existing MemorizationStudies table; read/written through the memorization-study CRUD Lambda.
+ */
+export interface MemorizationReminderPref {
+  reminderOptIn: boolean; // default false
+  reminderHour?: number; // 0..23 local hour; absent = stage default send time
+}

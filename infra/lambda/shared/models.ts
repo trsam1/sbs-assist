@@ -344,3 +344,23 @@ export interface MemorizationStudyRecord {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+/**
+ * Per-user daily-reminder preference for Memorize the Scroll. Opt-in, default off. Stored as a
+ * single item per user (PK=USER#<sub> / SK=PREFS) on the MemorizationStudies table — NO new table.
+ * Holds NO email address: the recipient is resolved from Cognito by `sub` at send time.
+ */
+export interface MemorizationReminderPref {
+  reminderOptIn: boolean; // default false; a missing PREFS item reads as false (no reminder)
+  reminderHour?: number; // 0..23 local hour the user prefers; absent → stage default send time
+}
+
+/** DynamoDB record shape for the per-user reminder preference (PK=USER#<sub> / SK=PREFS). */
+export interface MemorizationReminderPrefRecord {
+  PK: string; // "USER#<sub>"
+  SK: string; // "PREFS"
+  reminderOptIn: boolean;
+  reminderHour?: number; // 0..23, optional
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}

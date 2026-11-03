@@ -72,4 +72,35 @@ describe('MemorizationStudyService', () => {
     });
     expect(result?.chunks.length).toBe(1);
   });
+
+  it('getReminderPref GETs the per-user reminder prefs route', () => {
+    let result: { reminderOptIn: boolean; reminderHour?: number } | undefined;
+    service.getReminderPref().subscribe((p) => (result = p));
+    const req = httpTesting.expectOne(
+      `${environment.apiUrl}/scroll-studies/memorize-reminder-prefs`,
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush({ reminderOptIn: true, reminderHour: 8 });
+    expect(result).toEqual({ reminderOptIn: true, reminderHour: 8 });
+  });
+
+  it('putReminderPref PUTs the preference and maps the response', () => {
+    const pref = { reminderOptIn: true, reminderHour: 6 };
+    let result: { reminderOptIn: boolean; reminderHour?: number } | undefined;
+    service.putReminderPref(pref).subscribe((p) => (result = p));
+    const req = httpTesting.expectOne(
+      `${environment.apiUrl}/scroll-studies/memorize-reminder-prefs`,
+    );
+    expect(req.request.method).toBe('PUT');
+    expect(req.request.body).toEqual(pref);
+    req.flush({
+      PK: 'USER#u1',
+      SK: 'PREFS',
+      reminderOptIn: true,
+      reminderHour: 6,
+      createdAt: 'x',
+      updatedAt: 'y',
+    });
+    expect(result).toEqual({ reminderOptIn: true, reminderHour: 6 });
+  });
 });

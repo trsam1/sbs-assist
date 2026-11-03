@@ -1,6 +1,11 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
-import type { MemorizationChunk, MemorizationStudyRecord } from '../shared/models';
+import type {
+  MemorizationChunk,
+  MemorizationReminderPref,
+  MemorizationReminderPrefRecord,
+  MemorizationStudyRecord,
+} from '../shared/models';
 import { corsResponse, getRequestOrigin } from '../shared/cors';
 
 const client = new DynamoDBClient({});
@@ -142,6 +147,44 @@ function parsePutBody(body: string | null | undefined): ParseResult {
   return { chunks };
 }
 
+type PrefParseResult = { pref: MemorizationReminderPref } | { error: string };
+
+/**
+ * Parse and validate the reminder-preference PUT body. `reminderOptIn` is a required boolean;
+ * `reminderHour`, when present, is an integer in [0, 23]. No other fields are accepted and no email
+ * address is ever read or stored (the recipient is resolved from Cognito at send time). A malformed
+ * value is rejected rather than coerced.
+ */
+function parsePrefBody(body: string | null | undefined): PrefParseResult {
+  if (!body) return { error: 'Request body is required.' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { error: 'Invalid JSON body.' };
+  }
+  if (!isObject(parsed)) {
+    return { error: 'Invalid request body.' };
+  }
+
+  if (typeof parsed['reminderOptIn'] !== 'boolean') {
+    return { error: 'reminderOptIn must be a boolean.' };
+  }
+
+  const pref: MemorizationReminderPref = { reminderOptIn: parsed['reminderOptIn'] };
+
+  if (parsed['reminderHour'] !== undefined) {
+    const h = parsed['reminderHour'];
+    if (typeof h !== 'number' || !Number.isInteger(h) || h < 0 || h > 23) {
+      return { error: 'reminderHour must be an integer between 0 and 23.' };
+    }
+    pref.reminderHour = h;
+  }
+
+  return { pref };
+}
+
 async function getMemorizationStudy(
   userId: string,
   scrollStudyId: string,
@@ -183,10 +226,78 @@ async function saveMemorizationStudy(
   return record;
 }
 
+/** Fetch the per-user reminder preference item (PK=USER#<sub> / SK=PREFS), or null if unset. */
+async function getReminderPref(userId: string): Promise<MemorizationReminderPrefRecord | null> {
+  const result = await docClient.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: { PK: `USER#${userId}`, SK: 'PREFS' },
+    }),
+  );
+  return (result.Item as MemorizationReminderPrefRecord) ?? null;
+}
+
+/**
+ * Create-or-replace the per-user reminder preference. Reads before writing so `createdAt` is
+ * preserved across updates while `updatedAt` always advances. Stores no email address.
+ */
+async function saveReminderPref(
+  userId: string,
+  pref: MemorizationReminderPref,
+): Promise<MemorizationReminderPrefRecord> {
+  const now = new Date().toISOString();
+  const existing = await getReminderPref(userId);
+  const createdAt = existing?.createdAt ?? now;
+
+  const record: MemorizationReminderPrefRecord = {
+    PK: `USER#${userId}`,
+    SK: 'PREFS',
+    reminderOptIn: pref.reminderOptIn,
+    ...(pref.reminderHour !== undefined ? { reminderHour: pref.reminderHour } : {}),
+    createdAt,
+    updatedAt: now,
+  };
+
+  await docClient.send(new PutCommand({ TableName: tableName, Item: record }));
+  return record;
+}
+
 export const handler = async (event: APIGatewayEvent) => {
   const origin = getRequestOrigin(event.headers);
   try {
     const route = event.resource === '/scroll-studies/{scrollStudyId}/memorize';
+    const prefsRoute = event.resource === '/scroll-studies/memorize-reminder-prefs';
+
+    // GET /scroll-studies/memorize-reminder-prefs — fetch the per-user reminder preference.
+    // A missing item reads as opted-out (default off) — never an error.
+    if (event.httpMethod === 'GET' && prefsRoute) {
+      const userId = getUserId(event);
+      if (!userId) {
+        return corsResponse(400, { message: 'Missing authentication.' }, origin);
+      }
+      const existing = await getReminderPref(userId);
+      const pref: MemorizationReminderPref = existing
+        ? {
+            reminderOptIn: existing.reminderOptIn,
+            ...(existing.reminderHour !== undefined ? { reminderHour: existing.reminderHour } : {}),
+          }
+        : { reminderOptIn: false };
+      return corsResponse(200, pref, origin);
+    }
+
+    // PUT /scroll-studies/memorize-reminder-prefs — upsert the per-user reminder preference.
+    if (event.httpMethod === 'PUT' && prefsRoute) {
+      const userId = getUserId(event);
+      if (!userId) {
+        return corsResponse(400, { message: 'Missing authentication.' }, origin);
+      }
+      const parsed = parsePrefBody(event.body);
+      if ('error' in parsed) {
+        return corsResponse(400, { message: parsed.error }, origin);
+      }
+      const record = await saveReminderPref(userId, parsed.pref);
+      return corsResponse(200, record, origin);
+    }
 
     // GET /scroll-studies/{scrollStudyId}/memorize — fetch the saved memorization study
     if (event.httpMethod === 'GET' && route) {

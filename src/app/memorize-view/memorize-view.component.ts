@@ -11,7 +11,12 @@ import { FormsModule } from '@angular/forms';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
 import { OutlineStudyService } from '../outline-study.service';
-import { MemorizationChunk, MemorizationChunkState, OutlineParagraph } from '../models';
+import {
+  MemorizationChunk,
+  MemorizationChunkState,
+  MemorizationReminderPref,
+  OutlineParagraph,
+} from '../models';
 import {
   seedByVerses,
   seedFromParagraphs,
@@ -108,6 +113,44 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                   }
                 </div>
               }
+
+              <!-- Daily reminder preference (opt-in, default off; per-user, not scroll-scoped). -->
+              <div class="box p-3 mb-3" data-testid="reminder-pref">
+                <label class="checkbox is-size-7">
+                  <input
+                    type="checkbox"
+                    [checked]="reminderOptIn()"
+                    (change)="setReminderOptIn($any($event.target).checked)"
+                    data-testid="reminder-optin"
+                    aria-label="Email me a daily reminder when chunks are due for review"
+                  />
+                  Email me a daily reminder when chunks are due for review
+                </label>
+                @if (reminderOptIn()) {
+                  <div class="field is-grouped is-align-items-end mt-2">
+                    <div class="control">
+                      <label class="label is-small mb-1" for="reminder-hour"
+                        >Preferred hour (0–23)</label
+                      >
+                      <input
+                        id="reminder-hour"
+                        class="input is-small"
+                        type="number"
+                        min="0"
+                        max="23"
+                        [ngModel]="reminderHour()"
+                        (ngModelChange)="setReminderHour($event)"
+                        data-testid="reminder-hour"
+                        aria-label="Preferred reminder hour, 0 to 23"
+                        style="width: 6rem"
+                      />
+                    </div>
+                  </div>
+                }
+                @if (reminderError()) {
+                  <p class="help is-danger" data-testid="reminder-error">{{ reminderError() }}</p>
+                }
+              </div>
 
               <!-- Seed methods -->
               <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
@@ -594,6 +637,11 @@ export class MemorizeViewComponent implements OnInit {
   readonly saved = signal(false);
   readonly saveError = signal(false);
 
+  // Daily reminder preference (opt-in, default off; per-user, not scroll-scoped).
+  readonly reminderOptIn = signal(false);
+  readonly reminderHour = signal<number | null>(null);
+  readonly reminderError = signal('');
+
   protected readonly VERSE_REF_MAX = VERSE_REF_MAX;
   protected readonly VERSES_PER_CHUNK_MIN = VERSES_PER_CHUNK_MIN;
   protected readonly VERSES_PER_CHUNK_MAX = VERSES_PER_CHUNK_MAX;
@@ -709,6 +757,7 @@ export class MemorizeViewComponent implements OnInit {
           this.state.set('ready');
           this.loadSaved();
           this.loadOutline();
+          this.loadReminderPref();
         } else if (s.status === 'failed') {
           this.state.set('failed');
         } else {
@@ -741,6 +790,55 @@ export class MemorizeViewComponent implements OnInit {
       },
       error: () => {
         // 404 (no outline yet) or transient: leave paragraphs empty → Step 8 seed not offered.
+      },
+    });
+  }
+
+  /** Fetch the per-user daily-reminder preference (defaults to off when unset). */
+  private loadReminderPref(): void {
+    this.memorizationStudy.getReminderPref().subscribe({
+      next: (pref) => {
+        this.reminderOptIn.set(pref.reminderOptIn === true);
+        this.reminderHour.set(pref.reminderHour ?? null);
+      },
+      error: () => {
+        // Transient: leave the default-off state in place.
+      },
+    });
+  }
+
+  /** Toggle the daily reminder opt-in and persist the preference. */
+  setReminderOptIn(optIn: boolean): void {
+    this.reminderOptIn.set(optIn);
+    this.saveReminderPref();
+  }
+
+  /** Set the preferred reminder hour (0–23); clamps out-of-range input, then persists. */
+  setReminderHour(hour: number | string): void {
+    const n = typeof hour === 'number' ? hour : parseInt(hour, 10);
+    if (Number.isNaN(n)) {
+      this.reminderHour.set(null);
+    } else {
+      this.reminderHour.set(Math.max(0, Math.min(23, Math.trunc(n))));
+    }
+    this.saveReminderPref();
+  }
+
+  /** Persist the current reminder preference; a failure surfaces an inline error, state is kept. */
+  private saveReminderPref(): void {
+    this.reminderError.set('');
+    const hour = this.reminderHour();
+    const pref: MemorizationReminderPref = {
+      reminderOptIn: this.reminderOptIn(),
+      ...(this.reminderOptIn() && hour !== null ? { reminderHour: hour } : {}),
+    };
+    this.memorizationStudy.putReminderPref(pref).subscribe({
+      next: (saved) => {
+        this.reminderOptIn.set(saved.reminderOptIn === true);
+        this.reminderHour.set(saved.reminderHour ?? null);
+      },
+      error: () => {
+        this.reminderError.set('Could not save the reminder preference. Please try again.');
       },
     });
   }

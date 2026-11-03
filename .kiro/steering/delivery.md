@@ -60,6 +60,7 @@ inclusion: always
 - Bedrock is the main variable. No test or smoke step calls it, and dev self sign-up is off so strangers cannot run summaries.
 - Cost controls: on-demand everything, no VPC/NAT or always-on resources, 1-week dev logs, small seed, npm cache in CI, `pr-<n>` concurrency cancels superseded PR runs, docs-only changes skip deploys.
 - Prod delta from the pipeline work: ≈ $0.02 / month (PITR on `WordStudies`, deploy logs).
+- Memorize-the-Scroll daily reminder (#68): ≈ $0 / month — one daily `ReminderDispatch` Lambda invoke (a small table scan), SES within the free tier (first 62k emails/mo sent from Lambda), and the EventBridge Scheduler rule are all negligible. Prod delta from this feature is a few cents/month at most. One-time maintainer step: set `reminderSender` in `infra/lib/stage-config.ts` to a real address and verify it in **Amazon SES → Verified identities** (us-east-1); SES stays in sandbox (verified recipients only), which suffices for the maintainer. Until the sender is verified, the dispatch Lambda logs an unverified-sender error and skips — no crash, no bad mail.
 
 ## One-time manual setup (user)
 

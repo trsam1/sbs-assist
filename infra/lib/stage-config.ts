@@ -47,6 +47,20 @@ export interface StageConfig {
    * behavior setting, not a frozen physical name, so it may be changed later with an explicit edit.
    */
   figuresAssistModelId: string;
+  /**
+   * Verified SES sender address for the Memorize the Scroll daily due-review reminder. This is a
+   * behavior/identity setting the MAINTAINER fills in with a real address that is verified in SES
+   * (Amazon SES → Verified identities) — it is NOT a frozen physical name. The CDK wires it into
+   * the SES EmailIdentity, the dispatch Lambda's REMINDER_SENDER env, and the ses:SendEmail grant.
+   * The placeholder below is intentionally non-functional: until it is replaced with a verified
+   * address, the dispatch Lambda logs an unverified-sender error and skips (no crash, no bad mail).
+   */
+  reminderSender: string;
+  /**
+   * EventBridge Scheduler expression for the once-a-day reminder dispatch (e.g. a fixed UTC hour).
+   * Per-stage so dev and prod can diverge. A behavior setting, editable with an explicit change.
+   */
+  reminderScheduleExpression: string;
 }
 
 export const HOSTED_ZONE = { zoneName: 'teksnextdoor.com' } as const;
@@ -68,6 +82,9 @@ export const STAGES: Record<Stage, StageConfig> = {
     certificate: 'wildcard',
     apiCloudWatchRole: true,
     figuresAssistModelId: 'us.anthropic.claude-opus-5-5',
+    // MAINTAINER: replace with a real address verified in SES before the first send.
+    reminderSender: 'REPLACE_ME@teksnextdoor.com',
+    reminderScheduleExpression: 'cron(0 13 * * ? *)', // 13:00 UTC daily
   },
   dev: {
     stage: 'dev',
@@ -85,5 +102,8 @@ export const STAGES: Record<Stage, StageConfig> = {
     certificate: 'site',
     apiCloudWatchRole: false,
     figuresAssistModelId: 'us.anthropic.claude-sonnet-5-5',
+    // MAINTAINER: replace with a real address verified in SES before the first send.
+    reminderSender: 'REPLACE_ME@teksnextdoor.com',
+    reminderScheduleExpression: 'cron(0 13 * * ? *)', // 13:00 UTC daily
   },
 };

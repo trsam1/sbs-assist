@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { MemorizationChunk, MemorizationStudy, MemorizationStudyInput } from './models';
+import { MemorizationReminderPref } from './models';
 import { environment } from './environment';
 
 /** Raw record shape returned by the API (DynamoDB field names, incl. PK/SK). */
@@ -59,5 +60,26 @@ export class MemorizationStudyService {
         input,
       )
       .pipe(map(toMemorizationStudy));
+  }
+
+  /** Fetch the per-user daily-reminder preference; the API returns a default (off) when unset. */
+  getReminderPref(): Observable<MemorizationReminderPref> {
+    return this.http.get<MemorizationReminderPref>(
+      `${this.baseUrl}/scroll-studies/memorize-reminder-prefs`,
+    );
+  }
+
+  /** Save (create-or-replace) the per-user daily-reminder preference. */
+  putReminderPref(pref: MemorizationReminderPref): Observable<MemorizationReminderPref> {
+    return this.http
+      .put<
+        MemorizationReminderPref & { reminderOptIn: boolean }
+      >(`${this.baseUrl}/scroll-studies/memorize-reminder-prefs`, pref)
+      .pipe(
+        map((r) => ({
+          reminderOptIn: r.reminderOptIn,
+          ...(r.reminderHour !== undefined ? { reminderHour: r.reminderHour } : {}),
+        })),
+      );
   }
 }
