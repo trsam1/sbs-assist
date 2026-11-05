@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  HostListener,
   inject,
   OnInit,
   signal,
@@ -33,8 +34,16 @@ import {
   VERSES_PER_CHUNK_MAX,
 } from './chunking';
 import { readSchedule, isDue, applyGrade, dueLabel, Grade } from './srs';
+import {
+  classifySwipe,
+  swipeToGrade,
+  keyToGrade,
+  isFlipKey,
+  DEFAULT_SWIPE_OPTIONS,
+} from './gestures';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
+type ViewMode = 'review' | 'edit';
 type DrillMode = 'chain' | 'reveal' | 'cloze';
 type RevealLevel = 'full' | 'first' | 'blank';
 
@@ -71,493 +80,707 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
               are kept as labels. Your progress is saved.
             </p>
 
-            <!-- Progress summary + chunking controls -->
-            <div class="box">
-              <div class="level is-mobile mb-3">
-                <div class="level-left">
-                  <p class="is-size-6" data-testid="memorize-progress">{{ progressLabel() }}</p>
-                </div>
-              </div>
+            <!-- Review / Edit mode toggle. Review = the mobile-first flashcard deck; Edit = the
+                 full worksheet (seed, chunk editor, drill, reminder pref). -->
+            <div
+              class="buttons has-addons mb-4"
+              role="group"
+              aria-label="Review or edit mode"
+              data-testid="memorize-mode-toggle"
+            >
+              <button
+                type="button"
+                class="button"
+                [class.is-link]="viewMode() === 'review'"
+                [attr.aria-pressed]="viewMode() === 'review'"
+                (click)="setViewMode('review')"
+                data-testid="mode-review"
+              >
+                Review
+              </button>
+              <button
+                type="button"
+                class="button"
+                [class.is-link]="viewMode() === 'edit'"
+                [attr.aria-pressed]="viewMode() === 'edit'"
+                (click)="setViewMode('edit')"
+                data-testid="mode-edit"
+              >
+                Edit
+              </button>
+            </div>
 
-              <!-- Due-today review queue (SM-2). Derived client-side; never persisted. -->
-              @if (chunks().length > 0) {
-                <div class="box p-3 mb-3" data-testid="memorize-due-queue">
-                  <p class="is-size-6 mb-2">
-                    <strong data-testid="memorize-due-count">{{ dueCount() }}</strong>
-                    {{ dueCount() === 1 ? 'chunk' : 'chunks' }} due for review today
-                  </p>
-                  @if (dueQueue().length > 0) {
-                    <ul>
-                      @for (row of dueQueue(); track row.index) {
-                        <li class="mb-1" data-testid="memorize-due-row">
-                          <button
-                            class="button is-small is-link is-light"
-                            type="button"
-                            (click)="setActive(row.index)"
-                            [attr.aria-label]="
-                              'Review chunk ' +
-                              (row.index + 1) +
-                              (row.verseRef ? ' (' + row.verseRef + ')' : '')
-                            "
-                          >
-                            {{ row.index + 1 }}{{ row.verseRef ? ' — ' + row.verseRef : '' }}
-                          </button>
-                          <span class="is-size-7 has-text-grey ml-2">{{ row.dueLabel }}</span>
-                        </li>
-                      }
-                    </ul>
-                  } @else {
-                    <p class="is-size-7 has-text-grey" data-testid="memorize-due-empty">
-                      Nothing due today — well memorized. Come back when the next review falls due.
+            @if (viewMode() === 'review') {
+              <!-- ===== Review mode: flashcard deck driven by the due queue ===== -->
+              <div class="review-deck" data-testid="memorize-review">
+                @if (chunks().length === 0) {
+                  <div class="box has-text-centered" data-testid="review-no-chunks">
+                    <p class="mb-3">
+                      No chunks to review yet. Switch to <strong>Edit</strong> to seed this book
+                      into chunks, then come back to review them.
                     </p>
-                  }
-                </div>
-              }
+                    <button
+                      type="button"
+                      class="button is-link"
+                      (click)="setViewMode('edit')"
+                      data-testid="review-go-edit"
+                    >
+                      Go to Edit
+                    </button>
+                  </div>
+                } @else if (deckComplete()) {
+                  <div class="box has-text-centered" data-testid="review-complete">
+                    <p class="is-size-5 mb-2">All caught up ✓</p>
+                    <p class="has-text-grey">
+                      Nothing due right now — well memorized. Come back when the next review falls
+                      due.
+                    </p>
+                  </div>
+                } @else {
+                  <!-- Deck progress -->
+                  <p
+                    class="is-size-6 has-text-centered mb-3"
+                    aria-live="polite"
+                    data-testid="review-progress"
+                  >
+                    Card {{ deckProgress().pos + 1 }} of {{ deckProgress().total }} due
+                    @if (cardRef()) {
+                      <span class="tag is-light ml-2">{{ cardRef() }}</span>
+                    }
+                  </p>
 
-              <!-- Daily reminder preference (opt-in, default off; per-user, not scroll-scoped). -->
-              <div class="box p-3 mb-3" data-testid="reminder-pref">
-                <label class="checkbox is-size-7">
-                  <input
-                    type="checkbox"
-                    [checked]="reminderOptIn()"
-                    (change)="setReminderOptIn($any($event.target).checked)"
-                    data-testid="reminder-optin"
-                    aria-label="Email me a daily reminder when chunks are due for review"
-                  />
-                  Email me a daily reminder when chunks are due for review
-                </label>
-                @if (reminderOptIn()) {
-                  <div class="field is-grouped is-align-items-end mt-2">
-                    <div class="control">
-                      <label class="label is-small mb-1" for="reminder-hour"
-                        >Preferred hour (0–23)</label
-                      >
-                      <input
-                        id="reminder-hour"
-                        class="input is-small"
-                        type="number"
-                        min="0"
-                        max="23"
-                        [ngModel]="reminderHour()"
-                        (ngModelChange)="setReminderHour($event)"
-                        data-testid="reminder-hour"
-                        aria-label="Preferred reminder hour, 0 to 23"
-                        style="width: 6rem"
-                      />
+                  <!-- The flashcard: tap / Space / swipe-up to flip. -->
+                  <div
+                    class="flashcard"
+                    [class.is-flipped]="flipped()"
+                    role="button"
+                    tabindex="0"
+                    [attr.aria-label]="
+                      flipped()
+                        ? 'Card revealed. Grade your recall, or tap to flip back.'
+                        : 'Hidden card. Tap, press space, or swipe up to reveal.'
+                    "
+                    (click)="flip()"
+                    (keydown)="onCardKeydown($event)"
+                    (pointerdown)="onCardPointerDown($event)"
+                    (pointerup)="onCardPointerUp($event)"
+                    data-testid="review-card"
+                  >
+                    <div class="flashcard-inner">
+                      <!-- Front: reference label + optional first-letters scaffold -->
+                      <div class="flashcard-face flashcard-front" data-testid="review-card-front">
+                        <p class="card-ref">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
+                        <p class="card-prompt has-text-grey">Recite from memory, then flip.</p>
+                        @if (scaffold() === 'first') {
+                          <p class="card-scaffold" data-testid="review-scaffold">
+                            {{ cardScaffoldText() }}
+                          </p>
+                        }
+                      </div>
+                      <!-- Back: the full chunk text from the student's own scroll -->
+                      <div class="flashcard-face flashcard-back" data-testid="review-card-back">
+                        <p class="card-text">{{ cardBackText() }}</p>
+                      </div>
                     </div>
                   </div>
-                }
-                @if (reminderError()) {
-                  <p class="help is-danger" data-testid="reminder-error">{{ reminderError() }}</p>
+
+                  <!-- Front controls: scaffold toggle + explicit reveal -->
+                  @if (!flipped()) {
+                    <div class="buttons is-centered mt-3">
+                      <button
+                        type="button"
+                        class="button is-small is-light"
+                        (click)="toggleScaffold(); $event.stopPropagation()"
+                        [attr.aria-pressed]="scaffold() === 'first'"
+                        data-testid="review-scaffold-toggle"
+                      >
+                        {{ scaffold() === 'first' ? 'Hide hint' : 'Show first letters' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="button is-small is-link"
+                        (click)="flip(); $event.stopPropagation()"
+                        data-testid="review-reveal"
+                      >
+                        Reveal
+                      </button>
+                    </div>
+                  }
+
+                  <!-- Grade controls: large, full-width, bottom-anchored on phones. -->
+                  @if (flipped()) {
+                    <p class="is-size-7 has-text-grey has-text-centered mt-3 mb-2">
+                      Next review after a pass:
+                      <span data-testid="review-next-due">{{ activeDueLabel() }}</span>
+                    </p>
+                    <div
+                      class="grade-row"
+                      role="group"
+                      aria-label="Grade your recall"
+                      data-testid="review-grade-row"
+                    >
+                      <button
+                        type="button"
+                        class="button is-danger is-light grade-btn"
+                        [disabled]="saving()"
+                        (click)="gradeCard('again')"
+                        data-testid="review-grade-again"
+                      >
+                        Again
+                      </button>
+                      <button
+                        type="button"
+                        class="button grade-btn"
+                        [disabled]="saving()"
+                        (click)="gradeCard('hard')"
+                        data-testid="review-grade-hard"
+                      >
+                        Hard
+                      </button>
+                      <button
+                        type="button"
+                        class="button grade-btn"
+                        [disabled]="saving()"
+                        (click)="gradeCard('good')"
+                        data-testid="review-grade-good"
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        class="button is-success is-light grade-btn"
+                        [disabled]="saving()"
+                        (click)="gradeCard('easy')"
+                        data-testid="review-grade-easy"
+                      >
+                        Easy
+                      </button>
+                    </div>
+                  }
+
+                  <!-- Shortcut legend: makes the hands-free controls discoverable. -->
+                  @if (!legendDismissed()) {
+                    <div
+                      class="notification is-light p-2 mt-3 is-size-7"
+                      data-testid="review-legend"
+                    >
+                      <button
+                        type="button"
+                        class="delete is-small"
+                        (click)="dismissLegend()"
+                        aria-label="Dismiss shortcuts help"
+                        data-testid="review-legend-dismiss"
+                      ></button>
+                      <strong>Hands-free:</strong> tap / Space / swipe&nbsp;up to flip; then
+                      <strong>1</strong> Again · <strong>2</strong> Hard · <strong>3</strong> Good ·
+                      <strong>4</strong> Easy, or swipe left (Again) / right (Easy).
+                    </div>
+                  }
+
+                  @if (saveError()) {
+                    <p
+                      class="has-text-danger has-text-centered mt-2"
+                      data-testid="review-save-error"
+                    >
+                      Could not save that grade — it's kept; try again.
+                    </p>
+                  }
                 }
               </div>
+            } @else {
+              <!-- ===== Edit mode: the full worksheet (unchanged) ===== -->
 
-              <!-- Seed methods -->
-              <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
-                <div class="control">
-                  <label class="label is-small mb-1" for="verses-per-chunk">Verses per chunk</label>
-                  <input
-                    id="verses-per-chunk"
-                    class="input is-small"
-                    type="number"
-                    [min]="VERSES_PER_CHUNK_MIN"
-                    [max]="VERSES_PER_CHUNK_MAX"
-                    [ngModel]="versesPerChunk()"
-                    (ngModelChange)="setVersesPerChunk(+$event)"
-                    data-testid="verses-per-chunk"
-                    style="width: 6rem"
-                  />
+              <!-- Progress summary + chunking controls -->
+              <div class="box">
+                <div class="level is-mobile mb-3">
+                  <div class="level-left">
+                    <p class="is-size-6" data-testid="memorize-progress">{{ progressLabel() }}</p>
+                  </div>
                 </div>
-                <div class="control">
-                  <button
-                    class="button is-small"
-                    type="button"
-                    [disabled]="!hasVerseMarkers()"
-                    (click)="seedByVerseCount()"
-                    data-testid="seed-by-verses"
-                  >
-                    {{ chunks().length === 0 ? 'Seed by verses' : 'Re-seed by verses' }}
-                  </button>
+
+                <!-- Due-today review queue (SM-2). Derived client-side; never persisted. -->
+                @if (chunks().length > 0) {
+                  <div class="box p-3 mb-3" data-testid="memorize-due-queue">
+                    <p class="is-size-6 mb-2">
+                      <strong data-testid="memorize-due-count">{{ dueCount() }}</strong>
+                      {{ dueCount() === 1 ? 'chunk' : 'chunks' }} due for review today
+                    </p>
+                    @if (dueQueue().length > 0) {
+                      <ul>
+                        @for (row of dueQueue(); track row.index) {
+                          <li class="mb-1" data-testid="memorize-due-row">
+                            <button
+                              class="button is-small is-link is-light"
+                              type="button"
+                              (click)="setActive(row.index)"
+                              [attr.aria-label]="
+                                'Review chunk ' +
+                                (row.index + 1) +
+                                (row.verseRef ? ' (' + row.verseRef + ')' : '')
+                              "
+                            >
+                              {{ row.index + 1 }}{{ row.verseRef ? ' — ' + row.verseRef : '' }}
+                            </button>
+                            <span class="is-size-7 has-text-grey ml-2">{{ row.dueLabel }}</span>
+                          </li>
+                        }
+                      </ul>
+                    } @else {
+                      <p class="is-size-7 has-text-grey" data-testid="memorize-due-empty">
+                        Nothing due today — well memorized. Come back when the next review falls
+                        due.
+                      </p>
+                    }
+                  </div>
+                }
+
+                <!-- Daily reminder preference (opt-in, default off; per-user, not scroll-scoped). -->
+                <div class="box p-3 mb-3" data-testid="reminder-pref">
+                  <label class="checkbox is-size-7">
+                    <input
+                      type="checkbox"
+                      [checked]="reminderOptIn()"
+                      (change)="setReminderOptIn($any($event.target).checked)"
+                      data-testid="reminder-optin"
+                      aria-label="Email me a daily reminder when chunks are due for review"
+                    />
+                    Email me a daily reminder when chunks are due for review
+                  </label>
+                  @if (reminderOptIn()) {
+                    <div class="field is-grouped is-align-items-end mt-2">
+                      <div class="control">
+                        <label class="label is-small mb-1" for="reminder-hour"
+                          >Preferred hour (0–23)</label
+                        >
+                        <input
+                          id="reminder-hour"
+                          class="input is-small"
+                          type="number"
+                          min="0"
+                          max="23"
+                          [ngModel]="reminderHour()"
+                          (ngModelChange)="setReminderHour($event)"
+                          data-testid="reminder-hour"
+                          aria-label="Preferred reminder hour, 0 to 23"
+                          style="width: 6rem"
+                        />
+                      </div>
+                    </div>
+                  }
+                  @if (reminderError()) {
+                    <p class="help is-danger" data-testid="reminder-error">{{ reminderError() }}</p>
+                  }
                 </div>
-                @if (outlineParagraphs().length > 0) {
+
+                <!-- Seed methods -->
+                <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
+                  <div class="control">
+                    <label class="label is-small mb-1" for="verses-per-chunk"
+                      >Verses per chunk</label
+                    >
+                    <input
+                      id="verses-per-chunk"
+                      class="input is-small"
+                      type="number"
+                      [min]="VERSES_PER_CHUNK_MIN"
+                      [max]="VERSES_PER_CHUNK_MAX"
+                      [ngModel]="versesPerChunk()"
+                      (ngModelChange)="setVersesPerChunk(+$event)"
+                      data-testid="verses-per-chunk"
+                      style="width: 6rem"
+                    />
+                  </div>
                   <div class="control">
                     <button
                       class="button is-small"
                       type="button"
-                      (click)="seedFromOutline()"
-                      data-testid="seed-from-step8"
+                      [disabled]="!hasVerseMarkers()"
+                      (click)="seedByVerseCount()"
+                      data-testid="seed-by-verses"
                     >
-                      {{
-                        chunks().length === 0
-                          ? 'Seed from Step 8 paragraphs'
-                          : 'Re-seed from Step 8'
-                      }}
+                      {{ chunks().length === 0 ? 'Seed by verses' : 'Re-seed by verses' }}
                     </button>
+                  </div>
+                  @if (outlineParagraphs().length > 0) {
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        (click)="seedFromOutline()"
+                        data-testid="seed-from-step8"
+                      >
+                        {{
+                          chunks().length === 0
+                            ? 'Seed from Step 8 paragraphs'
+                            : 'Re-seed from Step 8'
+                        }}
+                      </button>
+                    </div>
+                  }
+                </div>
+
+                @if (!hasVerseMarkers() && outlineParagraphs().length === 0) {
+                  <div
+                    class="notification is-warning is-light"
+                    role="status"
+                    data-testid="seed-blocked"
+                  >
+                    This scroll has no verse markers and no Step 8 outline yet, so chunks can't be
+                    seeded. Add verse references to your scroll text, or complete Step 8 (Outline),
+                    then come back.
+                  </div>
+                } @else if (chunks().length === 0) {
+                  <div role="status" data-testid="memorize-empty">
+                    No chunks yet. Seed by a verse count, or from your Step 8 paragraphs, then
+                    adjust the boundaries.
                   </div>
                 }
-              </div>
 
-              @if (!hasVerseMarkers() && outlineParagraphs().length === 0) {
-                <div
-                  class="notification is-warning is-light"
-                  role="status"
-                  data-testid="seed-blocked"
-                >
-                  This scroll has no verse markers and no Step 8 outline yet, so chunks can't be
-                  seeded. Add verse references to your scroll text, or complete Step 8 (Outline),
-                  then come back.
-                </div>
-              } @else if (chunks().length === 0) {
-                <div role="status" data-testid="memorize-empty">
-                  No chunks yet. Seed by a verse count, or from your Step 8 paragraphs, then adjust
-                  the boundaries.
-                </div>
-              }
-
-              @if (seedUnmapped().length > 0) {
-                <div
-                  class="notification is-warning is-light"
-                  role="alert"
-                  data-testid="seed-unmapped"
-                >
-                  {{ seedUnmapped().length }} Step 8 paragraph(s) referenced a location not found in
-                  the scroll text and were skipped. Check those paragraphs' references, or adjust
-                  the chunks below by hand.
-                </div>
-              }
-
-              <!-- Chunk editor -->
-              @for (chunk of chunks(); track $index) {
-                <div class="box p-3 mb-2" data-testid="memorize-chunk-row">
-                  <div class="field is-grouped is-align-items-end mb-2">
-                    <div class="control">
-                      <label class="label is-small mb-1" [attr.for]="'verseref-' + $index"
-                        >Reference (label only)</label
-                      >
-                      <input
-                        [id]="'verseref-' + $index"
-                        class="input is-small"
-                        type="text"
-                        [maxlength]="VERSE_REF_MAX"
-                        placeholder="e.g. 2:5-8"
-                        [ngModel]="chunk.verseRef"
-                        (ngModelChange)="setVerseRef($index, $event)"
-                        data-testid="chunk-verseref"
-                      />
-                    </div>
-                    <div class="control">
-                      <label class="label is-small mb-1" [attr.for]="'state-' + $index"
-                        >Progress</label
-                      >
-                      <div class="select is-small">
-                        <select
-                          [id]="'state-' + $index"
-                          [ngModel]="chunk.state"
-                          (ngModelChange)="setState($index, $event)"
-                          data-testid="chunk-state"
-                        >
-                          @for (st of stateOrder; track st) {
-                            <option [value]="st">{{ stateLabels[st] }}</option>
-                          }
-                        </select>
-                      </div>
-                    </div>
-                    <div class="control is-expanded"></div>
-                    <div class="control">
-                      <button
-                        class="button is-small"
-                        type="button"
-                        [disabled]="$index === 0"
-                        (click)="moveUp($index)"
-                        [attr.aria-label]="'Move chunk ' + ($index + 1) + ' up'"
-                        data-testid="chunk-reorder"
-                      >
-                        ↑
-                      </button>
-                    </div>
-                    <div class="control">
-                      <button
-                        class="button is-small"
-                        type="button"
-                        [disabled]="$index === 0"
-                        (click)="mergeUp($index)"
-                        [attr.aria-label]="'Merge chunk ' + ($index + 1) + ' into the one above'"
-                        data-testid="chunk-merge"
-                      >
-                        Merge up
-                      </button>
-                    </div>
-                    <div class="control">
-                      <button
-                        class="button is-small is-danger is-outlined"
-                        type="button"
-                        (click)="removeChunk($index)"
-                        [attr.aria-label]="'Remove chunk ' + ($index + 1)"
-                        data-testid="chunk-remove"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                  @if (chunk.verseRef) {
-                    <span class="tag is-light is-small mr-2" aria-label="Reference">{{
-                      chunk.verseRef
-                    }}</span>
-                  }
-                  @if (outOfRange($index)) {
-                    <p class="help is-warning" role="alert" data-testid="chunk-out-of-range">
-                      This chunk's range no longer fits the scroll text — re-seed to fix it.
-                    </p>
-                  }
-                  <p class="is-size-7 has-text-grey" data-testid="chunk-preview">
-                    {{ preview($index) }}
-                  </p>
-                </div>
-              }
-            </div>
-
-            <!-- Drill surface -->
-            @if (chunks().length > 0) {
-              <div class="box" data-testid="memorize-drill">
-                <h3 class="title is-5">Drill</h3>
-                <div class="buttons has-addons are-small" role="group" aria-label="Drill mode">
-                  <button
-                    type="button"
-                    class="button"
-                    [class.is-link]="mode() === 'chain'"
-                    [attr.aria-pressed]="mode() === 'chain'"
-                    (click)="setMode('chain')"
-                    data-testid="drill-mode-chain"
-                  >
-                    Chain
-                  </button>
-                  <button
-                    type="button"
-                    class="button"
-                    [class.is-link]="mode() === 'reveal'"
-                    [attr.aria-pressed]="mode() === 'reveal'"
-                    (click)="setMode('reveal')"
-                    data-testid="drill-mode-reveal"
-                  >
-                    Reveal
-                  </button>
-                  <button
-                    type="button"
-                    class="button"
-                    [class.is-link]="mode() === 'cloze'"
-                    [attr.aria-pressed]="mode() === 'cloze'"
-                    (click)="setMode('cloze')"
-                    data-testid="drill-mode-cloze"
-                  >
-                    Fill blanks
-                  </button>
-                </div>
-
-                <!-- Chunk selector -->
-                <div class="field">
-                  <label class="label is-small mb-1" for="active-chunk">Chunk</label>
-                  <div class="select is-small">
-                    <select
-                      id="active-chunk"
-                      [ngModel]="activeIndex()"
-                      (ngModelChange)="setActive(+$event)"
-                      data-testid="active-chunk"
-                    >
-                      @for (chunk of chunks(); track $index) {
-                        <option [value]="$index">
-                          {{ $index + 1 }}{{ chunk.verseRef ? ' — ' + chunk.verseRef : '' }}
-                        </option>
-                      }
-                    </select>
-                  </div>
-                </div>
-
-                <!-- Review schedule: next-due label + three-button grade (SM-2). Separate axis
-                     from the learned-state ladder — grading never changes the state value. -->
-                <div class="field" data-testid="memorize-grade">
-                  <p class="is-size-7 has-text-grey mb-2">
-                    Next review: <span data-testid="chunk-next-due">{{ activeDueLabel() }}</span>
-                  </p>
+                @if (seedUnmapped().length > 0) {
                   <div
-                    class="buttons has-addons are-small"
-                    role="group"
-                    aria-label="Grade your recall"
+                    class="notification is-warning is-light"
+                    role="alert"
+                    data-testid="seed-unmapped"
                   >
-                    <button
-                      type="button"
-                      class="button is-danger is-light"
-                      [disabled]="saving()"
-                      (click)="grade('again')"
-                      data-testid="grade-again"
-                    >
-                      Again
-                    </button>
-                    <button
-                      type="button"
-                      class="button"
-                      [disabled]="saving()"
-                      (click)="grade('hard')"
-                      data-testid="grade-hard"
-                    >
-                      Hard
-                    </button>
-                    <button
-                      type="button"
-                      class="button"
-                      [disabled]="saving()"
-                      (click)="grade('good')"
-                      data-testid="grade-good"
-                    >
-                      Good
-                    </button>
-                    <button
-                      type="button"
-                      class="button is-success is-light"
-                      [disabled]="saving()"
-                      (click)="grade('easy')"
-                      data-testid="grade-easy"
-                    >
-                      Easy
-                    </button>
+                    {{ seedUnmapped().length }} Step 8 paragraph(s) referenced a location not found
+                    in the scroll text and were skipped. Check those paragraphs' references, or
+                    adjust the chunks below by hand.
                   </div>
-                </div>
+                }
 
-                @switch (mode()) {
-                  @case ('chain') {
-                    <p class="help mb-2">
-                      Recite this chunk, then recite the whole run chained from the first learned
-                      chunk.
-                    </p>
-                    <div class="content" data-testid="chain-active">{{ activeText() }}</div>
-                    <h4 class="title is-6">Chained run</h4>
-                    <div class="content" data-testid="chain-run">{{ chainRun() }}</div>
-                  }
-                  @case ('reveal') {
-                    <div class="buttons are-small">
-                      <button
-                        class="button"
-                        [class.is-link]="revealLevel() === 'full'"
-                        type="button"
-                        (click)="setReveal('full')"
-                        data-testid="reveal-full"
-                      >
-                        Full
-                      </button>
-                      <button
-                        class="button"
-                        [class.is-link]="revealLevel() === 'first'"
-                        type="button"
-                        (click)="setReveal('first')"
-                        data-testid="reveal-first"
-                      >
-                        First letters
-                      </button>
-                      <button
-                        class="button"
-                        [class.is-link]="revealLevel() === 'blank'"
-                        type="button"
-                        (click)="setReveal('blank')"
-                        data-testid="reveal-blank"
-                      >
-                        Blank
-                      </button>
-                    </div>
-                    <div class="content" data-testid="reveal-text">{{ revealText() }}</div>
-                  }
-                  @case ('cloze') {
-                    <div class="field is-grouped is-align-items-center mb-3">
+                <!-- Chunk editor -->
+                @for (chunk of chunks(); track $index) {
+                  <div class="box p-3 mb-2" data-testid="memorize-chunk-row">
+                    <div class="field is-grouped is-align-items-end mb-2">
                       <div class="control">
-                        <label class="label is-small mb-0 mr-2" for="cloze-n">Hide every</label>
-                      </div>
-                      <div class="control">
+                        <label class="label is-small mb-1" [attr.for]="'verseref-' + $index"
+                          >Reference (label only)</label
+                        >
                         <input
-                          id="cloze-n"
+                          [id]="'verseref-' + $index"
                           class="input is-small"
-                          type="number"
-                          min="2"
-                          max="10"
-                          [ngModel]="clozeN()"
-                          (ngModelChange)="setClozeN(+$event)"
-                          data-testid="cloze-n"
-                          style="width: 5rem"
+                          type="text"
+                          [maxlength]="VERSE_REF_MAX"
+                          placeholder="e.g. 2:5-8"
+                          [ngModel]="chunk.verseRef"
+                          (ngModelChange)="setVerseRef($index, $event)"
+                          data-testid="chunk-verseref"
                         />
                       </div>
-                      <div class="control"><span class="is-size-7">word(s)</span></div>
+                      <div class="control">
+                        <label class="label is-small mb-1" [attr.for]="'state-' + $index"
+                          >Progress</label
+                        >
+                        <div class="select is-small">
+                          <select
+                            [id]="'state-' + $index"
+                            [ngModel]="chunk.state"
+                            (ngModelChange)="setState($index, $event)"
+                            data-testid="chunk-state"
+                          >
+                            @for (st of stateOrder; track st) {
+                              <option [value]="st">{{ stateLabels[st] }}</option>
+                            }
+                          </select>
+                        </div>
+                      </div>
+                      <div class="control is-expanded"></div>
                       <div class="control">
                         <button
                           class="button is-small"
                           type="button"
-                          (click)="toggleClozeReveal()"
-                          data-testid="cloze-reveal-toggle"
+                          [disabled]="$index === 0"
+                          (click)="moveUp($index)"
+                          [attr.aria-label]="'Move chunk ' + ($index + 1) + ' up'"
+                          data-testid="chunk-reorder"
                         >
-                          {{ clozeRevealed() ? 'Hide answers' : 'Reveal answers' }}
+                          ↑
+                        </button>
+                      </div>
+                      <div class="control">
+                        <button
+                          class="button is-small"
+                          type="button"
+                          [disabled]="$index === 0"
+                          (click)="mergeUp($index)"
+                          [attr.aria-label]="'Merge chunk ' + ($index + 1) + ' into the one above'"
+                          data-testid="chunk-merge"
+                        >
+                          Merge up
+                        </button>
+                      </div>
+                      <div class="control">
+                        <button
+                          class="button is-small is-danger is-outlined"
+                          type="button"
+                          (click)="removeChunk($index)"
+                          [attr.aria-label]="'Remove chunk ' + ($index + 1)"
+                          data-testid="chunk-remove"
+                        >
+                          Remove
                         </button>
                       </div>
                     </div>
-                    <div class="content" data-testid="cloze-tokens">
-                      @for (tok of clozeTokens(); track $index) {
-                        @if (tok.blank) {
-                          <span
-                            class="tag is-light"
-                            [class.is-success]="clozeResult()[$index] === true"
-                            [class.is-danger]="clozeResult()[$index] === false"
-                            data-testid="cloze-slot"
-                          >
-                            @if (clozeRevealed()) {
-                              {{ tok.text }}
-                            } @else {
-                              <input
-                                class="input is-small"
-                                type="text"
-                                [ngModel]="clozeTyped()[$index] ?? ''"
-                                (ngModelChange)="setClozeTyped($index, $event)"
-                                [attr.aria-label]="'Blank ' + ($index + 1)"
-                                data-testid="cloze-input"
-                                style="width: 6rem"
-                              />
-                            }
-                          </span>
-                        } @else {
-                          <span>{{ tok.text }}</span>
-                        }
-                      }
-                    </div>
+                    @if (chunk.verseRef) {
+                      <span class="tag is-light is-small mr-2" aria-label="Reference">{{
+                        chunk.verseRef
+                      }}</span>
+                    }
+                    @if (outOfRange($index)) {
+                      <p class="help is-warning" role="alert" data-testid="chunk-out-of-range">
+                        This chunk's range no longer fits the scroll text — re-seed to fix it.
+                      </p>
+                    }
+                    <p class="is-size-7 has-text-grey" data-testid="chunk-preview">
+                      {{ preview($index) }}
+                    </p>
+                  </div>
+                }
+              </div>
+
+              <!-- Drill surface -->
+              @if (chunks().length > 0) {
+                <div class="box" data-testid="memorize-drill">
+                  <h3 class="title is-5">Drill</h3>
+                  <div class="buttons has-addons are-small" role="group" aria-label="Drill mode">
                     <button
-                      class="button is-small"
                       type="button"
-                      (click)="checkCloze()"
-                      data-testid="cloze-check"
+                      class="button"
+                      [class.is-link]="mode() === 'chain'"
+                      [attr.aria-pressed]="mode() === 'chain'"
+                      (click)="setMode('chain')"
+                      data-testid="drill-mode-chain"
                     >
-                      Check
+                      Chain
                     </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [class.is-link]="mode() === 'reveal'"
+                      [attr.aria-pressed]="mode() === 'reveal'"
+                      (click)="setMode('reveal')"
+                      data-testid="drill-mode-reveal"
+                    >
+                      Reveal
+                    </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [class.is-link]="mode() === 'cloze'"
+                      [attr.aria-pressed]="mode() === 'cloze'"
+                      (click)="setMode('cloze')"
+                      data-testid="drill-mode-cloze"
+                    >
+                      Fill blanks
+                    </button>
+                  </div>
+
+                  <!-- Chunk selector -->
+                  <div class="field">
+                    <label class="label is-small mb-1" for="active-chunk">Chunk</label>
+                    <div class="select is-small">
+                      <select
+                        id="active-chunk"
+                        [ngModel]="activeIndex()"
+                        (ngModelChange)="setActive(+$event)"
+                        data-testid="active-chunk"
+                      >
+                        @for (chunk of chunks(); track $index) {
+                          <option [value]="$index">
+                            {{ $index + 1 }}{{ chunk.verseRef ? ' — ' + chunk.verseRef : '' }}
+                          </option>
+                        }
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Review schedule: next-due label + three-button grade (SM-2). Separate axis
+                     from the learned-state ladder — grading never changes the state value. -->
+                  <div class="field" data-testid="memorize-grade">
+                    <p class="is-size-7 has-text-grey mb-2">
+                      Next review: <span data-testid="chunk-next-due">{{ activeDueLabel() }}</span>
+                    </p>
+                    <div
+                      class="buttons has-addons are-small"
+                      role="group"
+                      aria-label="Grade your recall"
+                    >
+                      <button
+                        type="button"
+                        class="button is-danger is-light"
+                        [disabled]="saving()"
+                        (click)="grade('again')"
+                        data-testid="grade-again"
+                      >
+                        Again
+                      </button>
+                      <button
+                        type="button"
+                        class="button"
+                        [disabled]="saving()"
+                        (click)="grade('hard')"
+                        data-testid="grade-hard"
+                      >
+                        Hard
+                      </button>
+                      <button
+                        type="button"
+                        class="button"
+                        [disabled]="saving()"
+                        (click)="grade('good')"
+                        data-testid="grade-good"
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        class="button is-success is-light"
+                        [disabled]="saving()"
+                        (click)="grade('easy')"
+                        data-testid="grade-easy"
+                      >
+                        Easy
+                      </button>
+                    </div>
+                  </div>
+
+                  @switch (mode()) {
+                    @case ('chain') {
+                      <p class="help mb-2">
+                        Recite this chunk, then recite the whole run chained from the first learned
+                        chunk.
+                      </p>
+                      <div class="content" data-testid="chain-active">{{ activeText() }}</div>
+                      <h4 class="title is-6">Chained run</h4>
+                      <div class="content" data-testid="chain-run">{{ chainRun() }}</div>
+                    }
+                    @case ('reveal') {
+                      <div class="buttons are-small">
+                        <button
+                          class="button"
+                          [class.is-link]="revealLevel() === 'full'"
+                          type="button"
+                          (click)="setReveal('full')"
+                          data-testid="reveal-full"
+                        >
+                          Full
+                        </button>
+                        <button
+                          class="button"
+                          [class.is-link]="revealLevel() === 'first'"
+                          type="button"
+                          (click)="setReveal('first')"
+                          data-testid="reveal-first"
+                        >
+                          First letters
+                        </button>
+                        <button
+                          class="button"
+                          [class.is-link]="revealLevel() === 'blank'"
+                          type="button"
+                          (click)="setReveal('blank')"
+                          data-testid="reveal-blank"
+                        >
+                          Blank
+                        </button>
+                      </div>
+                      <div class="content" data-testid="reveal-text">{{ revealText() }}</div>
+                    }
+                    @case ('cloze') {
+                      <div class="field is-grouped is-align-items-center mb-3">
+                        <div class="control">
+                          <label class="label is-small mb-0 mr-2" for="cloze-n">Hide every</label>
+                        </div>
+                        <div class="control">
+                          <input
+                            id="cloze-n"
+                            class="input is-small"
+                            type="number"
+                            min="2"
+                            max="10"
+                            [ngModel]="clozeN()"
+                            (ngModelChange)="setClozeN(+$event)"
+                            data-testid="cloze-n"
+                            style="width: 5rem"
+                          />
+                        </div>
+                        <div class="control"><span class="is-size-7">word(s)</span></div>
+                        <div class="control">
+                          <button
+                            class="button is-small"
+                            type="button"
+                            (click)="toggleClozeReveal()"
+                            data-testid="cloze-reveal-toggle"
+                          >
+                            {{ clozeRevealed() ? 'Hide answers' : 'Reveal answers' }}
+                          </button>
+                        </div>
+                      </div>
+                      <div class="content" data-testid="cloze-tokens">
+                        @for (tok of clozeTokens(); track $index) {
+                          @if (tok.blank) {
+                            <span
+                              class="tag is-light"
+                              [class.is-success]="clozeResult()[$index] === true"
+                              [class.is-danger]="clozeResult()[$index] === false"
+                              data-testid="cloze-slot"
+                            >
+                              @if (clozeRevealed()) {
+                                {{ tok.text }}
+                              } @else {
+                                <input
+                                  class="input is-small"
+                                  type="text"
+                                  [ngModel]="clozeTyped()[$index] ?? ''"
+                                  (ngModelChange)="setClozeTyped($index, $event)"
+                                  [attr.aria-label]="'Blank ' + ($index + 1)"
+                                  data-testid="cloze-input"
+                                  style="width: 6rem"
+                                />
+                              }
+                            </span>
+                          } @else {
+                            <span>{{ tok.text }}</span>
+                          }
+                        }
+                      </div>
+                      <button
+                        class="button is-small"
+                        type="button"
+                        (click)="checkCloze()"
+                        data-testid="cloze-check"
+                      >
+                        Check
+                      </button>
+                    }
                   }
+                </div>
+              }
+
+              <!-- Save -->
+              <div class="field">
+                <button
+                  class="button is-primary"
+                  type="button"
+                  [class.is-loading]="saving()"
+                  [disabled]="saving()"
+                  (click)="save()"
+                  data-testid="memorize-save"
+                >
+                  Save
+                </button>
+              </div>
+              <div aria-live="polite">
+                @if (saved()) {
+                  <p class="has-text-success" data-testid="memorize-saved">Saved.</p>
+                }
+                @if (saveError()) {
+                  <p class="has-text-danger" data-testid="memorize-save-error">
+                    Could not save. Your work is still here — try again.
+                  </p>
                 }
               </div>
             }
-
-            <!-- Save -->
-            <div class="field">
-              <button
-                class="button is-primary"
-                type="button"
-                [class.is-loading]="saving()"
-                [disabled]="saving()"
-                (click)="save()"
-                data-testid="memorize-save"
-              >
-                Save
-              </button>
-            </div>
-            <div aria-live="polite">
-              @if (saved()) {
-                <p class="has-text-success" data-testid="memorize-saved">Saved.</p>
-              }
-              @if (saveError()) {
-                <p class="has-text-danger" data-testid="memorize-save-error">
-                  Could not save. Your work is still here — try again.
-                </p>
-              }
-            </div>
           }
           @case ('preparing') {
             <div
@@ -607,6 +830,122 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
       </div>
     </section>
   `,
+  styles: [
+    `
+      /* Flashcard flip — GPU-composited transform; themed via Bulma CSS variables. */
+      .flashcard {
+        perspective: 1200px;
+        cursor: pointer;
+        outline: none;
+      }
+      .flashcard:focus-visible {
+        outline: 2px solid var(--bulma-link, #485fc7);
+        outline-offset: 3px;
+        border-radius: 8px;
+      }
+      .flashcard-inner {
+        position: relative;
+        width: 100%;
+        min-height: 12rem;
+        transform-style: preserve-3d;
+        transition: transform 0.45s cubic-bezier(0.4, 0.2, 0.2, 1);
+      }
+      .flashcard.is-flipped .flashcard-inner {
+        transform: rotateY(180deg);
+      }
+      .flashcard-face {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem 1rem;
+        border-radius: 10px;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+        background: var(--bulma-scheme-main-bis, #f5f5f5);
+        color: var(--bulma-text, #363636);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+      }
+      .flashcard-back {
+        transform: rotateY(180deg);
+      }
+      .card-ref {
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+      .card-prompt {
+        margin-top: 0.5rem;
+      }
+      .card-scaffold {
+        margin-top: 1rem;
+        font-family: var(--bulma-family-monospace, monospace);
+        letter-spacing: 0.05em;
+        word-break: break-word;
+      }
+      .card-text {
+        font-size: 1.15rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        text-align: center;
+      }
+      /* Grade row: large, full-width, bottom-anchored targets. */
+      .grade-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+      }
+      .grade-row .grade-btn {
+        width: 100%;
+        min-height: 44px;
+        font-size: 1rem;
+      }
+      @media (max-width: 480px) {
+        .flashcard-inner {
+          min-height: 16rem;
+        }
+        .grade-row {
+          position: sticky;
+          bottom: 0;
+          background: var(--bulma-scheme-main, #fff);
+          padding: 0.5rem 0;
+          z-index: 2;
+        }
+        .grade-row .grade-btn {
+          min-height: 52px;
+        }
+      }
+      /* Respect reduced motion: no 3-D rotation, just a cross-fade between faces. */
+      @media (prefers-reduced-motion: reduce) {
+        .flashcard-inner {
+          transform-style: flat;
+          transition: none;
+        }
+        .flashcard.is-flipped .flashcard-inner {
+          transform: none;
+        }
+        .flashcard-face {
+          backface-visibility: visible;
+          -webkit-backface-visibility: visible;
+          transition: opacity 0.2s linear;
+        }
+        .flashcard-back {
+          transform: none;
+          opacity: 0;
+        }
+        .flashcard:not(.is-flipped) .flashcard-front {
+          opacity: 1;
+        }
+        .flashcard.is-flipped .flashcard-front {
+          opacity: 0;
+        }
+        .flashcard.is-flipped .flashcard-back {
+          opacity: 1;
+        }
+      }
+    `,
+  ],
 })
 export class MemorizeViewComponent implements OnInit {
   private readonly scrollStudy = inject(ScrollStudyService);
@@ -641,6 +980,15 @@ export class MemorizeViewComponent implements OnInit {
   readonly reminderOptIn = signal(false);
   readonly reminderHour = signal<number | null>(null);
   readonly reminderError = signal('');
+
+  // Review-mode flashcard state (transient, view-only, never persisted).
+  readonly viewMode = signal<ViewMode>('edit');
+  readonly deck = signal<number[]>([]); // session deck: chunk indices, built from dueQueue
+  readonly deckPos = signal(0); // current card position within the deck
+  readonly flipped = signal(false); // current card front/back
+  readonly scaffold = signal<'none' | 'first'>('none'); // front first-letters hint
+  readonly legendDismissed = signal(false); // shortcut legend shown until dismissed
+  private swipeStart: { x: number; y: number } | null = null;
 
   protected readonly VERSE_REF_MAX = VERSE_REF_MAX;
   protected readonly VERSES_PER_CHUNK_MIN = VERSES_PER_CHUNK_MIN;
@@ -741,6 +1089,42 @@ export class MemorizeViewComponent implements OnInit {
     return dueLabel(readSchedule(cs[i]), this.today());
   });
 
+  // --- Review-mode (flashcard deck) derived state ---
+
+  /** The chunk index for the current card, or -1 when the deck is complete/empty. */
+  readonly currentCardIndex = computed(() => {
+    const d = this.deck();
+    const pos = this.deckPos();
+    return pos >= 0 && pos < d.length ? d[pos] : -1;
+  });
+
+  /** Deck progress for the aria-live indicator. */
+  readonly deckProgress = computed(() => ({ pos: this.deckPos(), total: this.deck().length }));
+
+  /** True when the deck has been worked through (nothing left to review this session). */
+  readonly deckComplete = computed(() => this.deckPos() >= this.deck().length);
+
+  /** The current card's reference label (empty when unlabeled → the template shows "Chunk K"). */
+  readonly cardRef = computed(() => {
+    const i = this.currentCardIndex();
+    const cs = this.chunks();
+    return i >= 0 && i < cs.length ? (cs[i].verseRef ?? '') : '';
+  });
+
+  /** The current card's 1-based chunk number (for the "Chunk K" fallback label). */
+  readonly cardChunkNumber = computed(() => this.currentCardIndex() + 1);
+
+  /** The current card's full text (student's own scroll), shown on the back. */
+  readonly cardBackText = computed(() => {
+    const i = this.currentCardIndex();
+    const cs = this.chunks();
+    if (i < 0 || i >= cs.length) return '';
+    return chunkText(this.scrollText(), cs[i]);
+  });
+
+  /** First-letters scaffold for the current card's text (front hint). */
+  readonly cardScaffoldText = computed(() => firstLetters(this.cardBackText()));
+
   ngOnInit(): void {
     this.scrollStudyId = this.route.snapshot.paramMap.get('scrollStudyId') ?? '';
     this.load();
@@ -775,6 +1159,7 @@ export class MemorizeViewComponent implements OnInit {
     this.memorizationStudy.get(this.scrollStudyId).subscribe({
       next: (saved) => {
         this.chunks.set(saved.chunks);
+        this.buildDeck();
       },
       error: () => {
         // 404 (none yet) or transient: leave the empty worksheet in place.
@@ -1019,5 +1404,126 @@ export class MemorizeViewComponent implements OnInit {
       ),
     );
     this.save();
+  }
+
+  // --- Review mode (flashcard deck) ---
+
+  /** Switch Review/Edit. Entering Review (re)builds the deck from the current due queue. */
+  setViewMode(mode: ViewMode): void {
+    this.viewMode.set(mode);
+    if (mode === 'review') this.buildDeck();
+  }
+
+  /** Build the session deck from the due queue (soonest-due first); reset to the first card. */
+  private buildDeck(): void {
+    this.deck.set(this.dueQueue().map((row) => row.index));
+    this.deckPos.set(0);
+    this.flipped.set(false);
+    this.scaffold.set('none');
+    this.syncActiveToCard();
+  }
+
+  /** Keep `activeIndex` pointed at the current card so grade()/activeDueLabel operate on it. */
+  private syncActiveToCard(): void {
+    const i = this.currentCardIndex();
+    if (i >= 0) this.activeIndex.set(i);
+  }
+
+  /** Flip the current card front↔back. */
+  flip(): void {
+    if (this.deckComplete()) return;
+    this.flipped.update((f) => !f);
+  }
+
+  /**
+   * Grade the current card via the existing SM-2 `grade()` path (schedule only, never state),
+   * then advance the deck. An "again" re-queues the card to the end so it recurs this session.
+   */
+  gradeCard(g: Grade): void {
+    if (this.deckComplete() || this.saving()) return;
+    const cardIndex = this.currentCardIndex();
+    if (cardIndex < 0) return;
+
+    this.syncActiveToCard();
+    this.grade(g); // existing path: applyGrade + save (optimistic)
+
+    if (g === 'again') {
+      // still due after a miss → put it back at the end of the session deck
+      this.deck.update((d) => [...d, cardIndex]);
+    }
+    this.advanceDeck();
+  }
+
+  /** Move to the next card: advance position, reset the flip/scaffold, re-aim activeIndex. */
+  private advanceDeck(): void {
+    this.deckPos.update((p) => p + 1);
+    this.flipped.set(false);
+    this.scaffold.set('none');
+    this.syncActiveToCard();
+  }
+
+  /** Toggle the first-letters scaffold on the card front. */
+  toggleScaffold(): void {
+    this.scaffold.update((s) => (s === 'first' ? 'none' : 'first'));
+  }
+
+  /** Dismiss the shortcut legend for the session. */
+  dismissLegend(): void {
+    this.legendDismissed.set(true);
+  }
+
+  /** Keyboard on the card: Space/Enter/→ flips; once flipped, 1-4 grade. */
+  onCardKeydown(e: KeyboardEvent): void {
+    if (this.deckComplete()) return;
+    if (!this.flipped()) {
+      if (isFlipKey(e.key)) {
+        e.preventDefault();
+        this.flip();
+      }
+      return;
+    }
+    const g = keyToGrade(e.key);
+    if (g) {
+      e.preventDefault();
+      this.gradeCard(g);
+    } else if (isFlipKey(e.key)) {
+      // allow flipping back
+      e.preventDefault();
+      this.flip();
+    }
+  }
+
+  /** Record the pointer start for swipe classification. */
+  onCardPointerDown(e: PointerEvent): void {
+    this.swipeStart = { x: e.clientX, y: e.clientY };
+  }
+
+  /** On pointer release, classify the swipe: up = flip; once flipped, left = Again, right = Easy. */
+  onCardPointerUp(e: PointerEvent): void {
+    const start = this.swipeStart;
+    this.swipeStart = null;
+    if (!start || this.deckComplete()) return;
+    const dir = classifySwipe(e.clientX - start.x, e.clientY - start.y, DEFAULT_SWIPE_OPTIONS);
+    if (dir === 'none') return; // a tap (not a swipe) is handled by (click)=flip()
+    if (dir === 'up') {
+      this.flip();
+      return;
+    }
+    if (this.flipped()) {
+      const g = swipeToGrade(dir);
+      if (g) this.gradeCard(g);
+    }
+  }
+
+  /** Global keydown: route card shortcuts in Review mode, ignoring events from form fields. */
+  @HostListener('document:keydown', ['$event'])
+  onDocumentKeydown(e: KeyboardEvent): void {
+    if (this.viewMode() !== 'review' || this.state() !== 'ready') return;
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // If focus is already on the card it handles its own keydown; this covers the rest of the page.
+    if (target?.getAttribute('data-testid') === 'review-card') return;
+    this.onCardKeydown(e);
   }
 }

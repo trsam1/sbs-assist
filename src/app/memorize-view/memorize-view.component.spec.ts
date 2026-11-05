@@ -569,4 +569,213 @@ describe('MemorizeViewComponent', () => {
       expect(component.reminderOptIn()).toBe(true);
     });
   });
+
+  // --- Review mode: mobile-first flashcard deck ---
+
+  describe('review mode (flashcard deck)', () => {
+    const TODAY = new Date(2026, 10, 2); // 2026-11-02 local
+    const isoDay = (offset: number): string => {
+      const d = new Date(2026, 10, 2 + offset);
+      const m = `${d.getMonth() + 1}`.padStart(2, '0');
+      const day = `${d.getDate()}`.padStart(2, '0');
+      return `${d.getFullYear()}-${m}-${day}`;
+    };
+
+    function loadWithChunks(chunks: MemorizationChunk[]): void {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(of(makeStudy({ chunks })));
+      fixture.detectChanges();
+      component.setToday(TODAY);
+    }
+
+    it('renders the Review/Edit toggle and defaults to Edit', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      expect(query('[data-testid="memorize-mode-toggle"]')).toBeTruthy();
+      expect(component.viewMode()).toBe('edit');
+      // Edit mode shows the worksheet
+      expect(query('[data-testid="seed-controls"]')).toBeTruthy();
+      expect(query('[data-testid="memorize-review"]')).toBeFalsy();
+    });
+
+    it('switching to Review renders the flashcard and hides the worksheet', () => {
+      loadWithChunks([chunk()]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(component.viewMode()).toBe('review');
+      expect(query('[data-testid="memorize-review"]')).toBeTruthy();
+      expect(query('[data-testid="review-card"]')).toBeTruthy();
+      // worksheet is gone in review mode
+      expect(query('[data-testid="seed-controls"]')).toBeFalsy();
+    });
+
+    it('builds the deck from the due queue (soonest-first) with progress', () => {
+      loadWithChunks([
+        chunk({ verseRef: '1', dueDate: isoDay(5) }), // not due
+        chunk({ start: 21, end: 48, verseRef: '2', dueDate: isoDay(-1) }), // overdue
+        chunk({ start: 50, end: 70, verseRef: '3', dueDate: isoDay(0) }), // due today
+      ]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      // deck holds the two due chunks, overdue first (indices 1 then 2)
+      expect(component.deck()).toEqual([1, 2]);
+      expect(component.deckProgress()).toEqual({ pos: 0, total: 2 });
+      expect(query('[data-testid="review-progress"]')?.textContent).toContain('Card 1 of 2');
+      expect(component.cardRef()).toBe('2');
+    });
+
+    it('shows the no-chunks empty state pointing at Edit', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(query('[data-testid="review-no-chunks"]')).toBeTruthy();
+    });
+
+    it('shows the all-caught-up state when nothing is due', () => {
+      loadWithChunks([chunk({ dueDate: isoDay(10) })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(component.deck()).toEqual([]);
+      expect(component.deckComplete()).toBe(true);
+      expect(query('[data-testid="review-complete"]')).toBeTruthy();
+    });
+
+    it('flips the card to reveal the chunk text, and the grade row appears only when flipped', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(component.flipped()).toBe(false);
+      expect(query('[data-testid="review-grade-row"]')).toBeFalsy();
+
+      component.flip();
+      fixture.detectChanges();
+      expect(component.flipped()).toBe(true);
+      expect(query('[data-testid="review-card-back"]')?.textContent).toContain('In the beginning');
+      expect(query('[data-testid="review-grade-row"]')).toBeTruthy();
+    });
+
+    it('toggles the first-letters scaffold on the front', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      component.setViewMode('review');
+      component.toggleScaffold();
+      fixture.detectChanges();
+      expect(component.scaffold()).toBe('first');
+      expect(query('[data-testid="review-scaffold"]')?.textContent).toContain('I_'); // "In" → "I_"
+    });
+
+    it('grading a card runs SM-2, persists, and auto-advances to the next card', () => {
+      loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(component.currentCardIndex()).toBe(0);
+
+      component.flip();
+      component.gradeCard('good');
+      // graded the first chunk via the SM-2 path
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(component.chunks()[0].intervalDays).toBe(1);
+      expect(component.chunks()[0].repetitions).toBe(1);
+      // advanced to the next card, flipped reset
+      expect(component.deckPos()).toBe(1);
+      expect(component.currentCardIndex()).toBe(1);
+      expect(component.flipped()).toBe(false);
+    });
+
+    it('an Again grade re-queues the card to the end of the session deck', () => {
+      loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(component.deck()).toEqual([0, 1]);
+
+      component.flip();
+      component.gradeCard('again');
+      // card 0 re-queued to the end; now at position 1
+      expect(component.deck()).toEqual([0, 1, 0]);
+      expect(component.deckPos()).toBe(1);
+    });
+
+    it('grading does not change the learned-state ladder (axes stay orthogonal)', () => {
+      loadWithChunks([chunk({ verseRef: '1', state: 'chained' })]);
+      component.setViewMode('review');
+      component.flip();
+      component.gradeCard('easy');
+      expect(component.chunks()[0].state).toBe('chained');
+    });
+
+    it('completes the deck after the last card is graded', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      component.flip();
+      component.gradeCard('good');
+      fixture.detectChanges();
+      expect(component.deckComplete()).toBe(true);
+      expect(query('[data-testid="review-complete"]')).toBeTruthy();
+    });
+
+    it('keyboard: Space flips, then 1-4 grade', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+
+      component.onCardKeydown(new KeyboardEvent('keydown', { key: ' ' }));
+      expect(component.flipped()).toBe(true);
+
+      component.onCardKeydown(new KeyboardEvent('keydown', { key: '3' })); // good
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(component.chunks()[0].repetitions).toBe(1);
+    });
+
+    it('document keydown is ignored when focus is in a form field', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      const input = document.createElement('input');
+      const e = new KeyboardEvent('keydown', { key: ' ' });
+      Object.defineProperty(e, 'target', { value: input });
+      component.onDocumentKeydown(e);
+      expect(component.flipped()).toBe(false); // not flipped — ignored
+    });
+
+    it('swipe up flips; swipe left grades Again once flipped', () => {
+      loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+
+      // swipe up → flip
+      component.onCardPointerDown({ clientX: 100, clientY: 300 } as PointerEvent);
+      component.onCardPointerUp({ clientX: 100, clientY: 210 } as PointerEvent);
+      expect(component.flipped()).toBe(true);
+
+      // swipe left → grade again (re-queues) and advance
+      component.onCardPointerDown({ clientX: 200, clientY: 100 } as PointerEvent);
+      component.onCardPointerUp({ clientX: 110, clientY: 100 } as PointerEvent);
+      expect(saveSpy).toHaveBeenCalled();
+      expect(component.deckPos()).toBe(1);
+    });
+
+    it('dismisses the shortcut legend', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(query('[data-testid="review-legend"]')).toBeTruthy();
+      component.dismissLegend();
+      fixture.detectChanges();
+      expect(query('[data-testid="review-legend"]')).toBeFalsy();
+    });
+
+    it('Edit mode preserves the existing worksheet surface (non-regression)', () => {
+      loadWithChunks([chunk({ verseRef: '1' })]);
+      // default is edit; worksheet pieces all present
+      expect(query('[data-testid="seed-controls"]')).toBeTruthy();
+      expect(query('[data-testid="memorize-chunk-row"]')).toBeTruthy();
+      expect(query('[data-testid="memorize-drill"]')).toBeTruthy();
+      expect(query('[data-testid="reminder-pref"]')).toBeTruthy();
+      expect(query('[data-testid="memorize-save"]')).toBeTruthy();
+    });
+  });
 });
