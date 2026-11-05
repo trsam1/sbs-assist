@@ -99,6 +99,9 @@ export class WordStudyToolStack extends cdk.Stack {
   /** Lambda: Figures Assist (Bedrock; Step 10 candidates + tag-check) */
   public readonly figuresAssistFn: nodejs.NodejsFunction;
 
+  /** Lambda: Recitation auto-grader (Memorize Test mode — Transcribe + Bedrock) */
+  public readonly recitationGradeFn: nodejs.NodejsFunction;
+
   /** DynamoDB: Interrogation Studies (Step 12 — Interrogate the Text) */
   public readonly interrogationStudiesTable: dynamodb.Table;
 
@@ -316,7 +319,12 @@ export class WordStudyToolStack extends cdk.Stack {
           maxAge: 3000,
         },
       ],
-      lifecycleRules: [{ expiration: cdk.Duration.days(7) }],
+      lifecycleRules: [
+        { expiration: cdk.Duration.days(7) },
+        // Memorize Test-mode recitation clips are transient: the grade Lambda deletes each clip as
+        // soon as scoring resolves; this prefix-scoped 1-day rule is the backstop if that fails.
+        { prefix: 'recitations/', expiration: cdk.Duration.days(1) },
+      ],
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
@@ -645,6 +653,55 @@ export class WordStudyToolStack extends cdk.Stack {
       }),
     );
 
+    // --- Recitation Grade Lambda (Memorize Test mode; Transcribe batch + Bedrock scoring) ---
+    // The grading model is per-stage via config.recitationGradeModelId (default the Haiku tier,
+    // same as the Step 5 AI summary — the scoring prompt is small). The Bedrock grant is derived
+    // from that id so model and grant never drift (same pattern as FiguresAssist).
+    const recitationModelId = config.recitationGradeModelId;
+    const recitationFoundationModelId = recitationModelId.replace(/^(us|eu|apac|global)\./, '');
+    this.recitationGradeFn = new nodejs.NodejsFunction(this, 'RecitationGradeFn', {
+      ...commonLambdaProps,
+      functionName: n('RecitationGrade'),
+      logGroup: fnLogs('RecitationGradeFn'),
+      entry: path.join(__dirname, '..', 'lambda', 'recitation-grade', 'index.ts'),
+      handler: 'handler',
+      // Transcribe batch + a Bedrock call per recitation: give it more headroom than a CRUD fn.
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        RECITATION_GRADE_MODEL_ID: recitationModelId,
+        RECITATION_AUDIO_BUCKET: this.uploadsBucket.bucketName,
+        ALLOWED_ORIGINS: allowedOriginsEnv,
+      },
+    });
+
+    // Bedrock scoring grant, scoped to the per-stage model + inference profile.
+    this.recitationGradeFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['bedrock:InvokeModel'],
+        resources: [
+          `arn:aws:bedrock:*::foundation-model/${recitationFoundationModelId}`,
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/${recitationModelId}`,
+        ],
+      }),
+    );
+    // Batch transcription of the uploaded clip.
+    this.recitationGradeFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['transcribe:StartTranscriptionJob', 'transcribe:GetTranscriptionJob'],
+        resources: ['*'], // Transcribe job ARNs are created per-call; the job name is caller-scoped.
+      }),
+    );
+    // Read/write/delete ONLY the transient recitations/ prefix on the uploads bucket.
+    this.recitationGradeFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
+        resources: [this.uploadsBucket.arnForObjects('recitations/*')],
+      }),
+    );
+
     // --- Interrogation Study Lambda (Step 12; CRUD only, no Bedrock) ---
     this.interrogationStudyFn = new nodejs.NodejsFunction(this, 'InterrogationStudyFn', {
       ...commonLambdaProps,
@@ -893,6 +950,12 @@ export class WordStudyToolStack extends cdk.Stack {
 
     // POST /ai/figures-assist
     figuresAssistResource.addMethod('POST', figuresAssistIntegration, authMethodOptions);
+
+    // --- Recitation Grade route (Memorize Test mode; Transcribe + Bedrock) ---
+    const recitationGradeIntegration = new apigateway.LambdaIntegration(this.recitationGradeFn);
+    const recitationGradeResource = aiResource.addResource('recitation-grade');
+    // POST /ai/recitation-grade  (action: 'presign' | 'grade')
+    recitationGradeResource.addMethod('POST', recitationGradeIntegration, authMethodOptions);
 
     // --- Interrogation Study routes (Step 12; CRUD) ---
     const interrogationStudyIntegration = new apigateway.LambdaIntegration(

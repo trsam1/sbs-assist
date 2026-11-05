@@ -322,3 +322,16 @@ export interface MemorizationReminderPref {
   reminderOptIn: boolean; // default false
   reminderHour?: number; // 0..23 local hour; absent = stage default send time
 }
+
+/** The SM-2 grade a recitation resolves to (matches srs.ts `Grade`). */
+export type RecitationGradeValue = 'again' | 'hard' | 'good' | 'easy';
+
+/** Result of auto-grading a spoken recitation (Memorize Test mode); never persisted. */
+export interface RecitationGradeResult {
+  grade: RecitationGradeValue;
+  reason: string;
+  accuracyPct: number;
+  missedWords: string[];
+  transcript: string;
+  degraded?: boolean;
+}

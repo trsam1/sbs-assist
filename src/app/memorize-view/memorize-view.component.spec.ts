@@ -5,6 +5,7 @@ import { of, throwError } from 'rxjs';
 import { MemorizeViewComponent } from './memorize-view.component';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
+import { RecitationGradeService } from '../recitation-grade.service';
 import { OutlineStudyService } from '../outline-study.service';
 import { MemorizationChunk, MemorizationStudy, OutlineStudy, OutlineParagraph } from '../models';
 
@@ -64,6 +65,7 @@ describe('MemorizeViewComponent', () => {
   let getOutlineSpy: ReturnType<typeof vi.fn>;
   let getPrefSpy: ReturnType<typeof vi.fn>;
   let putPrefSpy: ReturnType<typeof vi.fn>;
+  let gradeRecitationSpy: ReturnType<typeof vi.fn>;
 
   function configure(): void {
     getScrollSpy = vi.fn();
@@ -90,6 +92,14 @@ describe('MemorizeViewComponent', () => {
     const outlineService: Partial<OutlineStudyService> = {
       get: getOutlineSpy as unknown as OutlineStudyService['get'],
     };
+    gradeRecitationSpy = vi
+      .fn()
+      .mockReturnValue(
+        of({ grade: 'good', reason: 'ok', accuracyPct: 90, missedWords: [], transcript: 't' }),
+      );
+    const recitationService: Partial<RecitationGradeService> = {
+      gradeRecitation: gradeRecitationSpy as unknown as RecitationGradeService['gradeRecitation'],
+    };
     TestBed.configureTestingModule({
       imports: [MemorizeViewComponent],
       providers: [
@@ -97,6 +107,7 @@ describe('MemorizeViewComponent', () => {
         { provide: ScrollStudyService, useValue: scrollService },
         { provide: MemorizationStudyService, useValue: studyService },
         { provide: OutlineStudyService, useValue: outlineService },
+        { provide: RecitationGradeService, useValue: recitationService },
         {
           provide: ActivatedRoute,
           useValue: { snapshot: { paramMap: new Map([['scrollStudyId', 's1']]) } },
@@ -776,6 +787,99 @@ describe('MemorizeViewComponent', () => {
       expect(query('[data-testid="memorize-drill"]')).toBeTruthy();
       expect(query('[data-testid="reminder-pref"]')).toBeTruthy();
       expect(query('[data-testid="memorize-save"]')).toBeTruthy();
+    });
+  });
+
+  // --- V3: spoken-recitation auto-grade (Test mode) ---
+
+  describe('test mode (auto-grade)', () => {
+    const TODAY = new Date(2026, 10, 2);
+    /** Load a study with one due chunk and enter Test mode. */
+    function enterTestWithDueChunk(): void {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })), // never reviewed → due
+      );
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setViewMode('test');
+      fixture.detectChanges();
+    }
+
+    it('renders the Test toggle and enters Test mode with a due card', () => {
+      enterTestWithDueChunk();
+      expect(query('[data-testid="mode-test"]')).toBeTruthy();
+      expect(query('[data-testid="memorize-test"]')).toBeTruthy();
+      expect(component.viewMode()).toBe('test');
+      expect(component.testPhase()).toBe('idle');
+    });
+
+    it('defaults to desk mode (nothing auto-commits)', () => {
+      enterTestWithDueChunk();
+      expect(component.testDriveMode()).toBe('desk');
+    });
+
+    it('desk mode: a graded result proposes a grade; confirming commits via the SM-2 path once', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })),
+      );
+      // Stub recording support BEFORE the first render so the graded branch (not the no-mic
+      // fallback) renders; jsdom has no MediaRecorder.
+      vi.spyOn(component, 'recordingSupported').mockReturnValue(true);
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setViewMode('test');
+      // Simulate a completed grade (bypass the real MediaRecorder, which jsdom lacks).
+      component.gradeResult.set({
+        grade: 'good',
+        reason: 'minor slip',
+        accuracyPct: 90,
+        missedWords: [],
+        transcript: 'said it',
+      });
+      component.testPhase.set('graded');
+      fixture.detectChanges();
+      expect(query('[data-testid="test-result"]')).toBeTruthy();
+      expect(query('[data-testid="test-grade-row"]')).toBeTruthy();
+
+      component.commitTestGrade('good');
+      expect(saveSpy).toHaveBeenCalledTimes(1); // existing SM-2 save path
+      expect(component.testPhase()).toBe('idle'); // advanced + reset for the next card
+    });
+
+    it('drive mode: a graded result auto-commits without a confirm step', () => {
+      enterTestWithDueChunk();
+      component.setTestDriveMode('drive');
+      // Drive-mode auto-commit happens inside the grade subscription; simulate it directly.
+      component.commitTestGrade('good');
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('an Again grade re-queues the card within the session', () => {
+      enterTestWithDueChunk();
+      const before = component.deck().length;
+      component.commitTestGrade('again');
+      expect(component.deck().length).toBe(before + 1); // re-queued
+    });
+
+    it('falls back to manual grade buttons when recording is unavailable', () => {
+      enterTestWithDueChunk();
+      vi.spyOn(component, 'recordingSupported').mockReturnValue(false);
+      fixture.detectChanges();
+      expect(query('[data-testid="test-no-mic"]')).toBeTruthy();
+      expect(query('[data-testid="test-manual-grade-row"]')).toBeTruthy();
+    });
+
+    it('shows a no-chunks state in Test mode when nothing is seeded', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges(); // 404 → no study → no chunks
+      component.setViewMode('test');
+      fixture.detectChanges();
+      expect(query('[data-testid="test-no-chunks"]')).toBeTruthy();
     });
   });
 });

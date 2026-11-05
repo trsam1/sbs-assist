@@ -61,6 +61,15 @@ export interface StageConfig {
    * Per-stage so dev and prod can diverge. A behavior setting, editable with an explicit change.
    */
   reminderScheduleExpression: string;
+  /**
+   * Bedrock model id the Memorize the Scroll Test-mode recitation auto-grader (RecitationGradeFn)
+   * invokes to score a spoken recitation against the student's own chunk text. The scoring prompt
+   * is small, so the Haiku tier (same as the Step 5 AI summary) is the sensible default. Per-stage
+   * like figuresAssistModelId; the CDK wires it into both the Lambda's RECITATION_GRADE_MODEL_ID
+   * env and its bedrock:InvokeModel IAM ARNs so model and grant never drift. A behavior setting,
+   * not a frozen physical name, so it may be changed later with an explicit edit.
+   */
+  recitationGradeModelId: string;
 }
 
 export const HOSTED_ZONE = { zoneName: 'teksnextdoor.com' } as const;
@@ -85,6 +94,7 @@ export const STAGES: Record<Stage, StageConfig> = {
     // MAINTAINER: replace with a real address verified in SES before the first send.
     reminderSender: 'REPLACE_ME@teksnextdoor.com',
     reminderScheduleExpression: 'cron(0 13 * * ? *)', // 13:00 UTC daily
+    recitationGradeModelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   },
   dev: {
     stage: 'dev',
@@ -105,5 +115,6 @@ export const STAGES: Record<Stage, StageConfig> = {
     // MAINTAINER: replace with a real address verified in SES before the first send.
     reminderSender: 'REPLACE_ME@teksnextdoor.com',
     reminderScheduleExpression: 'cron(0 13 * * ? *)', // 13:00 UTC daily
+    recitationGradeModelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
   },
 };
