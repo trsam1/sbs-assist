@@ -255,7 +255,7 @@ describe('WordStudyToolStack (prod)', () => {
 
   it('keeps 90-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(15);
+    expect(groups).toHaveLength(16);
     for (const g of groups) expect(g.Properties?.['RetentionInDays']).toBe(90);
   });
 
@@ -483,6 +483,65 @@ describe('WordStudyToolStack (prod)', () => {
       ([, r]) => r.Properties?.['PathPart'] === 'figures-assist',
     );
     expect(resource, 'figures-assist resource').toBeDefined();
+    const resourceId = resource![0];
+    const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
+      (m) =>
+        (m.Properties?.['ResourceId'] as { Ref?: string } | undefined)?.Ref === resourceId &&
+        m.Properties?.['AuthorizationType'] === 'COGNITO_USER_POOLS',
+    );
+    expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['POST']);
+  });
+
+  it('runs RecitationGrade on Node 22 with the per-stage model env and the uploads bucket', () => {
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'RecitationGrade',
+      Runtime: 'nodejs22.x',
+      LoggingConfig: { LogGroup: Match.anyValue() },
+      Environment: {
+        Variables: Match.objectLike({
+          RECITATION_GRADE_MODEL_ID: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+        }),
+      },
+    });
+  });
+
+  it('scopes the RecitationGrade grants to Transcribe, the Haiku model, and the recitations/ prefix', () => {
+    const policies = Object.values(resourcesOfType(t, 'AWS::IAM::Policy'));
+    // The recitation-grade role is the one that can both transcribe and invoke Bedrock.
+    const recite = policies.filter((p) => {
+      const doc = JSON.stringify(p.Properties?.['PolicyDocument']);
+      return (
+        doc.includes('transcribe:StartTranscriptionJob') && doc.includes('bedrock:InvokeModel')
+      );
+    });
+    expect(recite.length, 'a policy with Transcribe + Bedrock').toBe(1);
+    const doc = JSON.stringify(recite[0].Properties?.['PolicyDocument']);
+    expect(doc).toContain('transcribe:GetTranscriptionJob');
+    expect(doc).toContain('foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0');
+    expect(doc).toContain('inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0');
+    expect(doc).toContain('s3:DeleteObject');
+    // S3 grant scoped to the transient recitations/ prefix, not the whole bucket.
+    expect(doc).toContain('recitations/*');
+  });
+
+  it('expires recitation clips after 1 day via a prefix-scoped lifecycle rule', () => {
+    const buckets = Object.entries(resourcesOfType(t, 'AWS::S3::Bucket')).filter(([id]) =>
+      id.startsWith('UploadsBucket'),
+    );
+    expect(buckets).toHaveLength(1);
+    const lifecycle = buckets[0][1].Properties?.['LifecycleConfiguration'] as {
+      Rules: Array<Record<string, unknown>>;
+    };
+    expect(
+      lifecycle.Rules.some((r) => r['Prefix'] === 'recitations/' && r['ExpirationInDays'] === 1),
+    ).toBe(true);
+  });
+
+  it('authorizes POST under /ai/recitation-grade', () => {
+    const resource = Object.entries(resourcesOfType(t, 'AWS::ApiGateway::Resource')).find(
+      ([, r]) => r.Properties?.['PathPart'] === 'recitation-grade',
+    );
+    expect(resource, 'recitation-grade resource').toBeDefined();
     const resourceId = resource![0];
     const methods = Object.values(resourcesOfType(t, 'AWS::ApiGateway::Method')).filter(
       (m) =>
@@ -806,7 +865,7 @@ describe('WordStudyToolStack (dev)', () => {
 
   it('keeps 7-day log retention', () => {
     const groups = Object.values(resourcesOfType(t, 'AWS::Logs::LogGroup'));
-    expect(groups).toHaveLength(15);
+    expect(groups).toHaveLength(16);
     for (const g of groups) {
       expect(g.Properties?.['RetentionInDays']).toBe(7);
       expect(g.DeletionPolicy).toBe('Delete');

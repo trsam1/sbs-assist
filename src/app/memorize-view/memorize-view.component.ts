@@ -11,12 +11,15 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
+import { RecitationGradeService } from '../recitation-grade.service';
 import { OutlineStudyService } from '../outline-study.service';
 import {
   MemorizationChunk,
   MemorizationChunkState,
   MemorizationReminderPref,
   OutlineParagraph,
+  RecitationGradeResult,
+  RecitationGradeValue,
 } from '../models';
 import {
   seedByVerses,
@@ -43,7 +46,7 @@ import {
 } from './gestures';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
-type ViewMode = 'review' | 'edit';
+type ViewMode = 'review' | 'test' | 'edit';
 type DrillMode = 'chain' | 'reveal' | 'cloze';
 type RevealLevel = 'full' | 'first' | 'blank';
 
@@ -97,6 +100,16 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                 data-testid="mode-review"
               >
                 Review
+              </button>
+              <button
+                type="button"
+                class="button"
+                [class.is-link]="viewMode() === 'test'"
+                [attr.aria-pressed]="viewMode() === 'test'"
+                (click)="setViewMode('test')"
+                data-testid="mode-test"
+              >
+                Test
               </button>
               <button
                 type="button"
@@ -285,6 +298,261 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                       Could not save that grade — it's kept; try again.
                     </p>
                   }
+                }
+              </div>
+            } @else if (viewMode() === 'test') {
+              <!-- ===== Test mode: recite aloud → auto-grade (Transcribe + Bedrock) ===== -->
+              <div class="review-deck" data-testid="memorize-test">
+                @if (chunks().length === 0) {
+                  <div class="box has-text-centered" data-testid="test-no-chunks">
+                    <p class="mb-3">
+                      No chunks to test yet. Switch to <strong>Edit</strong> to seed this book into
+                      chunks, then come back to test your recall.
+                    </p>
+                    <button
+                      type="button"
+                      class="button is-link"
+                      (click)="setViewMode('edit')"
+                      data-testid="test-go-edit"
+                    >
+                      Go to Edit
+                    </button>
+                  </div>
+                } @else if (deckComplete()) {
+                  <div class="box has-text-centered" data-testid="test-complete">
+                    <p class="is-size-5 mb-2">All caught up ✓</p>
+                    <p class="has-text-grey">Nothing due to test right now — well memorized.</p>
+                  </div>
+                } @else {
+                  <!-- Deck progress + drive/desk toggle -->
+                  <div class="level is-mobile mb-2">
+                    <div class="level-left">
+                      <p class="is-size-6" aria-live="polite" data-testid="test-progress">
+                        Card {{ deckProgress().pos + 1 }} of {{ deckProgress().total }} due
+                        @if (cardRef()) {
+                          <span class="tag is-light ml-2">{{ cardRef() }}</span>
+                        }
+                      </p>
+                    </div>
+                    <div class="level-right">
+                      <div
+                        class="buttons has-addons are-small mb-0"
+                        role="group"
+                        aria-label="Grading mode"
+                        data-testid="test-grade-mode"
+                      >
+                        <button
+                          type="button"
+                          class="button"
+                          [class.is-link]="testDriveMode() === 'desk'"
+                          [attr.aria-pressed]="testDriveMode() === 'desk'"
+                          (click)="setTestDriveMode('desk')"
+                          data-testid="test-mode-desk"
+                        >
+                          Desk
+                        </button>
+                        <button
+                          type="button"
+                          class="button"
+                          [class.is-link]="testDriveMode() === 'drive'"
+                          [attr.aria-pressed]="testDriveMode() === 'drive'"
+                          (click)="setTestDriveMode('drive')"
+                          data-testid="test-mode-drive"
+                        >
+                          Drive (hands-free)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="box has-text-centered" data-testid="test-card">
+                    <p class="card-ref mb-3">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
+
+                    @if (!recordingSupported()) {
+                      <!-- No MediaRecorder / permission: fall back to manual grading. -->
+                      <div class="notification is-warning is-light" data-testid="test-no-mic">
+                        Voice grading isn't available in this browser. Recite from memory, reveal
+                        the text, and grade yourself.
+                      </div>
+                      <p class="card-text mt-3" data-testid="test-manual-text">
+                        {{ cardBackText() }}
+                      </p>
+                    } @else if (testPhase() === 'idle') {
+                      <p class="has-text-grey mb-4">
+                        Recite this passage from memory, then stop — I'll listen and grade you.
+                      </p>
+                      <button
+                        type="button"
+                        class="button is-link is-large"
+                        (click)="startRecording()"
+                        data-testid="test-record"
+                        style="min-height: 56px"
+                      >
+                        🎙 Start reciting
+                      </button>
+                    } @else if (testPhase() === 'recording') {
+                      <p class="has-text-danger mb-4" aria-live="polite">● Listening…</p>
+                      <button
+                        type="button"
+                        class="button is-danger is-large"
+                        (click)="stopRecording()"
+                        data-testid="test-stop"
+                        style="min-height: 56px"
+                      >
+                        ■ Done reciting
+                      </button>
+                    } @else if (testPhase() === 'grading') {
+                      <p class="has-text-grey" aria-live="polite" data-testid="test-grading">
+                        Grading your recitation…
+                      </p>
+                    } @else if (testPhase() === 'graded') {
+                      <!-- The result: proposal (desk) or committed (drive). -->
+                      <p class="card-text mb-3" data-testid="test-revealed-text">
+                        {{ cardBackText() }}
+                      </p>
+                      <div aria-live="polite" data-testid="test-result">
+                        <p class="is-size-5 mb-1">
+                          <span
+                            class="tag is-medium"
+                            [class.is-danger]="gradeResult()?.grade === 'again'"
+                            [class.is-warning]="gradeResult()?.grade === 'hard'"
+                            [class.is-success]="
+                              gradeResult()?.grade === 'good' || gradeResult()?.grade === 'easy'
+                            "
+                            data-testid="test-grade-value"
+                          >
+                            {{ gradeLabel(gradeResult()?.grade) }}
+                          </span>
+                          <span class="is-size-6 has-text-grey ml-2" data-testid="test-accuracy">
+                            {{ gradeResult()?.accuracyPct }}% match
+                          </span>
+                        </p>
+                        <p class="is-size-7 has-text-grey" data-testid="test-reason">
+                          {{ gradeResult()?.reason }}
+                        </p>
+                        @if (gradeResult()?.degraded) {
+                          <p class="is-size-7 has-text-warning" data-testid="test-degraded">
+                            (Auto-grade was unavailable — scored by word match. Adjust below.)
+                          </p>
+                        }
+                      </div>
+
+                      @if (testDriveMode() === 'desk') {
+                        <!-- Desk: propose; the student confirms or overrides before it commits. -->
+                        <p class="is-size-7 has-text-grey mt-3 mb-2">
+                          Confirm the grade, or override:
+                        </p>
+                        <div
+                          class="grade-row"
+                          role="group"
+                          aria-label="Confirm or override the grade"
+                          data-testid="test-grade-row"
+                        >
+                          <button
+                            type="button"
+                            class="button is-danger is-light grade-btn"
+                            [disabled]="saving()"
+                            (click)="commitTestGrade('again')"
+                            data-testid="test-grade-again"
+                          >
+                            Again
+                          </button>
+                          <button
+                            type="button"
+                            class="button grade-btn"
+                            [disabled]="saving()"
+                            (click)="commitTestGrade('hard')"
+                            data-testid="test-grade-hard"
+                          >
+                            Hard
+                          </button>
+                          <button
+                            type="button"
+                            class="button grade-btn"
+                            [disabled]="saving()"
+                            (click)="commitTestGrade('good')"
+                            data-testid="test-grade-good"
+                          >
+                            Good
+                          </button>
+                          <button
+                            type="button"
+                            class="button is-success is-light grade-btn"
+                            [disabled]="saving()"
+                            (click)="commitTestGrade('easy')"
+                            data-testid="test-grade-easy"
+                          >
+                            Easy
+                          </button>
+                        </div>
+                      } @else {
+                        <p
+                          class="is-size-7 has-text-grey mt-3"
+                          aria-live="polite"
+                          data-testid="test-drive-advancing"
+                        >
+                          Recorded — next verse coming up…
+                        </p>
+                      }
+                    }
+
+                    @if (testError()) {
+                      <p class="has-text-danger mt-3" data-testid="test-error">
+                        Something went wrong grading that — recite again, or grade yourself below.
+                      </p>
+                    }
+
+                    <!-- Manual grade buttons, always available as the escape hatch. -->
+                    @if (
+                      !recordingSupported() ||
+                      testPhase() === 'idle' ||
+                      testError() ||
+                      (testPhase() === 'graded' && testDriveMode() === 'desk')
+                    ) {
+                      <!-- (rendered above for the graded/desk case; this covers the no-mic path) -->
+                    }
+                    @if (!recordingSupported()) {
+                      <div
+                        class="grade-row mt-3"
+                        role="group"
+                        aria-label="Grade your recall"
+                        data-testid="test-manual-grade-row"
+                      >
+                        <button
+                          type="button"
+                          class="button is-danger is-light grade-btn"
+                          [disabled]="saving()"
+                          (click)="commitTestGrade('again')"
+                        >
+                          Again
+                        </button>
+                        <button
+                          type="button"
+                          class="button grade-btn"
+                          [disabled]="saving()"
+                          (click)="commitTestGrade('hard')"
+                        >
+                          Hard
+                        </button>
+                        <button
+                          type="button"
+                          class="button grade-btn"
+                          [disabled]="saving()"
+                          (click)="commitTestGrade('good')"
+                        >
+                          Good
+                        </button>
+                        <button
+                          type="button"
+                          class="button is-success is-light grade-btn"
+                          [disabled]="saving()"
+                          (click)="commitTestGrade('easy')"
+                        >
+                          Easy
+                        </button>
+                      </div>
+                    }
+                  </div>
                 }
               </div>
             } @else {
@@ -950,6 +1218,7 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
 export class MemorizeViewComponent implements OnInit {
   private readonly scrollStudy = inject(ScrollStudyService);
   private readonly memorizationStudy = inject(MemorizationStudyService);
+  private readonly recitationGrade = inject(RecitationGradeService);
   private readonly outlineStudy = inject(OutlineStudyService);
   private readonly route = inject(ActivatedRoute);
 
@@ -989,6 +1258,18 @@ export class MemorizeViewComponent implements OnInit {
   readonly scaffold = signal<'none' | 'first'>('none'); // front first-letters hint
   readonly legendDismissed = signal(false); // shortcut legend shown until dismissed
   private swipeStart: { x: number; y: number } | null = null;
+
+  // Test-mode (spoken-recitation auto-grade) state (transient, view-only, never persisted).
+  readonly testDriveMode = signal<'desk' | 'drive'>('desk'); // default desk: nothing auto-commits
+  readonly testPhase = signal<'idle' | 'recording' | 'grading' | 'graded'>('idle');
+  readonly gradeResult = signal<RecitationGradeResult | null>(null);
+  readonly testError = signal(false);
+  private mediaRecorder: MediaRecorder | null = null;
+  private recordedChunks: Blob[] = [];
+  private mediaStream: MediaStream | null = null;
+  private recordStopTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Max recitation length (ms) before recording auto-stops. */
+  private static readonly MAX_RECORD_MS = 60_000;
 
   protected readonly VERSE_REF_MAX = VERSE_REF_MAX;
   protected readonly VERSES_PER_CHUNK_MIN = VERSES_PER_CHUNK_MIN;
@@ -1408,10 +1689,11 @@ export class MemorizeViewComponent implements OnInit {
 
   // --- Review mode (flashcard deck) ---
 
-  /** Switch Review/Edit. Entering Review (re)builds the deck from the current due queue. */
+  /** Switch Review/Test/Edit. Entering Review or Test (re)builds the deck from the due queue. */
   setViewMode(mode: ViewMode): void {
     this.viewMode.set(mode);
-    if (mode === 'review') this.buildDeck();
+    if (mode === 'review' || mode === 'test') this.buildDeck();
+    if (mode === 'test') this.resetTestCard();
   }
 
   /** Build the session deck from the due queue (soonest-due first); reset to the first card. */
@@ -1525,5 +1807,145 @@ export class MemorizeViewComponent implements OnInit {
     // If focus is already on the card it handles its own keydown; this covers the rest of the page.
     if (target?.getAttribute('data-testid') === 'review-card') return;
     this.onCardKeydown(e);
+  }
+
+  // --- Test mode (spoken-recitation auto-grade) ---
+
+  /** True when the browser can record audio (MediaRecorder + getUserMedia). Testable seam. */
+  recordingSupported(): boolean {
+    return (
+      typeof MediaRecorder !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      !!navigator.mediaDevices?.getUserMedia
+    );
+  }
+
+  /** Human label for a grade value (for the result tag). */
+  gradeLabel(g?: RecitationGradeValue): string {
+    switch (g) {
+      case 'again':
+        return 'Again';
+      case 'hard':
+        return 'Hard';
+      case 'good':
+        return 'Good';
+      case 'easy':
+        return 'Easy';
+      default:
+        return '';
+    }
+  }
+
+  /** Reset the test card to its idle (pre-recording) state for the current chunk. */
+  private resetTestCard(): void {
+    this.testPhase.set('idle');
+    this.gradeResult.set(null);
+    this.testError.set(false);
+  }
+
+  /** Begin recording the recitation. On any failure, degrade to manual grading. */
+  async startRecording(): Promise<void> {
+    if (!this.recordingSupported() || this.deckComplete()) return;
+    this.testError.set(false);
+    this.gradeResult.set(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.mediaStream = stream;
+      this.recordedChunks = [];
+      const recorder = new MediaRecorder(stream);
+      this.mediaRecorder = recorder;
+      recorder.ondataavailable = (e: BlobEvent) => {
+        if (e.data && e.data.size > 0) this.recordedChunks.push(e.data);
+      };
+      recorder.onstop = () => this.onRecordingStopped();
+      recorder.start();
+      this.testPhase.set('recording');
+      // Safety cap: auto-stop a runaway recording.
+      this.recordStopTimer = setTimeout(
+        () => this.stopRecording(),
+        MemorizeViewComponent.MAX_RECORD_MS,
+      );
+    } catch {
+      // Permission denied / no device: fall back to manual grading for this card.
+      this.teardownStream();
+      this.testError.set(true);
+      this.testPhase.set('idle');
+    }
+  }
+
+  /** Stop recording; the recorder's onstop handler runs the grade flow. */
+  stopRecording(): void {
+    if (this.recordStopTimer) {
+      clearTimeout(this.recordStopTimer);
+      this.recordStopTimer = null;
+    }
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+  }
+
+  /** Assemble the clip and send it for grading. */
+  private onRecordingStopped(): void {
+    this.teardownStream();
+    const type = this.mediaRecorder?.mimeType || 'audio/webm';
+    const clip = new Blob(this.recordedChunks, { type });
+    this.recordedChunks = [];
+    this.mediaRecorder = null;
+    if (clip.size === 0) {
+      this.testError.set(true);
+      this.testPhase.set('idle');
+      return;
+    }
+    this.gradeClip(clip);
+  }
+
+  /** Send the recorded clip to the grade service, then apply per drive/desk mode. */
+  private gradeClip(clip: Blob): void {
+    this.testPhase.set('grading');
+    const chunkText = this.cardBackText();
+    const reference = this.cardRef();
+    this.recitationGrade.gradeRecitation(clip, chunkText, reference).subscribe({
+      next: (result) => {
+        this.gradeResult.set(result);
+        this.testPhase.set('graded');
+        // Drive mode: auto-commit the computed grade and advance — no screen touch.
+        if (this.testDriveMode() === 'drive') {
+          this.commitTestGrade(result.grade);
+        }
+      },
+      error: () => {
+        // Service failure: let the student self-grade with the manual buttons.
+        this.testError.set(true);
+        this.gradeResult.set(null);
+        this.testPhase.set('graded');
+      },
+    });
+  }
+
+  /** Commit a grade (confirmed, overridden, or auto in drive mode) and advance the deck. */
+  commitTestGrade(g: RecitationGradeValue): void {
+    if (this.deckComplete() || this.saving()) return;
+    const cardIndex = this.currentCardIndex();
+    if (cardIndex < 0) return;
+    this.syncActiveToCard();
+    this.grade(g); // existing SM-2 path (schedule only)
+    if (g === 'again') {
+      this.deck.update((d) => [...d, cardIndex]);
+    }
+    this.advanceDeck();
+    this.resetTestCard();
+  }
+
+  /** Stop any live mic stream and release the device. */
+  private teardownStream(): void {
+    if (this.mediaStream) {
+      for (const track of this.mediaStream.getTracks()) track.stop();
+      this.mediaStream = null;
+    }
+  }
+
+  /** Set drive vs desk grading mode. */
+  setTestDriveMode(mode: 'desk' | 'drive'): void {
+    this.testDriveMode.set(mode);
   }
 }

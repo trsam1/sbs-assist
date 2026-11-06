@@ -364,3 +364,21 @@ export interface MemorizationReminderPrefRecord {
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
+
+/** The SM-2 grade a recitation can resolve to (matches the frontend `srs.ts Grade` union). */
+export type RecitationGradeValue = 'again' | 'hard' | 'good' | 'easy';
+
+/**
+ * Result of auto-grading a spoken recitation (Memorize the Scroll Test mode). Returned by the
+ * RecitationGrade Lambda to the student's own session; NEVER persisted. The `grade` feeds the
+ * existing SM-2 path on the frontend. `degraded` is true when Transcribe/Bedrock failed and the
+ * grade fell back to the deterministic word-diff (the student can override with the manual buttons).
+ */
+export interface RecitationGradeResult {
+  grade: RecitationGradeValue;
+  reason: string; // one-line, human-readable ('why' this grade)
+  accuracyPct: number; // 0..100, from the deterministic word-diff
+  missedWords: string[]; // words in the chunk absent/wrong in the recitation
+  transcript: string; // what Transcribe heard (student's own words)
+  degraded?: boolean; // true = scored by the diff fallback, not Bedrock
+}

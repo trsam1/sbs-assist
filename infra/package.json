@@ -25,7 +25,8 @@
     "aws-cdk-lib": "2.250.0",
     "constructs": "10.6.0",
     "mammoth": "1.13.0",
-    "pdf-parse": "1.1.1"
+    "pdf-parse": "1.1.1",
+    "@aws-sdk/client-transcribe": "3.1037.0"
   },
   "devDependencies": {
     "@aws-cdk/cloudformation-diff": "2.187.5",
