@@ -14,7 +14,6 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
-import * as ses from 'aws-cdk-lib/aws-ses';
 import { S3EventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as path from 'path';
 import { Construct } from 'constructs';
@@ -678,11 +677,13 @@ export class WordStudyToolStack extends cdk.Stack {
     // Additive: a verified SES sender, an EventBridge-scheduled dispatch Lambda, and its log group.
     // No new table — the per-user opt-in preference rides MemorizationStudies as an SK=PREFS item.
 
-    // SES verified sender. The address is a per-stage behavior value the maintainer fills in and
-    // verifies in SES; the placeholder is non-functional until replaced.
-    new ses.EmailIdentity(this, 'ReminderSenderIdentity', {
-      identity: ses.Identity.email(config.reminderSender),
-    });
+    // SES verified sender. NOTE: the EmailIdentity construct is intentionally NOT declared here.
+    // The sender identity (config.reminderSender) is verified in SES out-of-band (Amazon SES →
+    // Verified identities) and managed outside this stack, because CloudFormation refuses to
+    // *create* an identity that already exists. The dispatch Lambda still sends from it via the
+    // scoped ses:SendEmail grant below, which references the identity by ARN. To let CDK own the
+    // identity again, re-add the construct only after the out-of-band identity is removed, or
+    // import it with `cdk import`.
 
     this.reminderDispatchFn = new nodejs.NodejsFunction(this, 'ReminderDispatchFn', {
       ...commonLambdaProps,

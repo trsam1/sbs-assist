@@ -639,7 +639,7 @@ describe('WordStudyToolStack (prod)', () => {
     expect(methods.map((m) => m.Properties?.['HttpMethod']).sort()).toEqual(['GET', 'PUT']);
   });
 
-  it('adds the reminder-dispatch Lambda (Node 22, own log group, env wired) and SES identity', () => {
+  it('adds the reminder-dispatch Lambda (Node 22, own log group, env wired); SES identity is NOT CDK-managed', () => {
     t.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'ReminderDispatch',
       Runtime: 'nodejs22.x',
@@ -652,7 +652,9 @@ describe('WordStudyToolStack (prod)', () => {
         }),
       },
     });
-    t.resourceCountIs('AWS::SES::EmailIdentity', 1);
+    // The sender identity is verified in SES out-of-band and managed outside this stack
+    // (CloudFormation refuses to create an identity that already exists), so CDK declares none.
+    t.resourceCountIs('AWS::SES::EmailIdentity', 0);
   });
 
   it('adds a daily EventBridge schedule targeting the dispatch Lambda', () => {
