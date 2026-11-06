@@ -45,6 +45,14 @@ vi.mock('@aws-sdk/client-transcribe', () => ({
   GetTranscriptionJobCommand: class {
     constructor(public input: unknown) {}
   },
+  MediaFormat: {
+    WEBM: 'webm',
+    OGG: 'ogg',
+    MP4: 'mp4',
+    MP3: 'mp3',
+    WAV: 'wav',
+    FLAC: 'flac',
+  },
 }));
 
 vi.stubEnv('ALLOWED_ORIGINS', 'https://example.cloudfront.net');
@@ -186,12 +194,25 @@ describe('RecitationGrade Lambda', () => {
   // --- handler: presign ---
 
   describe('presign', () => {
-    it('returns a presigned url and an s3Key under the caller prefix', async () => {
+    it('returns a presigned url and an s3Key with a format extension under the caller prefix', async () => {
       const res = await handler(makeEvent({ action: 'presign', contentType: 'audio/webm' }));
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.uploadUrl).toBe('https://s3.example/presigned-put');
-      expect(body.s3Key).toMatch(new RegExp(`^recitations/${USER}/`));
+      expect(body.s3Key).toMatch(new RegExp(`^recitations/${USER}/.+\\.webm$`));
+    });
+    it('accepts a codecs suffix and maps it to the right extension', async () => {
+      const res = await handler(
+        makeEvent({ action: 'presign', contentType: 'audio/webm;codecs=opus' }),
+      );
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).s3Key).toMatch(/\.webm$/);
+    });
+    it('maps mp4 and wav to their extensions', async () => {
+      const mp4 = await handler(makeEvent({ action: 'presign', contentType: 'audio/mp4' }));
+      expect(JSON.parse(mp4.body).s3Key).toMatch(/\.mp4$/);
+      const wav = await handler(makeEvent({ action: 'presign', contentType: 'audio/wav' }));
+      expect(JSON.parse(wav.body).s3Key).toMatch(/\.wav$/);
     });
     it('rejects a non-audio contentType', async () => {
       const res = await handler(makeEvent({ action: 'presign', contentType: 'text/plain' }));
@@ -202,13 +223,13 @@ describe('RecitationGrade Lambda', () => {
   // --- handler: grade ---
 
   describe('grade', () => {
-    it('returns the Bedrock grade + diff and deletes the clip', async () => {
+    it('returns the Bedrock grade + diff, passes an explicit MediaFormat, and deletes the clip', async () => {
       stubTranscribe('for god so loved the world');
       mockBedrockSend.mockResolvedValueOnce(bedrockGrade('good', 'one small slip'));
       const res = await handler(
         makeEvent({
           action: 'grade',
-          s3Key: `recitations/${USER}/abc`,
+          s3Key: `recitations/${USER}/abc.webm`,
           chunkText: 'For God so loved the world',
           reference: '3:16',
         }),
@@ -220,6 +241,11 @@ describe('RecitationGrade Lambda', () => {
       expect(body.accuracyPct).toBe(100);
       expect(body.transcript).toBe('for god so loved the world');
       expect(body.degraded).toBeUndefined();
+      // The StartTranscriptionJob call carried an explicit MediaFormat inferred from the .webm key.
+      const startCall = mockTranscribeSend.mock.calls.find(
+        (c) => c[0]?.input && 'Media' in c[0].input,
+      );
+      expect(startCall?.[0].input.MediaFormat).toBe('webm');
       // clip deleted (a DeleteObjectCommand went to S3)
       expect(mockS3Send).toHaveBeenCalled();
     });

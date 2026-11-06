@@ -28,20 +28,33 @@ const VERSE_MARKER_SCAN = /(?:^|\s)(\d+(?::\d+)?)(?=\s)/gm;
 
 /** One located verse marker: its label and the offset where its VERSE TEXT begins (after it). */
 interface LocatedMarker {
-  ref: string; // the marker label, e.g. "5" or "2:7"
+  ref: string; // the raw marker label as it appears, e.g. "5" or "2:7"
+  fullRef: string; // chapter-qualified ref, e.g. "2:5" — bare verses inherit the active chapter
+  chapter: string; // the chapter in force at this marker ('' until the first C:V marker)
   textStart: number; // offset in scrollText where this verse's text begins (just past the marker)
 }
 
-/** Find every verse marker in the scroll, in order. Empty when the scroll carries no markers. */
+/**
+ * Find every verse marker in the scroll, in order, CARRYING THE CHAPTER FORWARD. The scroll keeps
+ * a full "chapter:verse" marker only where the chapter changes; later verses in that chapter are
+ * bare numbers (e.g. "2:6" then "7" "8" "9" "10"). We remember the last chapter seen and qualify
+ * each bare verse with it, so a chunk spanning 2:6–2:10 labels as "2:6-10", not "6-10".
+ * Empty when the scroll carries no markers.
+ */
 export function findVerseMarkers(scrollText: string): LocatedMarker[] {
   const markers: LocatedMarker[] = [];
   const re = new RegExp(VERSE_MARKER_SCAN); // fresh lastIndex per call
   let m: RegExpExecArray | null;
+  let chapter = ''; // the active chapter, updated whenever a "C:V" marker appears
   while ((m = re.exec(scrollText)) !== null) {
     const ref = m[1];
+    const colon = ref.indexOf(':');
+    if (colon >= 0) chapter = ref.slice(0, colon); // "2:7" → chapter becomes "2"
+    // A bare verse ("7") inherits the active chapter → "2:7"; a C:V ref is already qualified.
+    const fullRef = colon >= 0 ? ref : chapter ? `${chapter}:${ref}` : ref;
     // The verse text starts right after the matched marker token (m[0] may include a leading space).
     const markerEnd = m.index + m[0].length;
-    markers.push({ ref, textStart: markerEnd });
+    markers.push({ ref, fullRef, chapter, textStart: markerEnd });
   }
   return markers;
 }
@@ -54,10 +67,19 @@ function trimRange(scrollText: string, from: number, to: number): { start: numbe
   return { start: from + leading, end: to - trailing };
 }
 
-/** Compose a chunk label spanning first→last ref, e.g. "2:1-5" or "3" (single), capped. */
+/**
+ * Compose a chunk label spanning first→last ref from CHAPTER-QUALIFIED refs, collapsing a repeated
+ * chapter on the end so "2:6"→"2:10" reads "2:6-10" (not "2:6-2:10"); a cross-chapter span keeps
+ * both ("2:25-3:2"). Single-verse chunks show the one ref. Capped at VERSE_REF_MAX.
+ */
 function spanRef(first: string, last: string): string {
-  const label = first === last ? first : `${first}-${last}`;
-  return label.slice(0, VERSE_REF_MAX);
+  if (first === last) return first.slice(0, VERSE_REF_MAX);
+  const fc = first.indexOf(':');
+  const lc = last.indexOf(':');
+  // Same chapter on both ends → drop the chapter from the end verse.
+  const endLabel =
+    fc >= 0 && lc >= 0 && first.slice(0, fc) === last.slice(0, lc) ? last.slice(lc + 1) : last;
+  return `${first}-${endLabel}`.slice(0, VERSE_REF_MAX);
 }
 
 /**
@@ -90,7 +112,7 @@ export function seedByVerses(scrollText: string, versesPerChunk: number): Memori
     chunks.push({
       start,
       end,
-      verseRef: spanRef(group[0].ref, group[group.length - 1].ref),
+      verseRef: spanRef(group[0].fullRef, group[group.length - 1].fullRef),
       state: 'new',
     });
   }

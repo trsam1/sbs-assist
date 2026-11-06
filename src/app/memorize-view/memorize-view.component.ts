@@ -36,7 +36,19 @@ import {
   VERSES_PER_CHUNK_MIN,
   VERSES_PER_CHUNK_MAX,
 } from './chunking';
-import { readSchedule, isDue, applyGrade, dueLabel, Grade } from './srs';
+import {
+  readSchedule,
+  isDue,
+  applyGrade,
+  dueLabel,
+  deriveState,
+  selectDeck,
+  DEFAULT_NEW_PER_DAY,
+  NEW_PER_DAY_MIN,
+  NEW_PER_DAY_MAX,
+  LearnedState,
+  Grade,
+} from './srs';
 import {
   classifySwipe,
   swipeToGrade,
@@ -122,6 +134,58 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                 Edit
               </button>
             </div>
+
+            @if (viewMode() === 'review' || viewMode() === 'test') {
+              <!-- Shared drill settings: how many new chunks/day, and what "Again" does. -->
+              <div class="field is-grouped is-grouped-multiline mb-4" data-testid="drill-settings">
+                <div class="control">
+                  <label class="label is-small mb-1" for="new-per-day">New chunks per day</label>
+                  <input
+                    id="new-per-day"
+                    class="input is-small"
+                    type="number"
+                    [min]="NEW_PER_DAY_MIN"
+                    [max]="NEW_PER_DAY_MAX"
+                    [ngModel]="newPerDay()"
+                    (ngModelChange)="setNewPerDay(+$event)"
+                    data-testid="new-per-day"
+                    style="width: 5rem"
+                  />
+                  <p class="help is-size-7">
+                    {{ newChunkCount() }} new chunk(s) waiting — introduced {{ newPerDay() }}/day.
+                  </p>
+                </div>
+                <div class="control">
+                  <span class="label is-small mb-1">On “Again”</span>
+                  <div
+                    class="buttons has-addons are-small mb-0"
+                    role="group"
+                    aria-label="Again behavior"
+                  >
+                    <button
+                      type="button"
+                      class="button"
+                      [class.is-link]="againMode() === 'now'"
+                      [attr.aria-pressed]="againMode() === 'now'"
+                      (click)="setAgainMode('now')"
+                      data-testid="again-now"
+                    >
+                      Redo now
+                    </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [class.is-link]="againMode() === 'later'"
+                      [attr.aria-pressed]="againMode() === 'later'"
+                      (click)="setAgainMode('later')"
+                      data-testid="again-later"
+                    >
+                      Later this session
+                    </button>
+                  </div>
+                </div>
+              </div>
+            }
 
             @if (viewMode() === 'review') {
               <!-- ===== Review mode: flashcard deck driven by the due queue ===== -->
@@ -736,21 +800,18 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                         />
                       </div>
                       <div class="control">
-                        <label class="label is-small mb-1" [attr.for]="'state-' + $index"
-                          >Progress</label
+                        <span class="label is-small mb-1">Progress</span>
+                        <span
+                          class="tag is-small"
+                          [class.is-light]="chunkStates()[$index] === 'new'"
+                          [class.is-info]="chunkStates()[$index] === 'learning'"
+                          [class.is-link]="chunkStates()[$index] === 'chained'"
+                          [class.is-success]="chunkStates()[$index] === 'solid'"
+                          data-testid="chunk-state"
+                          title="Earned automatically from your review history"
                         >
-                        <div class="select is-small">
-                          <select
-                            [id]="'state-' + $index"
-                            [ngModel]="chunk.state"
-                            (ngModelChange)="setState($index, $event)"
-                            data-testid="chunk-state"
-                          >
-                            @for (st of stateOrder; track st) {
-                              <option [value]="st">{{ stateLabels[st] }}</option>
-                            }
-                          </select>
-                        </div>
+                          {{ stateLabels[chunkStates()[$index]] }}
+                        </span>
                       </div>
                       <div class="control is-expanded"></div>
                       <div class="control">
@@ -1259,6 +1320,13 @@ export class MemorizeViewComponent implements OnInit {
   readonly legendDismissed = signal(false); // shortcut legend shown until dismissed
   private swipeStart: { x: number; y: number } | null = null;
 
+  // How many never-reviewed chunks are introduced into the deck per day (persisted per study as a
+  // sentinel chunk; see loadSaved/save). Review chunks are never throttled — only new material is.
+  readonly newPerDay = signal(DEFAULT_NEW_PER_DAY);
+  // What "Again" does during a session: 'now' re-shows the same card immediately (drill it until it
+  // sticks); 'later' requeues it a few cards back so it recurs soon without blocking the deck.
+  readonly againMode = signal<'now' | 'later'>('now');
+
   // Test-mode (spoken-recitation auto-grade) state (transient, view-only, never persisted).
   readonly testDriveMode = signal<'desk' | 'drive'>('desk'); // default desk: nothing auto-commits
   readonly testPhase = signal<'idle' | 'recording' | 'grading' | 'graded'>('idle');
@@ -1274,6 +1342,8 @@ export class MemorizeViewComponent implements OnInit {
   protected readonly VERSE_REF_MAX = VERSE_REF_MAX;
   protected readonly VERSES_PER_CHUNK_MIN = VERSES_PER_CHUNK_MIN;
   protected readonly VERSES_PER_CHUNK_MAX = VERSES_PER_CHUNK_MAX;
+  protected readonly NEW_PER_DAY_MIN = NEW_PER_DAY_MIN;
+  protected readonly NEW_PER_DAY_MAX = NEW_PER_DAY_MAX;
   protected readonly stateLabels = STATE_LABELS;
   protected readonly stateOrder = STATE_ORDER;
 
@@ -1288,9 +1358,17 @@ export class MemorizeViewComponent implements OnInit {
 
   readonly progressLabel = computed(() => {
     const cs = this.chunks();
-    const solid = cs.filter((c) => c.state === 'solid').length;
+    const solid = cs.filter((c) => deriveState(c) === 'solid').length;
     return `${solid} of ${cs.length} chunks solid`;
   });
+
+  /** The DERIVED learned-state for each chunk (earned from the SM-2 schedule, not set by hand). */
+  readonly chunkStates = computed<LearnedState[]>(() => this.chunks().map((c) => deriveState(c)));
+
+  /** Count of never-reviewed ("new") chunks — what the new-per-day limit meters. */
+  readonly newChunkCount = computed(
+    () => this.chunks().filter((c) => deriveState(c) === 'new').length,
+  );
 
   readonly activeText = computed(() => {
     const cs = this.chunks();
@@ -1408,6 +1486,7 @@ export class MemorizeViewComponent implements OnInit {
 
   ngOnInit(): void {
     this.scrollStudyId = this.route.snapshot.paramMap.get('scrollStudyId') ?? '';
+    this.loadPrefs();
     this.load();
   }
 
@@ -1696,9 +1775,58 @@ export class MemorizeViewComponent implements OnInit {
     if (mode === 'test') this.resetTestCard();
   }
 
-  /** Build the session deck from the due queue (soonest-due first); reset to the first card. */
+  // --- session/study preferences (view-only, persisted in localStorage per scroll study) ---
+
+  private prefKey(suffix: string): string {
+    return `memorize:${this.scrollStudyId}:${suffix}`;
+  }
+
+  /** Load view-only prefs (new-per-day, again-mode) from localStorage; defaults when absent. */
+  private loadPrefs(): void {
+    try {
+      const npd = localStorage.getItem(this.prefKey('newPerDay'));
+      if (npd !== null) {
+        const n = parseInt(npd, 10);
+        if (Number.isFinite(n)) {
+          this.newPerDay.set(Math.max(NEW_PER_DAY_MIN, Math.min(NEW_PER_DAY_MAX, n)));
+        }
+      }
+      const am = localStorage.getItem(this.prefKey('againMode'));
+      if (am === 'now' || am === 'later') this.againMode.set(am);
+    } catch {
+      // localStorage unavailable (private mode / SSR): keep defaults.
+    }
+  }
+
+  private writePref(suffix: string, value: string): void {
+    try {
+      localStorage.setItem(this.prefKey(suffix), value);
+    } catch {
+      // Non-fatal: the pref simply won't persist across reloads.
+    }
+  }
+
+  /** Set the new-chunks-per-day introduction limit (clamped) and rebuild the deck. */
+  setNewPerDay(n: number): void {
+    const clamped = Math.max(
+      NEW_PER_DAY_MIN,
+      Math.min(NEW_PER_DAY_MAX, Math.floor(Number.isFinite(n) ? n : DEFAULT_NEW_PER_DAY)),
+    );
+    this.newPerDay.set(clamped);
+    this.writePref('newPerDay', String(clamped));
+    if (this.viewMode() === 'review' || this.viewMode() === 'test') this.buildDeck();
+  }
+
+  /** Set what "Again" does this session: 'now' (redo same card) or 'later' (requeue soon). */
+  setAgainMode(mode: 'now' | 'later'): void {
+    this.againMode.set(mode);
+    this.writePref('againMode', mode);
+  }
+
+  /** Build the session deck from the due queue, metering new chunks per day; reset to first card. */
   private buildDeck(): void {
-    this.deck.set(this.dueQueue().map((row) => row.index));
+    const rows = this.chunks().map((c, index) => ({ index, schedule: readSchedule(c) }));
+    this.deck.set(selectDeck(rows, this.today(), this.newPerDay()));
     this.deckPos.set(0);
     this.flipped.set(false);
     this.scaffold.set('none');
@@ -1719,7 +1847,9 @@ export class MemorizeViewComponent implements OnInit {
 
   /**
    * Grade the current card via the existing SM-2 `grade()` path (schedule only, never state),
-   * then advance the deck. An "again" re-queues the card to the end so it recurs this session.
+   * then handle the deck move. On "Again": in 'now' mode the SAME card stays up (flip back to the
+   * front to try again); in 'later' mode it is requeued a few cards back and the deck advances.
+   * Any pass grade (hard/good/easy) always advances.
    */
   gradeCard(g: Grade): void {
     if (this.deckComplete() || this.saving()) return;
@@ -1730,10 +1860,26 @@ export class MemorizeViewComponent implements OnInit {
     this.grade(g); // existing path: applyGrade + save (optimistic)
 
     if (g === 'again') {
-      // still due after a miss → put it back at the end of the session deck
-      this.deck.update((d) => [...d, cardIndex]);
+      if (this.againMode() === 'now') {
+        // Redo now: keep the same card, just reset it to the front to recite again.
+        this.flipped.set(false);
+        this.scaffold.set('none');
+        return;
+      }
+      // Later: requeue a few cards back (not the very end) so it recurs soon.
+      this.requeueCurrent(cardIndex);
     }
     this.advanceDeck();
+  }
+
+  /** Requeue the current card a short distance ahead (3 cards, or the end if the deck is shorter). */
+  private requeueCurrent(cardIndex: number): void {
+    this.deck.update((d) => {
+      const next = [...d];
+      const insertAt = Math.min(next.length, this.deckPos() + 4); // ~3 cards later
+      next.splice(insertAt, 0, cardIndex);
+      return next;
+    });
   }
 
   /** Move to the next card: advance position, reset the flip/scaffold, re-aim activeIndex. */
@@ -1922,15 +2068,21 @@ export class MemorizeViewComponent implements OnInit {
     });
   }
 
-  /** Commit a grade (confirmed, overridden, or auto in drive mode) and advance the deck. */
+  /** Commit a grade (confirmed, overridden, or auto in drive mode) and handle the deck move. */
   commitTestGrade(g: RecitationGradeValue): void {
     if (this.deckComplete() || this.saving()) return;
     const cardIndex = this.currentCardIndex();
     if (cardIndex < 0) return;
     this.syncActiveToCard();
     this.grade(g); // existing SM-2 path (schedule only)
+
+    if (g === 'again' && this.againMode() === 'now') {
+      // Redo now: stay on the same verse, reset the test card to record again.
+      this.resetTestCard();
+      return;
+    }
     if (g === 'again') {
-      this.deck.update((d) => [...d, cardIndex]);
+      this.requeueCurrent(cardIndex);
     }
     this.advanceDeck();
     this.resetTestCard();

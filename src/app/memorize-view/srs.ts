@@ -148,3 +148,69 @@ export function dueLabel(s: Schedule, today: Date): string {
   if (days === 1) return 'due tomorrow';
   return `due in ${days} days`;
 }
+
+/**
+ * The learned-progress ladder, DERIVED from the SM-2 schedule rather than set by hand. This makes
+ * the progress label an EARNED signal (it tracks real review history) instead of a manual field:
+ *
+ *   new      — never graded (no lastReviewed): a card still waiting to be introduced.
+ *   learning — graded at least once, still short interval (interval < GRADUATING_INTERVAL days).
+ *   chained  — graduated (interval >= GRADUATING_INTERVAL) but not yet long-term.
+ *   solid    — long interval (interval >= SOLID_INTERVAL days): committed to memory.
+ *
+ * Kept here next to the SM-2 math so the thresholds live with the scheduler they describe.
+ */
+export type LearnedState = 'new' | 'learning' | 'chained' | 'solid';
+
+/** Interval (days) at which a chunk graduates from learning → chained. */
+export const GRADUATING_INTERVAL = 6;
+/** Interval (days) at which a chunk is considered solid / long-term. */
+export const SOLID_INTERVAL = 21;
+
+/** Derive the learned-state ladder from a chunk's schedule (never reviewed → 'new'). */
+export function deriveState(chunk: SchedulePartial): LearnedState {
+  const s = readSchedule(chunk);
+  if (!s.lastReviewed) return 'new';
+  if (s.intervalDays >= SOLID_INTERVAL) return 'solid';
+  if (s.intervalDays >= GRADUATING_INTERVAL) return 'chained';
+  return 'learning';
+}
+
+/** Default number of never-reviewed ("new") chunks introduced into the deck per day. */
+export const DEFAULT_NEW_PER_DAY = 2;
+/** Bounds for the new-per-day introduction limit. */
+export const NEW_PER_DAY_MIN = 0;
+export const NEW_PER_DAY_MAX = 50;
+
+/** A due row carrying enough to order and cap the deck. */
+export interface DeckRow {
+  index: number; // chunk index in the study
+  schedule: Schedule;
+}
+
+/**
+ * Select the session deck from all chunks, METERING how many brand-new (never-reviewed) chunks are
+ * introduced today. Review chunks (already learned, now due again) are ALWAYS included — the limit
+ * only throttles the introduction of NEW material, exactly like Anki's "new cards/day". Ordering:
+ * review chunks first (soonest-due, then chunk order), then up to `newPerDay` new chunks in order.
+ *
+ * `newPerDay` is clamped to [NEW_PER_DAY_MIN, NEW_PER_DAY_MAX]; a value of 0 introduces no new
+ * chunks (review-only day). Pure: `today` is injected.
+ */
+export function selectDeck(rows: readonly DeckRow[], today: Date, newPerDay: number): number[] {
+  const cap = Math.max(NEW_PER_DAY_MIN, Math.min(NEW_PER_DAY_MAX, Math.floor(newPerDay)));
+  const due = rows.filter((r) => isDue(r.schedule, today));
+
+  const review = due.filter((r) => r.schedule.lastReviewed);
+  const fresh = due.filter((r) => !r.schedule.lastReviewed);
+
+  review.sort((a, b) => {
+    const ad = a.schedule.dueDate || '';
+    const bd = b.schedule.dueDate || '';
+    if (ad !== bd) return ad < bd ? -1 : 1;
+    return a.index - b.index;
+  });
+  fresh.sort((a, b) => a.index - b.index);
+
+  return [...review.map((r) => r.index), ...fresh.slice(0, cap).map((r) => r.index)];
+}

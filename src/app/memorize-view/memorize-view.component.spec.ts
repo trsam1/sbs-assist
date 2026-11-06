@@ -133,6 +133,11 @@ describe('MemorizeViewComponent', () => {
 
   afterEach(() => {
     TestBed.resetTestingModule();
+    try {
+      localStorage.clear();
+    } catch {
+      // jsdom always has localStorage; guard for safety.
+    }
   });
 
   // --- state model ---
@@ -210,21 +215,36 @@ describe('MemorizeViewComponent', () => {
     expect(query('[data-testid="seed-unmapped"]')).toBeTruthy();
   });
 
-  it('renders saved chunks in order with their verseRef/state', () => {
+  it('renders saved chunks in order and derives progress from the schedule', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     getStudySpy.mockReturnValue(
       of(
         makeStudy({
           chunks: [
-            chunk({ start: 0, end: 19, verseRef: '1', state: 'solid' }),
-            chunk({ start: 21, end: 48, verseRef: '2', state: 'learning' }),
+            // "solid" is EARNED: a long interval + a real last-reviewed date derive to solid.
+            chunk({
+              start: 0,
+              end: 19,
+              verseRef: '1',
+              intervalDays: 30,
+              lastReviewed: '2026-10-01',
+            }),
+            // reviewed once, short interval → learning.
+            chunk({
+              start: 21,
+              end: 48,
+              verseRef: '2',
+              intervalDays: 1,
+              lastReviewed: '2026-10-30',
+            }),
           ],
         }),
       ),
     );
     fixture.detectChanges();
     expect(queryAll('[data-testid="memorize-chunk-row"]').length).toBe(2);
+    expect(component.chunkStates()).toEqual(['solid', 'learning']);
     expect(component.progressLabel()).toBe('1 of 2 chunks solid');
   });
 
@@ -261,7 +281,7 @@ describe('MemorizeViewComponent', () => {
 
   // --- chunk editing ---
 
-  it('reorders, merges, removes, relabels, and re-states chunks', () => {
+  it('reorders, merges, removes, and relabels chunks', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
@@ -270,9 +290,9 @@ describe('MemorizeViewComponent', () => {
     component.setVerseRef(0, '1:1');
     expect(component.chunks()[0].verseRef).toBe('1:1');
 
-    component.setState(0, 'solid');
-    expect(component.chunks()[0].state).toBe('solid');
-    expect(component.progressLabel()).toBe('1 of 3 chunks solid');
+    // Progress is EARNED from the schedule, not set by hand: freshly seeded chunks are all "new".
+    expect(component.chunkStates().every((s) => s === 'new')).toBe(true);
+    expect(component.progressLabel()).toBe('0 of 3 chunks solid');
 
     // merge chunk 1 into chunk 0 → union of ranges, count drops
     const before = component.chunks().length;
@@ -624,17 +644,42 @@ describe('MemorizeViewComponent', () => {
 
     it('builds the deck from the due queue (soonest-first) with progress', () => {
       loadWithChunks([
-        chunk({ verseRef: '1', dueDate: isoDay(5) }), // not due
-        chunk({ start: 21, end: 48, verseRef: '2', dueDate: isoDay(-1) }), // overdue
-        chunk({ start: 50, end: 70, verseRef: '3', dueDate: isoDay(0) }), // due today
+        chunk({ verseRef: '1', dueDate: isoDay(5), lastReviewed: isoDay(-1) }), // not due
+        chunk({
+          start: 21,
+          end: 48,
+          verseRef: '2',
+          dueDate: isoDay(-1),
+          lastReviewed: isoDay(-3),
+        }), // overdue review
+        chunk({ start: 50, end: 70, verseRef: '3', dueDate: isoDay(0), lastReviewed: isoDay(-2) }), // due review
       ]);
       component.setViewMode('review');
       fixture.detectChanges();
-      // deck holds the two due chunks, overdue first (indices 1 then 2)
+      // deck holds the two due REVIEW chunks, overdue first (indices 1 then 2)
       expect(component.deck()).toEqual([1, 2]);
       expect(component.deckProgress()).toEqual({ pos: 0, total: 2 });
       expect(query('[data-testid="review-progress"]')?.textContent).toContain('Card 1 of 2');
       expect(component.cardRef()).toBe('2');
+    });
+
+    it('meters new chunks per day: review chunks always in, new chunks capped', () => {
+      loadWithChunks([
+        chunk({ verseRef: '1', dueDate: isoDay(-1), lastReviewed: isoDay(-2) }), // due review
+        chunk({ start: 21, end: 48, verseRef: '2' }), // new
+        chunk({ start: 50, end: 70, verseRef: '3' }), // new
+        chunk({ start: 72, end: 90, verseRef: '4' }), // new
+      ]);
+      component.setNewPerDay(1);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      // the review chunk (0) plus exactly ONE new chunk (2); chunks 3,4 held back
+      expect(component.deck()).toEqual([0, 1]);
+      expect(component.newChunkCount()).toBe(3);
+
+      // raising the limit re-introduces the rest immediately
+      component.setNewPerDay(5);
+      expect(component.deck()).toEqual([0, 1, 2, 3]);
     });
 
     it('shows the no-chunks empty state pointing at Edit', () => {
@@ -696,20 +741,45 @@ describe('MemorizeViewComponent', () => {
       expect(component.flipped()).toBe(false);
     });
 
-    it('an Again grade re-queues the card to the end of the session deck', () => {
+    it('an Again grade in redo-now mode (default) keeps the same card up', () => {
       loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
       component.setViewMode('review');
       fixture.detectChanges();
+      expect(component.againMode()).toBe('now'); // default
       expect(component.deck()).toEqual([0, 1]);
 
       component.flip();
+      expect(component.flipped()).toBe(true);
       component.gradeCard('again');
-      // card 0 re-queued to the end; now at position 1
-      expect(component.deck()).toEqual([0, 1, 0]);
-      expect(component.deckPos()).toBe(1);
+      // still on card 0, flipped back to the front to try again — NOT advanced
+      expect(component.deckPos()).toBe(0);
+      expect(component.currentCardIndex()).toBe(0);
+      expect(component.flipped()).toBe(false);
+      expect(component.deck()).toEqual([0, 1]); // deck unchanged
+      expect(saveSpy).toHaveBeenCalledTimes(1); // the miss was still recorded
     });
 
-    it('grading does not change the learned-state ladder (axes stay orthogonal)', () => {
+    it('an Again grade in later mode requeues the card a few cards on and advances', () => {
+      loadWithChunks([
+        chunk({ verseRef: '1' }),
+        chunk({ start: 21, end: 48, verseRef: '2' }),
+        chunk({ start: 50, end: 70, verseRef: '3' }),
+      ]);
+      component.setNewPerDay(10); // introduce all three new chunks
+      component.setViewMode('review');
+      component.setAgainMode('later');
+      fixture.detectChanges();
+      expect(component.deck()).toEqual([0, 1, 2]);
+
+      component.flip();
+      component.gradeCard('again');
+      // card 0 requeued ~3 cards on (clamped to end here), advanced to position 1
+      expect(component.deck()).toEqual([0, 1, 2, 0]);
+      expect(component.deckPos()).toBe(1);
+      expect(component.currentCardIndex()).toBe(1);
+    });
+
+    it('grading does not change the stored learned-state field (axes stay orthogonal)', () => {
       loadWithChunks([chunk({ verseRef: '1', state: 'chained' })]);
       component.setViewMode('review');
       component.flip();
@@ -752,7 +822,7 @@ describe('MemorizeViewComponent', () => {
       expect(component.flipped()).toBe(false); // not flipped — ignored
     });
 
-    it('swipe up flips; swipe left grades Again once flipped', () => {
+    it('swipe up flips; swipe left grades Again (redo-now keeps the same card)', () => {
       loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
       component.setViewMode('review');
       fixture.detectChanges();
@@ -762,11 +832,12 @@ describe('MemorizeViewComponent', () => {
       component.onCardPointerUp({ clientX: 100, clientY: 210 } as PointerEvent);
       expect(component.flipped()).toBe(true);
 
-      // swipe left → grade again (re-queues) and advance
+      // swipe left → grade again; default redo-now keeps the same card (flipped back to front)
       component.onCardPointerDown({ clientX: 200, clientY: 100 } as PointerEvent);
       component.onCardPointerUp({ clientX: 110, clientY: 100 } as PointerEvent);
       expect(saveSpy).toHaveBeenCalled();
-      expect(component.deckPos()).toBe(1);
+      expect(component.deckPos()).toBe(0);
+      expect(component.flipped()).toBe(false);
     });
 
     it('dismisses the shortcut legend', () => {
@@ -858,8 +929,19 @@ describe('MemorizeViewComponent', () => {
       expect(saveSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('an Again grade re-queues the card within the session', () => {
+    it('an Again grade in redo-now mode (default) stays on the same card and resets to record', () => {
       enterTestWithDueChunk();
+      const before = component.deck().length;
+      const pos = component.deckPos();
+      component.commitTestGrade('again');
+      expect(component.deck().length).toBe(before); // NOT requeued
+      expect(component.deckPos()).toBe(pos); // same card
+      expect(component.testPhase()).toBe('idle'); // reset to record again
+    });
+
+    it('an Again grade in later mode requeues the card and advances', () => {
+      enterTestWithDueChunk();
+      component.setAgainMode('later');
       const before = component.deck().length;
       component.commitTestGrade('again');
       expect(component.deck().length).toBe(before + 1); // re-queued

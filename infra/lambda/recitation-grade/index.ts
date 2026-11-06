@@ -10,6 +10,7 @@ import {
   TranscribeClient,
   StartTranscriptionJobCommand,
   GetTranscriptionJobCommand,
+  MediaFormat,
 } from '@aws-sdk/client-transcribe';
 import { randomUUID } from 'node:crypto';
 import type { RecitationGradeValue } from '../shared/models';
@@ -196,10 +197,13 @@ async function invokeModel(prompt: string, maxTokens: number): Promise<string> {
 async function transcribeClip(s3Key: string): Promise<string> {
   const jobName = `recite-${randomUUID()}`;
   const bucket = audioBucket();
+  const mediaFormat = mediaFormatForKey(s3Key);
+  console.log(`Transcribe start: job=${jobName} format=${mediaFormat} key=${s3Key}`);
   await transcribe.send(
     new StartTranscriptionJobCommand({
       TranscriptionJobName: jobName,
       LanguageCode: 'en-US',
+      MediaFormat: mediaFormat,
       Media: { MediaFileUri: `s3://${bucket}/${s3Key}` },
     }),
   );
@@ -235,6 +239,35 @@ const AUDIO_CONTENT_TYPES = new Set([
   'audio/flac',
 ]);
 
+/**
+ * Map an audio content-type to its Amazon Transcribe `MediaFormat` and a file extension. Transcribe
+ * needs the format explicitly OR inferable from the object key's extension — our keys are UUIDs with
+ * no extension, so without this the grade step fails with "The media format ... is not valid" and
+ * the whole recitation silently returns no grade. The browser often sends a codecs suffix
+ * ("audio/webm;codecs=opus"); we match on the base type only.
+ */
+const MEDIA_FORMATS: Record<string, { format: MediaFormat; ext: string }> = {
+  'audio/webm': { format: MediaFormat.WEBM, ext: 'webm' },
+  'audio/ogg': { format: MediaFormat.OGG, ext: 'ogg' },
+  'audio/mp4': { format: MediaFormat.MP4, ext: 'mp4' },
+  'audio/mpeg': { format: MediaFormat.MP3, ext: 'mp3' },
+  'audio/wav': { format: MediaFormat.WAV, ext: 'wav' },
+  'audio/x-wav': { format: MediaFormat.WAV, ext: 'wav' },
+  'audio/flac': { format: MediaFormat.FLAC, ext: 'flac' },
+};
+
+/** Base content-type without any codecs suffix, lowercased. */
+function baseContentType(contentType: string): string {
+  return contentType.split(';')[0].trim().toLowerCase();
+}
+
+/** The Transcribe MediaFormat for a stored key, inferred from its extension (default webm). */
+function mediaFormatForKey(s3Key: string): MediaFormat {
+  const ext = s3Key.split('.').pop()?.toLowerCase() ?? '';
+  const match = Object.values(MEDIA_FORMATS).find((m) => m.ext === ext);
+  return match?.format ?? MediaFormat.WEBM;
+}
+
 export const handler = async (event: APIGatewayEvent) => {
   const origin = getRequestOrigin(event.headers);
   const userId = getUserId(event);
@@ -260,10 +293,13 @@ export const handler = async (event: APIGatewayEvent) => {
   // --- presign: hand back a short-lived PUT url for the recitation clip ---
   if (action === 'presign') {
     const contentType = typeof body['contentType'] === 'string' ? body['contentType'] : '';
-    if (!AUDIO_CONTENT_TYPES.has(contentType)) {
+    const base = baseContentType(contentType);
+    if (!AUDIO_CONTENT_TYPES.has(base)) {
       return corsResponse(400, { message: 'contentType must be a supported audio type.' }, origin);
     }
-    const s3Key = `recitations/${userId}/${randomUUID()}`;
+    // Give the key a real extension so Amazon Transcribe can infer the media format.
+    const ext = MEDIA_FORMATS[base]?.ext ?? 'webm';
+    const s3Key = `recitations/${userId}/${randomUUID()}.${ext}`;
     const uploadUrl = await getSignedUrl(
       s3,
       new PutObjectCommand({ Bucket: audioBucket(), Key: s3Key, ContentType: contentType }),
@@ -285,6 +321,7 @@ export const handler = async (event: APIGatewayEvent) => {
       return corsResponse(400, { message: 'chunkText is required.' }, origin);
     }
     const chunkText = chunkTextRaw.slice(0, CHUNK_TEXT_CAP);
+    console.log(`Grade start: key=${s3Key} chunkChars=${chunkText.length}`);
 
     let transcript = '';
     let degraded = false;
