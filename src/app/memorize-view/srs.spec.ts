@@ -6,10 +6,15 @@ import {
   dueLabel,
   daysUntilDue,
   toLocalIsoDate,
+  deriveState,
+  selectDeck,
+  GRADUATING_INTERVAL,
+  SOLID_INTERVAL,
   DEFAULT_EASE,
   MIN_EASE,
   Schedule,
   SchedulePartial,
+  DeckRow,
 } from './srs';
 
 /** A fixed, timezone-agnostic "today" (local midnight) for deterministic date math. */
@@ -168,5 +173,90 @@ describe('srs.daysUntilDue / dueLabel', () => {
   it('labels overdue chunks', () => {
     expect(dueLabel(readSchedule({ dueDate: iso(plusDays(-2)) }), TODAY)).toBe('overdue by 2 days');
     expect(dueLabel(readSchedule({ dueDate: iso(plusDays(-1)) }), TODAY)).toBe('overdue by 1 day');
+  });
+});
+
+describe('srs.deriveState', () => {
+  it('is "new" when never reviewed (no lastReviewed)', () => {
+    expect(deriveState({})).toBe('new');
+    expect(deriveState({ dueDate: iso(TODAY) })).toBe('new'); // due but never graded
+  });
+
+  it('is "learning" once reviewed with a short interval', () => {
+    expect(deriveState({ lastReviewed: iso(TODAY), intervalDays: 1 })).toBe('learning');
+    expect(deriveState({ lastReviewed: iso(TODAY), intervalDays: GRADUATING_INTERVAL - 1 })).toBe(
+      'learning',
+    );
+  });
+
+  it('is "chained" at the graduating interval, "solid" at the solid interval', () => {
+    expect(deriveState({ lastReviewed: iso(TODAY), intervalDays: GRADUATING_INTERVAL })).toBe(
+      'chained',
+    );
+    expect(deriveState({ lastReviewed: iso(TODAY), intervalDays: SOLID_INTERVAL - 1 })).toBe(
+      'chained',
+    );
+    expect(deriveState({ lastReviewed: iso(TODAY), intervalDays: SOLID_INTERVAL })).toBe('solid');
+  });
+
+  it('tracks the real applyGrade progression from new → learning → chained', () => {
+    let s: SchedulePartial = {};
+    expect(deriveState(s)).toBe('new');
+    s = applyGrade(readSchedule(s), 'good', TODAY); // rep 1, interval 1
+    expect(deriveState(s)).toBe('learning');
+    s = applyGrade(readSchedule(s), 'good', plusDays(1)); // rep 2, interval 6
+    expect(deriveState(s)).toBe('chained');
+  });
+});
+
+describe('srs.selectDeck', () => {
+  const row = (index: number, s: SchedulePartial): DeckRow => ({
+    index,
+    schedule: readSchedule(s),
+  });
+
+  it('includes every due review chunk and caps NEW chunks to newPerDay', () => {
+    const rows: DeckRow[] = [
+      row(0, { lastReviewed: iso(plusDays(-6)), dueDate: iso(TODAY), intervalDays: 6 }), // due review
+      row(1, {}), // new
+      row(2, {}), // new
+      row(3, {}), // new
+    ];
+    const deck = selectDeck(rows, TODAY, 2);
+    // review (0) first, then at most 2 new (1,2); chunk 3 held back
+    expect(deck).toEqual([0, 1, 2]);
+  });
+
+  it('introduces zero new chunks when newPerDay is 0 (review-only day)', () => {
+    const rows: DeckRow[] = [
+      row(0, { lastReviewed: iso(plusDays(-1)), dueDate: iso(TODAY), intervalDays: 1 }),
+      row(1, {}),
+      row(2, {}),
+    ];
+    expect(selectDeck(rows, TODAY, 0)).toEqual([0]);
+  });
+
+  it('excludes chunks not yet due', () => {
+    const rows: DeckRow[] = [
+      row(0, { lastReviewed: iso(TODAY), dueDate: iso(plusDays(5)), intervalDays: 5 }), // future
+      row(1, {}), // new → due now
+    ];
+    expect(selectDeck(rows, TODAY, 5)).toEqual([1]);
+  });
+
+  it('orders review chunks soonest-due first, then new chunks in index order', () => {
+    const rows: DeckRow[] = [
+      row(0, { lastReviewed: iso(plusDays(-1)), dueDate: iso(TODAY), intervalDays: 1 }),
+      row(1, { lastReviewed: iso(plusDays(-3)), dueDate: iso(plusDays(-1)), intervalDays: 2 }), // overdue, earlier dueDate
+      row(2, {}),
+    ];
+    const deck = selectDeck(rows, TODAY, 5);
+    expect(deck).toEqual([1, 0, 2]); // chunk 1 (earlier due) before chunk 0, then new chunk 2
+  });
+
+  it('clamps newPerDay to the allowed range', () => {
+    const rows: DeckRow[] = [row(0, {}), row(1, {}), row(2, {})];
+    expect(selectDeck(rows, TODAY, 999).length).toBe(3); // capped by NEW_PER_DAY_MAX >= 3 here
+    expect(selectDeck(rows, TODAY, -5)).toEqual([]); // floored to 0
   });
 });

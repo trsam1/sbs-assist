@@ -34,6 +34,19 @@ describe('chunking helpers', () => {
     it('returns [] for text with no markers', () => {
       expect(findVerseMarkers('no numbers here at all')).toEqual([]);
     });
+
+    it('carries the chapter forward so bare verses become chapter-qualified fullRefs', () => {
+      const text = '2:6 alpha 7 bravo 8 charlie 3:1 delta 2 echo';
+      const markers = findVerseMarkers(text);
+      expect(markers.map((m) => m.ref)).toEqual(['2:6', '7', '8', '3:1', '2']);
+      expect(markers.map((m) => m.fullRef)).toEqual(['2:6', '2:7', '2:8', '3:1', '3:2']);
+    });
+
+    it('leaves bare verses unqualified until the first chapter:verse marker', () => {
+      const text = '1 alpha 2 bravo 2:3 charlie 4 delta';
+      const markers = findVerseMarkers(text);
+      expect(markers.map((m) => m.fullRef)).toEqual(['1', '2', '2:3', '2:4']);
+    });
   });
 
   describe('seedByVerses', () => {
@@ -54,6 +67,19 @@ describe('chunking helpers', () => {
       const text = '1 alpha 2 bravo 3 charlie';
       const chunks = seedByVerses(text, 1);
       expect(chunks.map((c) => c.verseRef)).toEqual(['1', '2', '3']);
+    });
+
+    it('labels chunks with the chapter carried forward, collapsing a shared chapter', () => {
+      // The scroll keeps the chapter only on 2:6; later verses are bare. The label must be "2:6-10".
+      const text = '2:6 alpha 7 bravo 8 charlie 9 delta 10 echo';
+      const chunks = seedByVerses(text, 5);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['2:6-10']);
+    });
+
+    it('keeps both chapters on a cross-chapter span', () => {
+      const text = '2:25 alpha 26 bravo 3:1 charlie 2 delta';
+      const chunks = seedByVerses(text, 4);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['2:25-3:2']);
     });
 
     it('folds preamble before the first marker into chunk 0', () => {
@@ -91,10 +117,10 @@ describe('chunking helpers', () => {
       expect(unmapped).toEqual([1]);
     });
 
-    it('handles chapter:verse refs', () => {
+    it('handles chapter:verse refs, collapsing a shared chapter on the span', () => {
       const text = '2:1 alpha 2:2 bravo 2:3 charlie';
       const { chunks } = seedFromParagraphs(text, [para('2:1', '2:2'), para('2:3')]);
-      expect(chunks.map((c) => c.verseRef)).toEqual(['2:1-2:2', '2:3']);
+      expect(chunks.map((c) => c.verseRef)).toEqual(['2:1-2', '2:3']);
     });
 
     it('returns [] with all unmapped when no paragraph ref is locatable', () => {
