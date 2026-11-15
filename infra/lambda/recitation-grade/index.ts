@@ -32,9 +32,6 @@ function audioBucket(): string {
 const UPLOAD_URL_TTL_SECONDS = 300;
 /** Bound the chunk text sent in a prompt — a single chunk is small; cap defensively. */
 const CHUNK_TEXT_CAP = 20_000;
-/** Bound how long we poll a batch transcription job before degrading (ms). */
-const TRANSCRIBE_POLL_TIMEOUT_MS = 25_000;
-const TRANSCRIBE_POLL_INTERVAL_MS = 1_500;
 
 interface APIGatewayEvent {
   httpMethod: string;
@@ -193,9 +190,19 @@ async function invokeModel(prompt: string, maxTokens: number): Promise<string> {
   return responseBody.content?.[0]?.text?.trim() ?? '';
 }
 
-/** Run a batch transcription job on the uploaded clip and return the transcript text. */
-async function transcribeClip(s3Key: string): Promise<string> {
-  const jobName = `recite-${randomUUID()}`;
+/**
+ * Derive a stable Transcribe job name from the clip's S3 key. The job name must be a fresh value
+ * per clip (keys carry a UUID, so this is unique) AND recomputable from the key alone, so the
+ * async `grade-status` call can find the job WITHOUT the client echoing a job id back. Transcribe
+ * job names allow [0-9a-zA-Z._-]; the key's slashes and dots are replaced.
+ */
+function jobNameForKey(s3Key: string): string {
+  return `recite-${s3Key.replace(/[^0-9a-zA-Z._-]/g, '-')}`;
+}
+
+/** Kick off a batch transcription job for the uploaded clip. Returns immediately (no polling). */
+async function startTranscription(s3Key: string): Promise<string> {
+  const jobName = jobNameForKey(s3Key);
   const bucket = audioBucket();
   const mediaFormat = mediaFormatForKey(s3Key);
   console.log(`Transcribe start: job=${jobName} format=${mediaFormat} key=${s3Key}`);
@@ -207,26 +214,46 @@ async function transcribeClip(s3Key: string): Promise<string> {
       Media: { MediaFileUri: `s3://${bucket}/${s3Key}` },
     }),
   );
+  return jobName;
+}
 
-  const deadline = Date.now() + TRANSCRIBE_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const res = await transcribe.send(
-      new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }),
-    );
-    const status = res.TranscriptionJob?.TranscriptionJobStatus;
-    if (status === 'COMPLETED') {
-      const uri = res.TranscriptionJob?.Transcript?.TranscriptFileUri;
-      if (!uri) return '';
+/**
+ * Check a transcription job ONCE (no sleep-poll). Returns:
+ *   { done: false }                 — still running; the client should poll again,
+ *   { done: true, transcript }      — completed; transcript text (may be empty),
+ *   { done: true, failed: true }    — the job failed (the caller degrades to the diff).
+ */
+async function checkTranscription(
+  s3Key: string,
+): Promise<{ done: boolean; transcript?: string; failed?: boolean }> {
+  const jobName = jobNameForKey(s3Key);
+  let res;
+  try {
+    res = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
+  } catch (err: unknown) {
+    // Job not found (e.g. never started, or already reaped) — treat as a failure to degrade.
+    console.error('Transcribe status check failed:', err);
+    return { done: true, failed: true };
+  }
+  const status = res.TranscriptionJob?.TranscriptionJobStatus;
+  if (status === 'COMPLETED') {
+    const uri = res.TranscriptionJob?.Transcript?.TranscriptFileUri;
+    if (!uri) return { done: true, transcript: '' };
+    try {
       const text = await fetch(uri).then((r) => r.text());
       const parsed = JSON.parse(text) as { results?: { transcripts?: { transcript?: string }[] } };
-      return parsed.results?.transcripts?.[0]?.transcript ?? '';
+      return { done: true, transcript: parsed.results?.transcripts?.[0]?.transcript ?? '' };
+    } catch (err: unknown) {
+      console.error('Transcribe transcript fetch failed:', err);
+      return { done: true, failed: true };
     }
-    if (status === 'FAILED') {
-      throw new Error(res.TranscriptionJob?.FailureReason ?? 'transcription failed');
-    }
-    await new Promise((r) => setTimeout(r, TRANSCRIBE_POLL_INTERVAL_MS));
   }
-  throw new Error('transcription timed out');
+  if (status === 'FAILED') {
+    console.error('Transcribe job failed:', res.TranscriptionJob?.FailureReason);
+    return { done: true, failed: true };
+  }
+  // QUEUED or IN_PROGRESS — still running.
+  return { done: false };
 }
 
 const AUDIO_CONTENT_TYPES = new Set([
@@ -266,6 +293,72 @@ function mediaFormatForKey(s3Key: string): MediaFormat {
   const ext = s3Key.split('.').pop()?.toLowerCase() ?? '';
   const match = Object.values(MEDIA_FORMATS).find((m) => m.ext === ext);
   return match?.format ?? MediaFormat.WEBM;
+}
+
+/** Best-effort delete of a transient recitation clip (lifecycle reaps it if this fails). */
+async function deleteClip(s3Key: string): Promise<void> {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: audioBucket(), Key: s3Key }));
+  } catch (err: unknown) {
+    console.warn('Failed to delete recitation clip (lifecycle will reap it):', err);
+  }
+}
+
+/** The RecitationGradeResult shape, computed from the deterministic word-diff only (degraded). */
+function buildDegradedResult(chunkText: string) {
+  const diff = scoreDiff('', chunkText);
+  return {
+    grade: accuracyToGrade(diff.accuracyPct),
+    reason: `Matched ${diff.accuracyPct}% of the words.`,
+    accuracyPct: diff.accuracyPct,
+    missedWords: diff.missedWords,
+    transcript: '',
+    degraded: true,
+  };
+}
+
+/**
+ * Score a (possibly empty) transcript against the chunk: always compute the deterministic word-diff
+ * baseline, then upgrade to the authoritative Bedrock grade when the transcript is usable and the
+ * job did not fail. `failed` short-circuits straight to the diff fallback.
+ */
+async function scoreTranscript(
+  transcript: string,
+  chunkText: string,
+  reference: string,
+  failed = false,
+) {
+  const diff = scoreDiff(transcript, chunkText);
+  let grade: RecitationGradeValue = accuracyToGrade(diff.accuracyPct);
+  let reason = `Matched ${diff.accuracyPct}% of the words.`;
+  let degraded = failed;
+
+  if (!failed && transcript.trim().length > 0) {
+    try {
+      const out = await invokeModel(buildGradePrompt(transcript, chunkText, reference), 256);
+      const g = parseGrade(out);
+      if (g) {
+        grade = g.grade;
+        reason = g.reason || reason;
+      } else {
+        degraded = true;
+      }
+    } catch (err: unknown) {
+      console.error('Bedrock grade failed:', err);
+      degraded = true;
+    }
+  } else {
+    degraded = true;
+  }
+
+  return {
+    grade,
+    reason,
+    accuracyPct: diff.accuracyPct,
+    missedWords: diff.missedWords,
+    transcript,
+    ...(degraded ? { degraded: true } : {}),
+  };
 }
 
 export const handler = async (event: APIGatewayEvent) => {
@@ -308,12 +401,69 @@ export const handler = async (event: APIGatewayEvent) => {
     return corsResponse(200, { uploadUrl, s3Key }, origin);
   }
 
-  // --- grade: transcribe the clip + score it, then clean up the clip ---
+  // --- grade-start: validate, kick off the Transcribe job, return immediately (no polling) ---
+  // The heavy work (Transcribe → Bedrock) is async: the client polls `grade-status` until done,
+  // so no single request races the API Gateway 29s timeout.
+  if (action === 'grade-start') {
+    const s3Key = typeof body['s3Key'] === 'string' ? body['s3Key'] : '';
+    const chunkTextRaw = typeof body['chunkText'] === 'string' ? body['chunkText'] : '';
+    if (!s3Key.startsWith(`recitations/${userId}/`)) {
+      return corsResponse(400, { message: 'Invalid s3Key.' }, origin);
+    }
+    if (chunkTextRaw.trim().length === 0) {
+      return corsResponse(400, { message: 'chunkText is required.' }, origin);
+    }
+    console.log(`Grade start (async): key=${s3Key} chunkChars=${chunkTextRaw.trim().length}`);
+    try {
+      await startTranscription(s3Key);
+    } catch (err: unknown) {
+      // Could not even start the job (e.g. bad media). Grade immediately via the diff fallback and
+      // clean up, so the client gets a result rather than polling a job that will never exist.
+      console.error('Transcribe start failed:', err);
+      await deleteClip(s3Key);
+      return corsResponse(
+        200,
+        { status: 'graded', ...buildDegradedResult(chunkTextRaw.slice(0, CHUNK_TEXT_CAP)) },
+        origin,
+      );
+    }
+    return corsResponse(200, { status: 'pending', s3Key }, origin);
+  }
+
+  // --- grade-status: check the job ONCE; return pending, or the final graded result ---
+  if (action === 'grade-status') {
+    const s3Key = typeof body['s3Key'] === 'string' ? body['s3Key'] : '';
+    const chunkTextRaw = typeof body['chunkText'] === 'string' ? body['chunkText'] : '';
+    const reference = typeof body['reference'] === 'string' ? body['reference'] : '';
+    if (!s3Key.startsWith(`recitations/${userId}/`)) {
+      return corsResponse(400, { message: 'Invalid s3Key.' }, origin);
+    }
+    if (chunkTextRaw.trim().length === 0) {
+      return corsResponse(400, { message: 'chunkText is required.' }, origin);
+    }
+    const chunkText = chunkTextRaw.slice(0, CHUNK_TEXT_CAP);
+
+    const check = await checkTranscription(s3Key);
+    if (!check.done) {
+      return corsResponse(200, { status: 'pending', s3Key }, origin);
+    }
+    // Terminal: transcribe finished (or failed). Clean up the clip, then score.
+    await deleteClip(s3Key);
+    const result = await scoreTranscript(
+      check.transcript ?? '',
+      chunkText,
+      reference,
+      check.failed,
+    );
+    return corsResponse(200, { status: 'graded', ...result }, origin);
+  }
+
+  // --- grade (legacy synchronous): start + a single status check, then score. Kept for back-compat
+  // and callers that want one round-trip; the clip-less fast path still works for valid short jobs. ---
   if (action === 'grade') {
     const s3Key = typeof body['s3Key'] === 'string' ? body['s3Key'] : '';
     const chunkTextRaw = typeof body['chunkText'] === 'string' ? body['chunkText'] : '';
     const reference = typeof body['reference'] === 'string' ? body['reference'] : '';
-    // The key MUST belong to the caller — never grade (or read) another user's clip.
     if (!s3Key.startsWith(`recitations/${userId}/`)) {
       return corsResponse(400, { message: 'Invalid s3Key.' }, origin);
     }
@@ -323,59 +473,31 @@ export const handler = async (event: APIGatewayEvent) => {
     const chunkText = chunkTextRaw.slice(0, CHUNK_TEXT_CAP);
     console.log(`Grade start: key=${s3Key} chunkChars=${chunkText.length}`);
 
+    let failed = false;
     let transcript = '';
-    let degraded = false;
     try {
-      transcript = await transcribeClip(s3Key);
+      await startTranscription(s3Key);
+      const check = await checkTranscription(s3Key);
+      if (check.done) {
+        transcript = check.transcript ?? '';
+        failed = !!check.failed;
+      } else {
+        // Still running after one check — the synchronous path can't wait; degrade.
+        failed = true;
+      }
     } catch (err: unknown) {
       console.error('Transcribe failed:', err);
-      degraded = true;
+      failed = true;
     } finally {
-      // Transient audio: delete as soon as grading starts resolving, success or failure.
-      try {
-        await s3.send(new DeleteObjectCommand({ Bucket: audioBucket(), Key: s3Key }));
-      } catch (err: unknown) {
-        console.warn('Failed to delete recitation clip (lifecycle will reap it):', err);
-      }
+      await deleteClip(s3Key);
     }
-
-    // Deterministic baseline (always computed).
-    const diff = scoreDiff(transcript, chunkText);
-    let grade: RecitationGradeValue = accuracyToGrade(diff.accuracyPct);
-    let reason = `Matched ${diff.accuracyPct}% of the words.`;
-
-    // Authoritative grade from Bedrock when the transcript is usable and the model answers.
-    if (!degraded && transcript.trim().length > 0) {
-      try {
-        const out = await invokeModel(buildGradePrompt(transcript, chunkText, reference), 256);
-        const g = parseGrade(out);
-        if (g) {
-          grade = g.grade;
-          reason = g.reason || reason;
-        } else {
-          degraded = true;
-        }
-      } catch (err: unknown) {
-        console.error('Bedrock grade failed:', err);
-        degraded = true;
-      }
-    } else {
-      degraded = true;
-    }
-
-    return corsResponse(
-      200,
-      {
-        grade,
-        reason,
-        accuracyPct: diff.accuracyPct,
-        missedWords: diff.missedWords,
-        transcript,
-        ...(degraded ? { degraded: true } : {}),
-      },
-      origin,
-    );
+    const result = await scoreTranscript(transcript, chunkText, reference, failed);
+    return corsResponse(200, result, origin);
   }
 
-  return corsResponse(400, { message: 'action must be "presign" or "grade".' }, origin);
+  return corsResponse(
+    400,
+    { message: 'action must be "presign", "grade-start", "grade-status", or "grade".' },
+    origin,
+  );
 };

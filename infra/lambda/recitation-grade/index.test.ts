@@ -306,6 +306,140 @@ describe('RecitationGrade Lambda', () => {
     });
   });
 
+  // --- handler: async grade-start / grade-status ---
+
+  describe('grade-start', () => {
+    it('starts the Transcribe job and returns pending immediately (no Bedrock, no poll)', async () => {
+      // Only StartTranscriptionJob should be called — no Get, no fetch, no Bedrock.
+      mockTranscribeSend.mockImplementation((cmd: { input: Record<string, unknown> }) => {
+        if ('Media' in cmd.input) return Promise.resolve({});
+        throw new Error('grade-start must not poll the job');
+      });
+      const res = await handler(
+        makeEvent({
+          action: 'grade-start',
+          s3Key: `recitations/${USER}/abc.webm`,
+          chunkText: 'For God so loved the world',
+        }),
+      );
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.status).toBe('pending');
+      expect(body.s3Key).toBe(`recitations/${USER}/abc.webm`);
+      expect(mockBedrockSend).not.toHaveBeenCalled();
+      // exactly one transcribe call — the start, not a status check
+      expect(mockTranscribeSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a cross-user s3Key without starting a job', async () => {
+      const res = await handler(
+        makeEvent({ action: 'grade-start', s3Key: 'recitations/other/x.webm', chunkText: 't' }),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(mockTranscribeSend).not.toHaveBeenCalled();
+    });
+
+    it('degrades + cleans up when the job cannot even be started', async () => {
+      mockTranscribeSend.mockRejectedValueOnce(new Error('bad media'));
+      const res = await handler(
+        makeEvent({
+          action: 'grade-start',
+          s3Key: `recitations/${USER}/abc.webm`,
+          chunkText: 'For God so loved the world',
+        }),
+      );
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.degraded).toBe(true);
+      expect(body.status).toBe('graded'); // a terminal result, not a pending signal
+      expect(mockS3Send).toHaveBeenCalled(); // clip deleted
+    });
+  });
+
+  describe('grade-status', () => {
+    it('returns pending (not graded) while the job is still running', async () => {
+      mockTranscribeSend.mockResolvedValue({
+        TranscriptionJob: { TranscriptionJobStatus: 'IN_PROGRESS' },
+      });
+      const res = await handler(
+        makeEvent({
+          action: 'grade-status',
+          s3Key: `recitations/${USER}/abc.webm`,
+          chunkText: 'For God so loved the world',
+        }),
+      );
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.status).toBe('pending');
+      expect(mockBedrockSend).not.toHaveBeenCalled();
+      expect(mockS3Send).not.toHaveBeenCalled(); // not deleted while still running
+    });
+
+    it('scores with Bedrock and deletes the clip once the job is COMPLETED', async () => {
+      // Only a status check happens here (no StartTranscriptionJob).
+      mockTranscribeSend.mockResolvedValue({
+        TranscriptionJob: {
+          TranscriptionJobStatus: 'COMPLETED',
+          Transcript: { TranscriptFileUri: 'https://transcribe.example/out.json' },
+        },
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          text: () =>
+            Promise.resolve(
+              JSON.stringify({
+                results: { transcripts: [{ transcript: 'for god so loved the world' }] },
+              }),
+            ),
+        }),
+      );
+      mockBedrockSend.mockResolvedValueOnce(bedrockGrade('good', 'one small slip'));
+      const res = await handler(
+        makeEvent({
+          action: 'grade-status',
+          s3Key: `recitations/${USER}/abc.webm`,
+          chunkText: 'For God so loved the world',
+          reference: '3:16',
+        }),
+      );
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.status).toBe('graded');
+      expect(body.grade).toBe('good');
+      expect(body.transcript).toBe('for god so loved the world');
+      expect(body.degraded).toBeUndefined();
+      expect(mockS3Send).toHaveBeenCalled(); // clip deleted on completion
+    });
+
+    it('degrades to the diff when the job FAILED, and deletes the clip', async () => {
+      mockTranscribeSend.mockResolvedValue({
+        TranscriptionJob: { TranscriptionJobStatus: 'FAILED', FailureReason: 'bad audio' },
+      });
+      const res = await handler(
+        makeEvent({
+          action: 'grade-status',
+          s3Key: `recitations/${USER}/abc.webm`,
+          chunkText: 'For God so loved the world',
+        }),
+      );
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.status).toBe('graded');
+      expect(body.degraded).toBe(true);
+      expect(mockBedrockSend).not.toHaveBeenCalled();
+      expect(mockS3Send).toHaveBeenCalled();
+    });
+
+    it('rejects a cross-user s3Key', async () => {
+      const res = await handler(
+        makeEvent({ action: 'grade-status', s3Key: 'recitations/other/x.webm', chunkText: 't' }),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(mockTranscribeSend).not.toHaveBeenCalled();
+    });
+  });
+
   // --- validation ---
 
   it('rejects a missing auth, missing body, and unknown action', async () => {
