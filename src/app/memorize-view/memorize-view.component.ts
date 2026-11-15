@@ -1409,13 +1409,13 @@ export class MemorizeViewComponent implements OnInit {
    * live via a getter so a long-open session still schedules against the current day; the helpers
    * take it as an argument so the math stays pure and testable. Overridable in tests via `setToday`.
    */
-  private todayValue = new Date();
+  private readonly todayValue = signal(new Date());
   protected today(): Date {
-    return this.todayValue;
+    return this.todayValue();
   }
   /** Test seam: pin "today" so the due-queue / grade math is deterministic under test. */
   setToday(d: Date): void {
-    this.todayValue = d;
+    this.todayValue.set(d);
   }
 
   /** The chunks due for review today, soonest-due first then by chunk order (derived, not saved). */
