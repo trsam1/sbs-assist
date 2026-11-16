@@ -49,6 +49,7 @@ import {
   LearnedState,
   Grade,
 } from './srs';
+import { reciteDiff, ReciteDiff } from './recite-diff';
 import {
   classifySwipe,
   swipeToGrade,
@@ -471,9 +472,41 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                       </p>
                     } @else if (testPhase() === 'graded') {
                       <!-- The result: proposal (desk) or committed (drive). -->
-                      <p class="card-text mb-3" data-testid="test-revealed-text">
-                        {{ cardBackText() }}
-                      </p>
+                      @if (reciteDiff(); as diff) {
+                        <p class="card-text recite-words mb-3" data-testid="test-revealed-text">
+                          @for (t of diff.verse; track $index) {
+                            <span
+                              [class.missed-word]="!t.matched"
+                              [attr.data-missed]="t.matched ? null : 'true'"
+                              >{{ t.text }}</span
+                            >{{ ' ' }}
+                          }
+                        </p>
+                        <p class="is-size-7 has-text-grey mb-3" data-testid="test-missed-summary">
+                          @if (reciteMissedCount() === 0) {
+                            Every word was there.
+                          } @else {
+                            Missed {{ reciteMissedCount() }}
+                            {{ reciteMissedCount() === 1 ? 'word' : 'words' }} (underlined).
+                          }
+                        </p>
+                        <p class="is-size-6 mb-3" data-testid="test-said">
+                          <span class="has-text-grey">You said: </span>
+                          @for (t of diff.said; track $index) {
+                            <span [class.extra-word]="!t.matched">{{ t.text }}</span
+                            >{{ ' ' }}
+                          }
+                        </p>
+                      } @else {
+                        <p class="card-text mb-3" data-testid="test-revealed-text">
+                          {{ cardBackText() }}
+                        </p>
+                        @if (gradeResult()) {
+                          <p class="is-size-7 has-text-grey mb-3" data-testid="test-no-transcript">
+                            No transcript was captured, so missed words can't be highlighted.
+                          </p>
+                        }
+                      }
                       <div aria-live="polite" data-testid="test-result">
                         <p class="is-size-5 mb-1">
                           <span
@@ -1219,6 +1252,21 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
         white-space: pre-wrap;
         text-align: center;
       }
+      /* Missed-word highlight: color plus underline so it is not color-only. */
+      .missed-word {
+        color: var(--bulma-danger, #f14668);
+        font-weight: 600;
+        text-decoration: underline;
+        text-decoration-thickness: 2px;
+      }
+      .recite-words {
+        white-space: normal;
+      }
+      .extra-word {
+        font-style: italic;
+        text-decoration: line-through;
+        opacity: 0.8;
+      }
       /* Grade row: large, full-width, bottom-anchored targets. */
       .grade-row {
         display: grid;
@@ -1480,6 +1528,22 @@ export class MemorizeViewComponent implements OnInit {
     if (i < 0 || i >= cs.length) return '';
     return chunkText(this.scrollText(), cs[i]);
   });
+
+  /**
+   * Word-level highlight of the last graded recitation: which verse words were missed and which
+   * spoken words were not in the verse. Null when there is no usable transcript (degraded grade
+   * or no result), so the view never flags every word as missed.
+   */
+  readonly reciteDiff = computed<ReciteDiff | null>(() => {
+    const transcript = this.gradeResult()?.transcript?.trim();
+    if (!transcript) return null;
+    return reciteDiff(this.cardBackText(), transcript);
+  });
+
+  /** Count of verse words the student missed, for the summary line. */
+  readonly reciteMissedCount = computed(
+    () => this.reciteDiff()?.verse.filter((t) => !t.matched).length ?? 0,
+  );
 
   /** First-letters scaffold for the current card's text (front hint). */
   readonly cardScaffoldText = computed(() => firstLetters(this.cardBackText()));
