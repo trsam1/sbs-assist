@@ -921,6 +921,57 @@ describe('MemorizeViewComponent', () => {
       expect(component.testPhase()).toBe('idle'); // advanced + reset for the next card
     });
 
+    function enterGradedWith(transcript: string, degraded = false): void {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })),
+      );
+      vi.spyOn(component, 'recordingSupported').mockReturnValue(true);
+      fixture.detectChanges();
+      component.setToday(TODAY);
+      component.setViewMode('test');
+      component.gradeResult.set({
+        grade: 'hard',
+        reason: 'dropped a word',
+        accuracyPct: 67,
+        missedWords: ['the'],
+        transcript,
+        ...(degraded ? { degraded: true } : {}),
+      });
+      component.testPhase.set('graded');
+      fixture.detectChanges();
+    }
+
+    it('highlights the verse words the student missed and shows what they said', () => {
+      enterGradedWith('in beginning');
+      const missed = Array.from(
+        fixture.nativeElement.querySelectorAll('[data-testid="test-revealed-text"] [data-missed]'),
+      ).map((e) => (e as HTMLElement).textContent?.trim());
+      expect(missed).toEqual(['the']);
+      expect(query('[data-testid="test-missed-summary"]')?.textContent).toContain('Missed 1 word');
+      expect(query('[data-testid="test-said"]')?.textContent?.replace(/\s+/g, ' ')).toContain(
+        'in beginning',
+      );
+    });
+
+    it('says every word was there for a perfect recitation', () => {
+      enterGradedWith('In the beginning');
+      expect(fixture.nativeElement.querySelectorAll('[data-missed]').length).toBe(0);
+      expect(query('[data-testid="test-missed-summary"]')?.textContent).toContain(
+        'Every word was there',
+      );
+    });
+
+    it('does not mark every word missed when the grade has no transcript (degraded)', () => {
+      enterGradedWith('', true);
+      expect(fixture.nativeElement.querySelectorAll('[data-missed]').length).toBe(0);
+      expect(query('[data-testid="test-no-transcript"]')).toBeTruthy();
+      expect(query('[data-testid="test-revealed-text"]')?.textContent).toContain(
+        'In the beginning',
+      );
+    });
+
     it('drive mode: a graded result auto-commits without a confirm step', () => {
       enterTestWithDueChunk();
       component.setTestDriveMode('drive');
