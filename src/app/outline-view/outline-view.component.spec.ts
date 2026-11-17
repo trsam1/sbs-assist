@@ -431,7 +431,7 @@ describe('OutlineViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeStudy({ status: 'extracting', scrollText: '' })));
     fixture.detectChanges();
     expect(component.state()).toBe('preparing');
-    expect(query('[data-testid="outline-preparing"]')).not.toBeNull();
+    expect(query('[data-testid="tool-preparing"]')).not.toBeNull();
   });
 
   it('shows the failed state for a failed scroll with its reason', () => {
@@ -441,7 +441,7 @@ describe('OutlineViewComponent', () => {
     );
     fixture.detectChanges();
     expect(component.state()).toBe('failed');
-    expect(query('[data-testid="outline-failed"]')?.textContent).toContain('file too large');
+    expect(query('[data-testid="tool-failed"]')?.textContent).toContain('file too large');
   });
 
   it('shows the failed state on a 404 and the error state (with Retry) on a transient error', () => {
@@ -455,7 +455,7 @@ describe('OutlineViewComponent', () => {
     getScrollSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
     expect(component.state()).toBe('error');
-    expect(query('[data-testid="outline-retry-button"]')).not.toBeNull();
+    expect(query('[data-testid="tool-retry"]')).not.toBeNull();
   });
 
   it('renders the Theme & Purpose panel atop the worksheet in the ready state', () => {

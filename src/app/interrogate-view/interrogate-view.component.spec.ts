@@ -137,7 +137,7 @@ describe('InterrogateViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll({ status: 'extracting' })));
     fixture.detectChanges();
     expect(component.state()).toBe('preparing');
-    expect(query('[data-testid="interrogate-preparing"]')).toBeTruthy();
+    expect(query('[data-testid="tool-preparing"]')).toBeTruthy();
   });
 
   it('shows failed on a 404 and error (with Retry) on a transient failure', () => {
@@ -151,7 +151,7 @@ describe('InterrogateViewComponent', () => {
     getScrollSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
     expect(component.state()).toBe('error');
-    expect(query('[data-testid="interrogate-retry-button"]')).toBeTruthy();
+    expect(query('[data-testid="tool-retry"]')).toBeTruthy();
   });
 
   // --- entries ---

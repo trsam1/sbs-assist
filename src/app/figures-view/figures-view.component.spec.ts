@@ -137,7 +137,7 @@ describe('FiguresViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeStudy({ status: 'extracting' })));
     fixture.detectChanges();
     expect(component.state()).toBe('preparing');
-    expect(query('[data-testid="figures-preparing"]')).toBeTruthy();
+    expect(query('[data-testid="tool-preparing"]')).toBeTruthy();
     expect(suggestSpy).not.toHaveBeenCalled();
   });
 
@@ -152,7 +152,7 @@ describe('FiguresViewComponent', () => {
     getScrollSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
     expect(component.state()).toBe('error');
-    expect(query('[data-testid="figures-retry-button"]')).toBeTruthy();
+    expect(query('[data-testid="tool-retry"]')).toBeTruthy();
   });
 
   it('adds, edits and removes a figure entry; "other" reveals the label field', () => {

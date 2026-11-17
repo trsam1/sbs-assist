@@ -264,7 +264,7 @@ describe('AntecedentViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('preparing');
-    const back = query('[data-testid="antecedent-preparing-back"]') as HTMLAnchorElement;
+    const back = query('[data-testid="tool-preparing-back"]') as HTMLAnchorElement;
     expect(back.getAttribute('href')).toBe('/scroll/s1');
     expect(query('[data-testid="antecedent-table"]')).toBeNull();
   });
@@ -282,7 +282,7 @@ describe('AntecedentViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('failed');
-    const back = query('[data-testid="antecedent-failed-back"]') as HTMLAnchorElement;
+    const back = query('[data-testid="tool-failed-back"]') as HTMLAnchorElement;
     expect(back.getAttribute('href')).toBe('/scrolls');
   });
 
@@ -293,7 +293,7 @@ describe('AntecedentViewComponent', () => {
     );
     fixture.detectChanges();
     expect(component.state()).toBe('failed');
-    expect(query('[data-testid="antecedent-failed"]')?.textContent).toContain('file too large');
+    expect(query('[data-testid="tool-failed"]')?.textContent).toContain('file too large');
   });
 
   it('treats a non-404 load failure as a recoverable error with a working Retry', () => {
@@ -304,7 +304,7 @@ describe('AntecedentViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('error');
-    (query('[data-testid="antecedent-retry-button"]') as HTMLButtonElement).click();
+    (query('[data-testid="tool-retry"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(getScrollSpy).toHaveBeenCalledTimes(2);
     expect(component.state()).toBe('ready');
