@@ -8,6 +8,7 @@ import { BookStudy, Referent } from '../models';
 import { StepListComponent, WordStudyLink } from '../step-list/step-list.component';
 import { StudyCrudService } from '../study-crud.service';
 import { BookExportComponent } from '../book-bundle/book-export.component';
+import { BookSearchComponent } from '../book-bundle/book-search.component';
 import { StepStatus, StepStatusService } from '../step-list/step-status.service';
 
 type DetailState = 'loading' | 'loaded' | 'notfound' | 'error';
@@ -18,7 +19,14 @@ const REFERENT_LONG_MAX = 1000;
 
 @Component({
   selector: 'app-book-study-detail',
-  imports: [DatePipe, RouterLink, FormsModule, StepListComponent, BookExportComponent],
+  imports: [
+    DatePipe,
+    RouterLink,
+    FormsModule,
+    StepListComponent,
+    BookExportComponent,
+    BookSearchComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Book study detail">
@@ -77,6 +85,12 @@ const REFERENT_LONG_MAX = 1000;
             Created {{ bs.createdAt | date: 'medium' }} · Updated
             {{ bs.updatedAt | date: 'medium' }}
           </p>
+
+          <app-book-search
+            class="is-block mt-4"
+            [book]="bs"
+            [scrollStudyId]="linkedScroll()?.id ?? ''"
+          />
 
           <section class="mt-5" aria-label="Study steps" data-testid="steps-section">
             <h3 class="title is-5">Study steps</h3>

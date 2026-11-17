@@ -234,4 +234,100 @@ describe('BookStudyListComponent', () => {
     expect(errorNotif).not.toBeNull();
     expect(errorNotif!.textContent).toContain('Failed to delete book study');
   });
+
+  describe('search', () => {
+    function loadBooks(): void {
+      fixture.detectChanges();
+      httpTesting = getHttpTesting();
+      httpTesting
+        .expectOne((r) => r.url === `${environment.apiUrl}/books`)
+        .flush([
+          makeBookStudy({ id: 'b1', book: 'Romans', title: 'Grace', notes: 'justification' }),
+          makeBookStudy({ id: 'b2', book: 'John', title: '', notes: 'the Word' }),
+        ]);
+      fixture.detectChanges();
+    }
+
+    function type(text: string): void {
+      const input = query('[data-testid="books-search"]') as HTMLInputElement;
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+    }
+
+    const word = (id: string, w: string, strongs: string, notes = '') => ({
+      id,
+      userId: 'u',
+      createdAt: '',
+      updatedAt: '',
+      bookStudyIds: [],
+      wordStudies: [
+        {
+          word: w,
+          strongsNumber: strongs,
+          notes,
+          definitionNotes: '',
+          strongsNotes: '',
+          lexiconNotes: '',
+        },
+      ],
+    });
+
+    it('does not load word studies until something is searched', () => {
+      loadBooks();
+      httpTesting.expectNone(`${environment.apiUrl}/studies`);
+    });
+
+    it('filters books by name, title or notes, ignoring case and accents', () => {
+      loadBooks();
+      type('GRACE');
+      expect(queryAll('[data-testid="book-study-row"]').length).toBe(1);
+      type('word');
+      expect(queryAll('[data-testid="book-study-row"]').length).toBe(1);
+      expect(query('[data-testid="book-study-book"]')?.textContent).toContain('John');
+      type('');
+      expect(queryAll('[data-testid="book-study-row"]').length).toBe(2);
+    });
+
+    it('says so when no book matches', () => {
+      loadBooks();
+      type('zzz');
+      expect(query('[data-testid="no-book-matches"]')).not.toBeNull();
+    });
+
+    it('loads word studies once and lists the ones that match, with a link', () => {
+      loadBooks();
+      type('gr');
+      httpTesting
+        .expectOne(`${environment.apiUrl}/studies`)
+        .flush([word('w1', 'grace', 'G5485', 'favor'), word('w2', 'faith', 'G4102')]);
+      fixture.detectChanges();
+      expect(queryAll('[data-testid="word-study-match"]').length).toBe(1);
+      const link = query('[data-testid="word-study-match"] a') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/study/w1');
+
+      type('grace f'); // a second search does not call the API again
+      httpTesting.expectNone(`${environment.apiUrl}/studies`);
+      expect(queryAll('[data-testid="word-study-match"]').length).toBe(1);
+    });
+
+    it("matches a word study by Strong's number", () => {
+      loadBooks();
+      type('G4102');
+      httpTesting.expectOne(`${environment.apiUrl}/studies`).flush([word('w2', 'faith', 'G4102')]);
+      fixture.detectChanges();
+      expect(query('[data-testid="word-study-match"]')?.textContent).toContain('faith');
+    });
+
+    it('still filters books when the word study list cannot be loaded', () => {
+      loadBooks();
+      type('romans');
+      httpTesting
+        .expectOne(`${environment.apiUrl}/studies`)
+        .flush('x', { status: 500, statusText: 'err' });
+      fixture.detectChanges();
+      expect(queryAll('[data-testid="book-study-row"]').length).toBe(1);
+      expect(query('[data-testid="word-study-matches"]')).toBeNull();
+    });
+  });
 });

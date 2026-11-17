@@ -452,6 +452,15 @@ describe('BookStudyDetailComponent', () => {
     expect(query('[data-testid="export-json"]')).not.toBeNull();
   });
 
+  it('offers search for a loaded book', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="book-search"]')).not.toBeNull();
+    expect(query('[data-testid="book-search-input"]')).not.toBeNull();
+  });
+
   it('lists planned and manual steps without links', () => {
     mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
     createWith('b1');
