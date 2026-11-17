@@ -1,14 +1,23 @@
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  OnInit,
+  signal,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { BookStudyService } from '../book-study.service';
-import { BookStudy } from '../models';
+import { BookStudy, StudyWorksheet } from '../models';
+import { StudyCrudService } from '../study-crud.service';
+import { fold, queryWords } from '../book-bundle/book-search';
 
 export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 
 @Component({
   selector: 'app-book-study-list',
-  imports: [DatePipe],
+  imports: [DatePipe, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Book studies">
@@ -58,6 +67,47 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
               <p>No book studies yet. Create one to organize your work by book of the Bible.</p>
             </div>
           } @else {
+            <form
+              role="search"
+              aria-label="Search books and word studies"
+              class="mb-4"
+              (submit)="$event.preventDefault()"
+            >
+              <label class="is-sr-only" for="books-search">Search books and word studies</label>
+              <input
+                id="books-search"
+                class="input"
+                type="search"
+                placeholder="Search books, notes and word studies…"
+                [value]="bookQuery()"
+                (input)="onSearchInput($any($event.target).value)"
+                autocomplete="off"
+                data-testid="books-search"
+              />
+            </form>
+
+            @if (bookQuery().trim() && matchingWords().length > 0) {
+              <div class="box" data-testid="word-study-matches">
+                <p class="has-text-weight-semibold mb-2">Word studies</p>
+                <ul>
+                  @for (w of matchingWords(); track w.id) {
+                    <li data-testid="word-study-match">
+                      <a [routerLink]="['/study', w.id]">{{ w.word }}</a>
+                      @if (w.strongsNumber) {
+                        <span class="has-text-grey"> ({{ w.strongsNumber }})</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+
+            @if (visibleBooks().length === 0) {
+              <p class="has-text-grey" data-testid="no-book-matches">
+                No books match "{{ bookQuery().trim() }}".
+              </p>
+            }
+
             <div class="table-container">
               <table class="table is-fullwidth is-hoverable" aria-label="Book studies list">
                 <thead>
@@ -69,7 +119,7 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (bookStudy of bookStudies(); track bookStudy.id) {
+                  @for (bookStudy of visibleBooks(); track bookStudy.id) {
                     <tr data-testid="book-study-row">
                       <td data-testid="book-study-title">{{ displayTitle(bookStudy) }}</td>
                       <td data-testid="book-study-book">{{ bookStudy.book }}</td>
@@ -171,9 +221,65 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 export class BookStudyListComponent implements OnInit {
   private readonly bookStudyService = inject(BookStudyService);
   private readonly router = inject(Router);
+  private readonly studyCrud = inject(StudyCrudService);
 
   readonly state = signal<ListState>('idle');
   readonly bookStudies = signal<BookStudy[]>([]);
+
+  /** What the student typed in the search box. */
+  readonly bookQuery = signal('');
+  /** The student's word studies, loaded once, the first time something is searched. Null until then. */
+  private readonly allWordStudies = signal<StudyWorksheet[] | null>(null);
+  private wordsRequested = false;
+
+  /** Books whose name, title or notes contain every word typed (all books when the box is empty). */
+  readonly visibleBooks = computed(() => {
+    const words = queryWords(this.bookQuery());
+    if (words.length === 0) return this.bookStudies();
+    return this.bookStudies().filter((b) => {
+      const hay = fold(`${b.book} ${b.title} ${b.notes}`).norm;
+      return words.every((w) => hay.includes(w));
+    });
+  });
+
+  /** Word studies whose word, Strong's number or notes match, at most 25. */
+  readonly matchingWords = computed(() => {
+    const words = queryWords(this.bookQuery());
+    const all = this.allWordStudies();
+    if (words.length === 0 || !all) return [];
+    return all
+      .flatMap((s) =>
+        s.wordStudies.map((w) => ({
+          id: s.id,
+          word: w.word,
+          strongsNumber: w.strongsNumber,
+          hay: fold(
+            [
+              w.word,
+              w.strongsNumber,
+              w.notes,
+              w.definitionNotes,
+              w.strongsNotes,
+              w.lexiconNotes,
+            ].join(' '),
+          ).norm,
+        })),
+      )
+      .filter((w) => words.every((q) => w.hay.includes(q)))
+      .slice(0, 25);
+  });
+
+  onSearchInput(value: string): void {
+    this.bookQuery.set(value);
+    // One call, only once something is searched, and never per book.
+    if (value.trim() && !this.wordsRequested) {
+      this.wordsRequested = true;
+      this.studyCrud.listStudies().subscribe({
+        next: (studies) => this.allWordStudies.set(studies),
+        error: () => this.allWordStudies.set([]),
+      });
+    }
+  }
 
   /** The book study currently pending deletion confirmation. */
   readonly bookStudyToDelete = signal<BookStudy | null>(null);
