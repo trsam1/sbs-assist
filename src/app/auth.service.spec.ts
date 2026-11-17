@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { signIn, confirmSignIn, getCurrentUser } from 'aws-amplify/auth';
-import { AuthService } from './auth.service';
+import type { AuthService as AuthServiceType } from './auth.service';
 
 vi.mock('aws-amplify/auth', () => ({
   signIn: vi.fn(),
@@ -13,22 +12,32 @@ vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(),
 }));
 
-const signInMock = vi.mocked(signIn);
-const confirmSignInMock = vi.mocked(confirmSignIn);
-const getCurrentUserMock = vi.mocked(getCurrentUser);
+type AmplifyAuth = typeof import('aws-amplify/auth');
 
 describe('AuthService sign-in challenge handling', () => {
-  let service: AuthService;
+  let service: AuthServiceType;
+  let signInMock: ReturnType<typeof vi.mocked<AmplifyAuth['signIn']>>;
+  let confirmSignInMock: ReturnType<typeof vi.mocked<AmplifyAuth['confirmSignIn']>>;
+  let getCurrentUserMock: ReturnType<typeof vi.mocked<AmplifyAuth['getCurrentUser']>>;
 
   beforeEach(async () => {
+    // Another spec may already have loaded the real auth module into this worker's cache, which
+    // would bypass vi.mock above. Reset the registry and import fresh so the mock always applies.
+    vi.resetModules();
+    const amplifyAuth = await import('aws-amplify/auth');
+    signInMock = vi.mocked(amplifyAuth.signIn);
+    confirmSignInMock = vi.mocked(amplifyAuth.confirmSignIn);
+    getCurrentUserMock = vi.mocked(amplifyAuth.getCurrentUser);
+    const { AuthService } = await import('./auth.service');
     vi.clearAllMocks();
     // Constructor calls checkSession(); reject so the service lands on signedOut.
     getCurrentUserMock.mockRejectedValue(new Error('not authenticated'));
     TestBed.configureTestingModule({});
     service = TestBed.inject(AuthService);
     // Let the constructor's checkSession() settle to signedOut.
-    await Promise.resolve();
-    await Promise.resolve();
+    // Wait for the real signal instead of a fixed number of microtask ticks, so a late
+    // checkSession() can never overwrite a state a test sets afterwards.
+    await vi.waitFor(() => expect(service.state()).toBe('signedOut'));
   });
 
   it('(a) sets signed-in state when sign-in completes', async () => {
