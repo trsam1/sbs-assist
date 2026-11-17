@@ -442,6 +442,16 @@ describe('BookStudyDetailComponent', () => {
     expect(query('[data-testid="memorize-due"]')?.textContent).toContain('3 due');
   });
 
+  it('offers the export control for a loaded book', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="book-export"]')).not.toBeNull();
+    expect(query('[data-testid="export-markdown"]')).not.toBeNull();
+    expect(query('[data-testid="export-json"]')).not.toBeNull();
+  });
+
   it('lists planned and manual steps without links', () => {
     mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
     createWith('b1');
