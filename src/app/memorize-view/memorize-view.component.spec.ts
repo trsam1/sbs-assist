@@ -3,6 +3,7 @@ import { ActivatedRoute, provideRouter } from '@angular/router';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { MemorizeViewComponent } from './memorize-view.component';
+import { MemorizeStore } from './memorize-store';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
 import { RecitationGradeService } from '../recitation-grade.service';
@@ -59,6 +60,7 @@ function makeOutline(paragraphs: OutlineParagraph[]): OutlineStudy {
 describe('MemorizeViewComponent', () => {
   let fixture: ComponentFixture<MemorizeViewComponent>;
   let component: MemorizeViewComponent;
+  let store: MemorizeStore;
   let getScrollSpy: ReturnType<typeof vi.fn>;
   let getStudySpy: ReturnType<typeof vi.fn>;
   let saveSpy: ReturnType<typeof vi.fn>;
@@ -116,12 +118,13 @@ describe('MemorizeViewComponent', () => {
     });
     fixture = TestBed.createComponent(MemorizeViewComponent);
     component = fixture.componentInstance;
+    store = component.store;
   }
 
   // Seed three chunks (one verse each) for drill/edit tests.
   function seedThree(): void {
-    component.setVersesPerChunk(1);
-    component.seedByVerseCount();
+    store.setVersesPerChunk(1);
+    store.seedByVerseCount();
   }
 
   function query(sel: string): HTMLElement | null {
@@ -146,7 +149,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    expect(component.state()).toBe('ready');
+    expect(store.state()).toBe('ready');
     expect(query('[data-testid="memorize-empty"]')).toBeTruthy();
     expect(query('[data-testid="seed-by-verses"]')).toBeTruthy();
   });
@@ -172,7 +175,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll({ scrollText: 'prose with no markers at all' })));
     fixture.detectChanges();
-    expect(component.hasVerseMarkers()).toBe(false);
+    expect(store.hasVerseMarkers()).toBe(false);
     expect(query('[data-testid="seed-blocked"]')).toBeTruthy();
   });
 
@@ -182,8 +185,8 @@ describe('MemorizeViewComponent', () => {
     fixture.detectChanges();
     seedThree();
     fixture.detectChanges();
-    expect(component.chunks().length).toBe(3);
-    expect(component.chunks().map((c) => c.verseRef)).toEqual(['1', '2', '3']);
+    expect(store.chunks().length).toBe(3);
+    expect(store.chunks().map((c) => c.verseRef)).toEqual(['1', '2', '3']);
     expect(queryAll('[data-testid="memorize-chunk-row"]').length).toBe(3);
   });
 
@@ -191,9 +194,9 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
-    component.setVersesPerChunk(2);
-    component.seedByVerseCount();
-    expect(component.chunks().map((c) => c.verseRef)).toEqual(['1-2', '3']);
+    store.setVersesPerChunk(2);
+    store.seedByVerseCount();
+    expect(store.chunks().map((c) => c.verseRef)).toEqual(['1-2', '3']);
   });
 
   it('seeds from Step 8 paragraphs, flagging any unmapped paragraph', () => {
@@ -208,10 +211,10 @@ describe('MemorizeViewComponent', () => {
       ),
     );
     fixture.detectChanges();
-    component.seedFromOutline();
+    store.seedFromOutline();
     fixture.detectChanges();
-    expect(component.chunks().map((c) => c.verseRef)).toEqual(['1-2']);
-    expect(component.seedUnmapped()).toEqual([1]);
+    expect(store.chunks().map((c) => c.verseRef)).toEqual(['1-2']);
+    expect(store.seedUnmapped()).toEqual([1]);
     expect(query('[data-testid="seed-unmapped"]')).toBeTruthy();
   });
 
@@ -244,15 +247,15 @@ describe('MemorizeViewComponent', () => {
     );
     fixture.detectChanges();
     expect(queryAll('[data-testid="memorize-chunk-row"]').length).toBe(2);
-    expect(component.chunkStates()).toEqual(['solid', 'learning']);
-    expect(component.progressLabel()).toBe('1 of 2 chunks solid');
+    expect(store.chunkStates()).toEqual(['solid', 'learning']);
+    expect(store.progressLabel()).toBe('1 of 2 chunks solid');
   });
 
   it('shows preparing + back link for an uploading scroll', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll({ status: 'uploading' })));
     fixture.detectChanges();
-    expect(component.state()).toBe('preparing');
+    expect(store.state()).toBe('preparing');
     expect(query('[data-testid="tool-preparing"]')).toBeTruthy();
     expect(query('[data-testid="tool-preparing-back"]')).toBeTruthy();
   });
@@ -261,7 +264,7 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(of(makeScroll({ status: 'failed', failureReason: 'bad file' })));
     fixture.detectChanges();
-    expect(component.state()).toBe('failed');
+    expect(store.state()).toBe('failed');
     expect(query('[data-testid="tool-failed"]')?.textContent).toContain('bad file');
   });
 
@@ -269,13 +272,13 @@ describe('MemorizeViewComponent', () => {
     configure();
     getScrollSpy.mockReturnValue(throwError(() => ({ status: 404 })));
     fixture.detectChanges();
-    expect(component.state()).toBe('failed');
+    expect(store.state()).toBe('failed');
 
     TestBed.resetTestingModule();
     configure();
     getScrollSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
-    expect(component.state()).toBe('error');
+    expect(store.state()).toBe('error');
     expect(query('[data-testid="tool-retry"]')).toBeTruthy();
   });
 
@@ -287,24 +290,24 @@ describe('MemorizeViewComponent', () => {
     fixture.detectChanges();
     seedThree();
 
-    component.setVerseRef(0, '1:1');
-    expect(component.chunks()[0].verseRef).toBe('1:1');
+    store.setVerseRef(0, '1:1');
+    expect(store.chunks()[0].verseRef).toBe('1:1');
 
     // Progress is EARNED from the schedule, not set by hand: freshly seeded chunks are all "new".
-    expect(component.chunkStates().every((s) => s === 'new')).toBe(true);
-    expect(component.progressLabel()).toBe('0 of 3 chunks solid');
+    expect(store.chunkStates().every((s) => s === 'new')).toBe(true);
+    expect(store.progressLabel()).toBe('0 of 3 chunks solid');
 
     // merge chunk 1 into chunk 0 → union of ranges, count drops
-    const before = component.chunks().length;
-    const c0start = component.chunks()[0].start;
-    const c1end = component.chunks()[1].end;
-    component.mergeUp(1);
-    expect(component.chunks().length).toBe(before - 1);
-    expect(component.chunks()[0].start).toBe(c0start);
-    expect(component.chunks()[0].end).toBe(c1end);
+    const before = store.chunks().length;
+    const c0start = store.chunks()[0].start;
+    const c1end = store.chunks()[1].end;
+    store.mergeUp(1);
+    expect(store.chunks().length).toBe(before - 1);
+    expect(store.chunks()[0].start).toBe(c0start);
+    expect(store.chunks()[0].end).toBe(c1end);
 
-    component.removeChunk(0);
-    expect(component.chunks().length).toBe(before - 2);
+    store.removeChunk(0);
+    expect(store.chunks().length).toBe(before - 2);
   });
 
   // --- drill modes ---
@@ -314,13 +317,13 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
     seedThree();
-    component.setMode('chain');
-    component.setActive(1);
+    store.setMode('chain');
+    store.setActive(1);
     fixture.detectChanges();
     // active text is the 2nd verse; chained run includes the 1st too
-    expect(component.activeText()).toContain('And the earth');
-    expect(component.chainRun()).toContain('In the beginning');
-    expect(component.chainRun()).toContain('And the earth');
+    expect(store.activeText()).toContain('And the earth');
+    expect(store.chainRun()).toContain('In the beginning');
+    expect(store.chainRun()).toContain('And the earth');
   });
 
   it('reveal mode steps full → first-letters → blank', () => {
@@ -328,16 +331,16 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
     seedThree();
-    component.setMode('reveal');
-    component.setActive(0);
+    store.setMode('reveal');
+    store.setActive(0);
 
-    component.setReveal('full');
-    expect(component.revealText()).toBe('1 In the beginning.');
-    component.setReveal('first');
-    expect(component.revealText()).toContain('I_'); // "In" → "I_"
-    expect(component.revealText()).not.toContain('beginning');
-    component.setReveal('blank');
-    expect(component.revealText()).not.toMatch(/[a-zA-Z]/);
+    store.setReveal('full');
+    expect(store.revealText()).toBe('1 In the beginning.');
+    store.setReveal('first');
+    expect(store.revealText()).toContain('I_'); // "In" → "I_"
+    expect(store.revealText()).not.toContain('beginning');
+    store.setReveal('blank');
+    expect(store.revealText()).not.toMatch(/[a-zA-Z]/);
   });
 
   it('cloze mode blanks every Nth word and grades typed answers client-side', () => {
@@ -345,24 +348,24 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
     seedThree();
-    component.setMode('cloze');
-    component.setActive(0);
-    component.setClozeN(2);
+    store.setMode('cloze');
+    store.setActive(0);
+    store.setClozeN(2);
 
-    const tokens = component.clozeTokens();
+    const tokens = store.clozeTokens();
     const blankIndices = tokens.map((t, i) => (t.blank ? i : -1)).filter((i) => i >= 0);
     expect(blankIndices.length).toBeGreaterThan(0);
 
     // Type the correct answer for the first blank, a wrong one for the next.
     const first = blankIndices[0];
-    component.setClozeTyped(first, tokens[first].text);
+    store.setClozeTyped(first, tokens[first].text);
     if (blankIndices[1] !== undefined) {
-      component.setClozeTyped(blankIndices[1], 'definitely-wrong');
+      store.setClozeTyped(blankIndices[1], 'definitely-wrong');
     }
-    component.checkCloze();
-    expect(component.clozeResult()[first]).toBe(true);
+    store.checkCloze();
+    expect(store.clozeResult()[first]).toBe(true);
     if (blankIndices[1] !== undefined) {
-      expect(component.clozeResult()[blankIndices[1]]).toBe(false);
+      expect(store.clozeResult()[blankIndices[1]]).toBe(false);
     }
     // No service call was made for grading.
     expect(saveSpy).not.toHaveBeenCalled();
@@ -375,8 +378,8 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
     seedThree();
-    component.setState(0, 'learning');
-    component.save();
+    store.setState(0, 'learning');
+    store.save();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     const [, input] = saveSpy.mock.calls[0];
@@ -384,7 +387,7 @@ describe('MemorizeViewComponent', () => {
     for (const c of input.chunks as MemorizationChunk[]) {
       expect(Object.keys(c).sort()).toEqual(['end', 'start', 'state', 'verseRef']);
     }
-    expect(component.saved()).toBe(true);
+    expect(store.saved()).toBe(true);
   });
 
   it('keeps chunks and shows an inline error when save fails', () => {
@@ -393,11 +396,11 @@ describe('MemorizeViewComponent', () => {
     saveSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
     seedThree();
-    const count = component.chunks().length;
-    component.save();
+    const count = store.chunks().length;
+    store.save();
     fixture.detectChanges();
-    expect(component.saveError()).toBe(true);
-    expect(component.chunks().length).toBe(count); // values kept
+    expect(store.saveError()).toBe(true);
+    expect(store.chunks().length).toBe(count); // values kept
   });
 
   it('depends only on scroll/memorization/outline services (no AI call)', () => {
@@ -405,7 +408,7 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll()));
     fixture.detectChanges();
     seedThree();
-    component.save();
+    store.save();
     // The only services touched are the scroll loader, outline reader, and the memorization CRUD.
     expect(getScrollSpy).toHaveBeenCalled();
     expect(saveSpy).toHaveBeenCalled();
@@ -437,12 +440,12 @@ describe('MemorizeViewComponent', () => {
         ),
       );
       fixture.detectChanges();
-      component.setToday(TODAY);
+      store.setToday(TODAY);
       fixture.detectChanges();
 
-      expect(component.dueCount()).toBe(2);
+      expect(store.dueCount()).toBe(2);
       // overdue (dueDate earliest) before due-today
-      expect(component.dueQueue().map((r) => r.verseRef)).toEqual(['2', '3']);
+      expect(store.dueQueue().map((r) => r.verseRef)).toEqual(['2', '3']);
       expect(query('[data-testid="memorize-due-count"]')?.textContent).toContain('2');
       expect(queryAll('[data-testid="memorize-due-row"]').length).toBe(2);
     });
@@ -452,9 +455,9 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk({ dueDate: isoDay(10) })] })));
       fixture.detectChanges();
-      component.setToday(TODAY);
+      store.setToday(TODAY);
       fixture.detectChanges();
-      expect(component.dueCount()).toBe(0);
+      expect(store.dueCount()).toBe(0);
       expect(query('[data-testid="memorize-due-empty"]')).toBeTruthy();
     });
 
@@ -465,9 +468,9 @@ describe('MemorizeViewComponent', () => {
         of(makeStudy({ chunks: [chunk(), chunk({ start: 21, end: 48 })] })),
       );
       fixture.detectChanges();
-      component.setToday(TODAY);
+      store.setToday(TODAY);
       fixture.detectChanges();
-      expect(component.dueCount()).toBe(2);
+      expect(store.dueCount()).toBe(2);
     });
 
     it('grading Good updates the active chunk schedule, persists, and advances the next-due label', () => {
@@ -475,12 +478,12 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk()] })));
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setActive(0);
+      store.setToday(TODAY);
+      store.setActive(0);
 
-      component.grade('good');
+      store.grade('good');
       // first successful recall → interval 1, reps 1, dueDate = tomorrow
-      const graded = component.chunks()[0];
+      const graded = store.chunks()[0];
       expect(graded.repetitions).toBe(1);
       expect(graded.intervalDays).toBe(1);
       expect(graded.dueDate).toBe(isoDay(1));
@@ -491,8 +494,8 @@ describe('MemorizeViewComponent', () => {
       expect((input.chunks as MemorizationChunk[])[0].intervalDays).toBe(1);
 
       fixture.detectChanges();
-      component.setToday(TODAY);
-      expect(component.activeDueLabel()).toBe('due tomorrow');
+      store.setToday(TODAY);
+      expect(store.activeDueLabel()).toBe('due tomorrow');
     });
 
     it('grading Again resets the chunk to a 1-day interval', () => {
@@ -508,11 +511,11 @@ describe('MemorizeViewComponent', () => {
         ),
       );
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setActive(0);
+      store.setToday(TODAY);
+      store.setActive(0);
 
-      component.grade('again');
-      const graded = component.chunks()[0];
+      store.grade('again');
+      const graded = store.chunks()[0];
       expect(graded.repetitions).toBe(0);
       expect(graded.intervalDays).toBe(1);
       expect(graded.dueDate).toBe(isoDay(1));
@@ -523,10 +526,10 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk({ state: 'chained' })] })));
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setActive(0);
-      component.grade('easy');
-      expect(component.chunks()[0].state).toBe('chained'); // untouched
+      store.setToday(TODAY);
+      store.setActive(0);
+      store.grade('easy');
+      expect(store.chunks()[0].state).toBe('chained'); // untouched
     });
 
     it('keeps the optimistic schedule and shows the error when a graded save fails', () => {
@@ -535,13 +538,13 @@ describe('MemorizeViewComponent', () => {
       getStudySpy.mockReturnValue(of(makeStudy({ chunks: [chunk()] })));
       saveSpy.mockReturnValue(throwError(() => ({ status: 500 })));
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setActive(0);
-      component.grade('good');
+      store.setToday(TODAY);
+      store.setActive(0);
+      store.grade('good');
       fixture.detectChanges();
-      expect(component.saveError()).toBe(true);
+      expect(store.saveError()).toBe(true);
       // schedule was applied optimistically and is kept for the retry
-      expect(component.chunks()[0].intervalDays).toBe(1);
+      expect(store.chunks()[0].intervalDays).toBe(1);
     });
   });
 
@@ -554,7 +557,7 @@ describe('MemorizeViewComponent', () => {
       fixture.detectChanges();
       const toggle = query('[data-testid="reminder-optin"]') as HTMLInputElement | null;
       expect(toggle).toBeTruthy();
-      expect(component.reminderOptIn()).toBe(false);
+      expect(store.reminderOptIn()).toBe(false);
       expect(toggle!.checked).toBe(false);
       // hour selector hidden while off
       expect(query('[data-testid="reminder-hour"]')).toBeFalsy();
@@ -565,8 +568,8 @@ describe('MemorizeViewComponent', () => {
       getPrefSpy.mockReturnValue(of({ reminderOptIn: true, reminderHour: 8 }));
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges();
-      expect(component.reminderOptIn()).toBe(true);
-      expect(component.reminderHour()).toBe(8);
+      expect(store.reminderOptIn()).toBe(true);
+      expect(store.reminderHour()).toBe(8);
       expect(query('[data-testid="reminder-hour"]')).toBeTruthy();
     });
 
@@ -574,9 +577,9 @@ describe('MemorizeViewComponent', () => {
       configure();
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges();
-      component.setReminderOptIn(true);
+      store.setReminderOptIn(true);
       expect(putPrefSpy).toHaveBeenCalledWith({ reminderOptIn: true });
-      expect(component.reminderOptIn()).toBe(true);
+      expect(store.reminderOptIn()).toBe(true);
     });
 
     it('persists the hour, clamped to 0–23', () => {
@@ -584,8 +587,8 @@ describe('MemorizeViewComponent', () => {
       getPrefSpy.mockReturnValue(of({ reminderOptIn: true }));
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges();
-      component.setReminderHour(99);
-      expect(component.reminderHour()).toBe(23);
+      store.setReminderHour(99);
+      expect(store.reminderHour()).toBe(23);
       expect(putPrefSpy).toHaveBeenCalledWith({ reminderOptIn: true, reminderHour: 23 });
     });
 
@@ -594,10 +597,10 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       putPrefSpy.mockReturnValue(throwError(() => ({ status: 500 })));
       fixture.detectChanges();
-      component.setReminderOptIn(true);
+      store.setReminderOptIn(true);
       fixture.detectChanges();
-      expect(component.reminderError()).toMatch(/could not save/i);
-      expect(component.reminderOptIn()).toBe(true);
+      expect(store.reminderError()).toMatch(/could not save/i);
+      expect(store.reminderOptIn()).toBe(true);
     });
   });
 
@@ -617,7 +620,7 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       getStudySpy.mockReturnValue(of(makeStudy({ chunks })));
       fixture.detectChanges();
-      component.setToday(TODAY);
+      store.setToday(TODAY);
     }
 
     it('renders the Review/Edit toggle and defaults to Edit', () => {
@@ -625,7 +628,7 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges();
       expect(query('[data-testid="memorize-mode-toggle"]')).toBeTruthy();
-      expect(component.viewMode()).toBe('edit');
+      expect(store.viewMode()).toBe('edit');
       // Edit mode shows the worksheet
       expect(query('[data-testid="seed-controls"]')).toBeTruthy();
       expect(query('[data-testid="memorize-review"]')).toBeFalsy();
@@ -633,9 +636,9 @@ describe('MemorizeViewComponent', () => {
 
     it('switching to Review renders the flashcard and hides the worksheet', () => {
       loadWithChunks([chunk()]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
-      expect(component.viewMode()).toBe('review');
+      expect(store.viewMode()).toBe('review');
       expect(query('[data-testid="memorize-review"]')).toBeTruthy();
       expect(query('[data-testid="review-card"]')).toBeTruthy();
       // worksheet is gone in review mode
@@ -654,13 +657,13 @@ describe('MemorizeViewComponent', () => {
         }), // overdue review
         chunk({ start: 50, end: 70, verseRef: '3', dueDate: isoDay(0), lastReviewed: isoDay(-2) }), // due review
       ]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
       // deck holds the two due REVIEW chunks, overdue first (indices 1 then 2)
-      expect(component.deck()).toEqual([1, 2]);
-      expect(component.deckProgress()).toEqual({ pos: 0, total: 2 });
+      expect(store.deck()).toEqual([1, 2]);
+      expect(store.deckProgress()).toEqual({ pos: 0, total: 2 });
       expect(query('[data-testid="review-progress"]')?.textContent).toContain('Card 1 of 2');
-      expect(component.cardRef()).toBe('2');
+      expect(store.cardRef()).toBe('2');
     });
 
     it('meters new chunks per day: review chunks always in, new chunks capped', () => {
@@ -670,92 +673,92 @@ describe('MemorizeViewComponent', () => {
         chunk({ start: 50, end: 70, verseRef: '3' }), // new
         chunk({ start: 72, end: 90, verseRef: '4' }), // new
       ]);
-      component.setNewPerDay(1);
-      component.setViewMode('review');
+      store.setNewPerDay(1);
+      store.setViewMode('review');
       fixture.detectChanges();
       // the review chunk (0) plus exactly ONE new chunk (2); chunks 3,4 held back
-      expect(component.deck()).toEqual([0, 1]);
-      expect(component.newChunkCount()).toBe(3);
+      expect(store.deck()).toEqual([0, 1]);
+      expect(store.newChunkCount()).toBe(3);
 
       // raising the limit re-introduces the rest immediately
-      component.setNewPerDay(5);
-      expect(component.deck()).toEqual([0, 1, 2, 3]);
+      store.setNewPerDay(5);
+      expect(store.deck()).toEqual([0, 1, 2, 3]);
     });
 
     it('shows the no-chunks empty state pointing at Edit', () => {
       configure();
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges();
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
       expect(query('[data-testid="review-no-chunks"]')).toBeTruthy();
     });
 
     it('shows the all-caught-up state when nothing is due', () => {
       loadWithChunks([chunk({ dueDate: isoDay(10) })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
-      expect(component.deck()).toEqual([]);
-      expect(component.deckComplete()).toBe(true);
+      expect(store.deck()).toEqual([]);
+      expect(store.deckComplete()).toBe(true);
       expect(query('[data-testid="review-complete"]')).toBeTruthy();
     });
 
     it('flips the card to reveal the chunk text, and the grade row appears only when flipped', () => {
       loadWithChunks([chunk({ verseRef: '1' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
-      expect(component.flipped()).toBe(false);
+      expect(store.flipped()).toBe(false);
       expect(query('[data-testid="review-grade-row"]')).toBeFalsy();
 
-      component.flip();
+      store.flip();
       fixture.detectChanges();
-      expect(component.flipped()).toBe(true);
+      expect(store.flipped()).toBe(true);
       expect(query('[data-testid="review-card-back"]')?.textContent).toContain('In the beginning');
       expect(query('[data-testid="review-grade-row"]')).toBeTruthy();
     });
 
     it('toggles the first-letters scaffold on the front', () => {
       loadWithChunks([chunk({ verseRef: '1' })]);
-      component.setViewMode('review');
-      component.toggleScaffold();
+      store.setViewMode('review');
+      store.toggleScaffold();
       fixture.detectChanges();
-      expect(component.scaffold()).toBe('first');
+      expect(store.scaffold()).toBe('first');
       expect(query('[data-testid="review-scaffold"]')?.textContent).toContain('I_'); // "In" → "I_"
     });
 
     it('grading a card runs SM-2, persists, and auto-advances to the next card', () => {
       loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
-      expect(component.currentCardIndex()).toBe(0);
+      expect(store.currentCardIndex()).toBe(0);
 
-      component.flip();
-      component.gradeCard('good');
+      store.flip();
+      store.gradeCard('good');
       // graded the first chunk via the SM-2 path
       expect(saveSpy).toHaveBeenCalledTimes(1);
-      expect(component.chunks()[0].intervalDays).toBe(1);
-      expect(component.chunks()[0].repetitions).toBe(1);
+      expect(store.chunks()[0].intervalDays).toBe(1);
+      expect(store.chunks()[0].repetitions).toBe(1);
       // advanced to the next card, flipped reset
-      expect(component.deckPos()).toBe(1);
-      expect(component.currentCardIndex()).toBe(1);
-      expect(component.flipped()).toBe(false);
+      expect(store.deckPos()).toBe(1);
+      expect(store.currentCardIndex()).toBe(1);
+      expect(store.flipped()).toBe(false);
     });
 
     it('an Again grade in redo-now mode (default) keeps the same card up', () => {
       loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
-      expect(component.againMode()).toBe('now'); // default
-      expect(component.deck()).toEqual([0, 1]);
+      expect(store.againMode()).toBe('now'); // default
+      expect(store.deck()).toEqual([0, 1]);
 
-      component.flip();
-      expect(component.flipped()).toBe(true);
-      component.gradeCard('again');
+      store.flip();
+      expect(store.flipped()).toBe(true);
+      store.gradeCard('again');
       // still on card 0, flipped back to the front to try again — NOT advanced
-      expect(component.deckPos()).toBe(0);
-      expect(component.currentCardIndex()).toBe(0);
-      expect(component.flipped()).toBe(false);
-      expect(component.deck()).toEqual([0, 1]); // deck unchanged
+      expect(store.deckPos()).toBe(0);
+      expect(store.currentCardIndex()).toBe(0);
+      expect(store.flipped()).toBe(false);
+      expect(store.deck()).toEqual([0, 1]); // deck unchanged
       expect(saveSpy).toHaveBeenCalledTimes(1); // the miss was still recorded
     });
 
@@ -765,89 +768,89 @@ describe('MemorizeViewComponent', () => {
         chunk({ start: 21, end: 48, verseRef: '2' }),
         chunk({ start: 50, end: 70, verseRef: '3' }),
       ]);
-      component.setNewPerDay(10); // introduce all three new chunks
-      component.setViewMode('review');
-      component.setAgainMode('later');
+      store.setNewPerDay(10); // introduce all three new chunks
+      store.setViewMode('review');
+      store.setAgainMode('later');
       fixture.detectChanges();
-      expect(component.deck()).toEqual([0, 1, 2]);
+      expect(store.deck()).toEqual([0, 1, 2]);
 
-      component.flip();
-      component.gradeCard('again');
+      store.flip();
+      store.gradeCard('again');
       // card 0 requeued ~3 cards on (clamped to end here), advanced to position 1
-      expect(component.deck()).toEqual([0, 1, 2, 0]);
-      expect(component.deckPos()).toBe(1);
-      expect(component.currentCardIndex()).toBe(1);
+      expect(store.deck()).toEqual([0, 1, 2, 0]);
+      expect(store.deckPos()).toBe(1);
+      expect(store.currentCardIndex()).toBe(1);
     });
 
     it('grading does not change the stored learned-state field (axes stay orthogonal)', () => {
       loadWithChunks([chunk({ verseRef: '1', state: 'chained' })]);
-      component.setViewMode('review');
-      component.flip();
-      component.gradeCard('easy');
-      expect(component.chunks()[0].state).toBe('chained');
+      store.setViewMode('review');
+      store.flip();
+      store.gradeCard('easy');
+      expect(store.chunks()[0].state).toBe('chained');
     });
 
     it('completes the deck after the last card is graded', () => {
       loadWithChunks([chunk({ verseRef: '1' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
-      component.flip();
-      component.gradeCard('good');
+      store.flip();
+      store.gradeCard('good');
       fixture.detectChanges();
-      expect(component.deckComplete()).toBe(true);
+      expect(store.deckComplete()).toBe(true);
       expect(query('[data-testid="review-complete"]')).toBeTruthy();
     });
 
     it('keyboard: Space flips, then 1-4 grade', () => {
       loadWithChunks([chunk({ verseRef: '1' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
 
-      component.onCardKeydown(new KeyboardEvent('keydown', { key: ' ' }));
-      expect(component.flipped()).toBe(true);
+      store.onCardKeydown(new KeyboardEvent('keydown', { key: ' ' }));
+      expect(store.flipped()).toBe(true);
 
-      component.onCardKeydown(new KeyboardEvent('keydown', { key: '3' })); // good
+      store.onCardKeydown(new KeyboardEvent('keydown', { key: '3' })); // good
       expect(saveSpy).toHaveBeenCalledTimes(1);
-      expect(component.chunks()[0].repetitions).toBe(1);
+      expect(store.chunks()[0].repetitions).toBe(1);
     });
 
     it('document keydown is ignored when focus is in a form field', () => {
       loadWithChunks([chunk({ verseRef: '1' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
       const input = document.createElement('input');
       const e = new KeyboardEvent('keydown', { key: ' ' });
       Object.defineProperty(e, 'target', { value: input });
       component.onDocumentKeydown(e);
-      expect(component.flipped()).toBe(false); // not flipped — ignored
+      expect(store.flipped()).toBe(false); // not flipped — ignored
     });
 
     it('swipe up no longer flips; swipe left grades Again (redo-now keeps the same card)', () => {
       loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
 
       // swipe up → no flip (tap, Space or Reveal flips)
-      component.onCardPointerDown({ clientX: 100, clientY: 300 } as PointerEvent);
-      component.onCardPointerUp({ clientX: 100, clientY: 210 } as PointerEvent);
-      expect(component.flipped()).toBe(false);
+      store.onCardPointerDown({ clientX: 100, clientY: 300 } as PointerEvent);
+      store.onCardPointerUp({ clientX: 100, clientY: 210 } as PointerEvent);
+      expect(store.flipped()).toBe(false);
 
       // reveal, then swipe left → grade again; default redo-now keeps the same card
-      component.flip();
-      component.onCardPointerDown({ clientX: 200, clientY: 100 } as PointerEvent);
-      component.onCardPointerUp({ clientX: 110, clientY: 100 } as PointerEvent);
+      store.flip();
+      store.onCardPointerDown({ clientX: 200, clientY: 100 } as PointerEvent);
+      store.onCardPointerUp({ clientX: 110, clientY: 100 } as PointerEvent);
       expect(saveSpy).toHaveBeenCalled();
-      expect(component.deckPos()).toBe(0);
-      expect(component.flipped()).toBe(false);
+      expect(store.deckPos()).toBe(0);
+      expect(store.flipped()).toBe(false);
     });
 
     it('renders the review card as flowing text with no 3-D flip markup', () => {
       loadWithChunks([chunk({ start: 0, end: SCROLL_TEXT.length, verseRef: '1-3' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
       expect(query('.flashcard')).toBeFalsy();
       expect(query('[data-testid="review-card-back"]')).toBeFalsy();
-      component.flip();
+      store.flip();
       fixture.detectChanges();
       const back = query('[data-testid="review-card-back"]')?.textContent ?? '';
       expect(back).toContain('In the beginning.');
@@ -856,10 +859,10 @@ describe('MemorizeViewComponent', () => {
 
     it('dismisses the shortcut legend', () => {
       loadWithChunks([chunk({ verseRef: '1' })]);
-      component.setViewMode('review');
+      store.setViewMode('review');
       fixture.detectChanges();
       expect(query('[data-testid="review-legend"]')).toBeTruthy();
-      component.dismissLegend();
+      store.dismissLegend();
       fixture.detectChanges();
       expect(query('[data-testid="review-legend"]')).toBeFalsy();
     });
@@ -887,8 +890,8 @@ describe('MemorizeViewComponent', () => {
         of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })), // never reviewed → due
       );
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setViewMode('test');
+      store.setToday(TODAY);
+      store.setViewMode('test');
       fixture.detectChanges();
     }
 
@@ -896,13 +899,13 @@ describe('MemorizeViewComponent', () => {
       enterTestWithDueChunk();
       expect(query('[data-testid="mode-test"]')).toBeTruthy();
       expect(query('[data-testid="memorize-test"]')).toBeTruthy();
-      expect(component.viewMode()).toBe('test');
-      expect(component.testPhase()).toBe('idle');
+      expect(store.viewMode()).toBe('test');
+      expect(store.testPhase()).toBe('idle');
     });
 
     it('defaults to desk mode (nothing auto-commits)', () => {
       enterTestWithDueChunk();
-      expect(component.testDriveMode()).toBe('desk');
+      expect(store.testDriveMode()).toBe('desk');
     });
 
     it('desk mode: a graded result proposes a grade; confirming commits via the SM-2 path once', () => {
@@ -913,26 +916,26 @@ describe('MemorizeViewComponent', () => {
       );
       // Stub recording support BEFORE the first render so the graded branch (not the no-mic
       // fallback) renders; jsdom has no MediaRecorder.
-      vi.spyOn(component, 'recordingSupported').mockReturnValue(true);
+      vi.spyOn(store, 'recordingSupported').mockReturnValue(true);
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setViewMode('test');
+      store.setToday(TODAY);
+      store.setViewMode('test');
       // Simulate a completed grade (bypass the real MediaRecorder, which jsdom lacks).
-      component.gradeResult.set({
+      store.gradeResult.set({
         grade: 'good',
         reason: 'minor slip',
         accuracyPct: 90,
         missedWords: [],
         transcript: 'said it',
       });
-      component.testPhase.set('graded');
+      store.testPhase.set('graded');
       fixture.detectChanges();
       expect(query('[data-testid="test-result"]')).toBeTruthy();
       expect(query('[data-testid="test-grade-row"]')).toBeTruthy();
 
-      component.commitTestGrade('good');
+      store.commitTestGrade('good');
       expect(saveSpy).toHaveBeenCalledTimes(1); // existing SM-2 save path
-      expect(component.testPhase()).toBe('idle'); // advanced + reset for the next card
+      expect(store.testPhase()).toBe('idle'); // advanced + reset for the next card
     });
 
     function enterGradedWith(transcript: string, degraded = false): void {
@@ -941,11 +944,11 @@ describe('MemorizeViewComponent', () => {
       getStudySpy.mockReturnValue(
         of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })),
       );
-      vi.spyOn(component, 'recordingSupported').mockReturnValue(true);
+      vi.spyOn(store, 'recordingSupported').mockReturnValue(true);
       fixture.detectChanges();
-      component.setToday(TODAY);
-      component.setViewMode('test');
-      component.gradeResult.set({
+      store.setToday(TODAY);
+      store.setViewMode('test');
+      store.gradeResult.set({
         grade: 'hard',
         reason: 'dropped a word',
         accuracyPct: 67,
@@ -953,7 +956,7 @@ describe('MemorizeViewComponent', () => {
         transcript,
         ...(degraded ? { degraded: true } : {}),
       });
-      component.testPhase.set('graded');
+      store.testPhase.set('graded');
       fixture.detectChanges();
     }
 
@@ -988,33 +991,33 @@ describe('MemorizeViewComponent', () => {
 
     it('drive mode: a graded result auto-commits without a confirm step', () => {
       enterTestWithDueChunk();
-      component.setTestDriveMode('drive');
+      store.setTestDriveMode('drive');
       // Drive-mode auto-commit happens inside the grade subscription; simulate it directly.
-      component.commitTestGrade('good');
+      store.commitTestGrade('good');
       expect(saveSpy).toHaveBeenCalledTimes(1);
     });
 
     it('an Again grade in redo-now mode (default) stays on the same card and resets to record', () => {
       enterTestWithDueChunk();
-      const before = component.deck().length;
-      const pos = component.deckPos();
-      component.commitTestGrade('again');
-      expect(component.deck().length).toBe(before); // NOT requeued
-      expect(component.deckPos()).toBe(pos); // same card
-      expect(component.testPhase()).toBe('idle'); // reset to record again
+      const before = store.deck().length;
+      const pos = store.deckPos();
+      store.commitTestGrade('again');
+      expect(store.deck().length).toBe(before); // NOT requeued
+      expect(store.deckPos()).toBe(pos); // same card
+      expect(store.testPhase()).toBe('idle'); // reset to record again
     });
 
     it('an Again grade in later mode requeues the card and advances', () => {
       enterTestWithDueChunk();
-      component.setAgainMode('later');
-      const before = component.deck().length;
-      component.commitTestGrade('again');
-      expect(component.deck().length).toBe(before + 1); // re-queued
+      store.setAgainMode('later');
+      const before = store.deck().length;
+      store.commitTestGrade('again');
+      expect(store.deck().length).toBe(before + 1); // re-queued
     });
 
     it('falls back to manual grade buttons when recording is unavailable', () => {
       enterTestWithDueChunk();
-      vi.spyOn(component, 'recordingSupported').mockReturnValue(false);
+      vi.spyOn(store, 'recordingSupported').mockReturnValue(false);
       fixture.detectChanges();
       expect(query('[data-testid="test-no-mic"]')).toBeTruthy();
       expect(query('[data-testid="test-manual-grade-row"]')).toBeTruthy();
@@ -1024,7 +1027,7 @@ describe('MemorizeViewComponent', () => {
       configure();
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges(); // 404 → no study → no chunks
-      component.setViewMode('test');
+      store.setViewMode('test');
       fixture.detectChanges();
       expect(query('[data-testid="test-no-chunks"]')).toBeTruthy();
     });
@@ -1040,7 +1043,7 @@ describe('MemorizeViewComponent', () => {
       getScrollSpy.mockReturnValue(of(makeScroll()));
       getStudySpy.mockReturnValue(of(makeStudy({ chunks })));
       fixture.detectChanges();
-      component.setToday(TODAY);
+      store.setToday(TODAY);
     }
 
     function lastSavedLearn(): unknown {
@@ -1051,10 +1054,10 @@ describe('MemorizeViewComponent', () => {
     it('adds a Learn toggle and opens the first new chunk with verse 1 current, the rest locked', () => {
       loadLearn([chunk(ALL)]);
       expect(query('[data-testid="mode-learn"]')).toBeTruthy();
-      component.setViewMode('learn');
+      store.setViewMode('learn');
       fixture.detectChanges();
-      expect(component.learnIndex()).toBe(0);
-      expect(component.learnVerses().map((v) => v.label)).toEqual(['1', '2', '3']);
+      expect(store.learnIndex()).toBe(0);
+      expect(store.learnVerses().map((v) => v.label)).toEqual(['1', '2', '3']);
       expect(query('[data-testid="learn-verse-current"]')).toBeTruthy();
       expect(
         fixture.nativeElement.querySelectorAll('[data-testid="learn-verse-locked"]').length,
@@ -1066,27 +1069,27 @@ describe('MemorizeViewComponent', () => {
 
     it('lands in Learn when a chunk is mid-way through its Learn run', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
-      expect(component.viewMode()).toBe('learn');
-      expect(component.learnProgress().unlocked).toBe(2);
+      expect(store.viewMode()).toBe('learn');
+      expect(store.learnProgress().unlocked).toBe(2);
     });
 
     it('does not land in Learn for a chunk with no Learn progress', () => {
       loadLearn([chunk(ALL)]);
-      expect(component.viewMode()).toBe('edit');
+      expect(store.viewMode()).toBe('edit');
     });
 
     it('moves Read to Fill to Recite and hides the cumulative range until revealed', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
       fixture.detectChanges();
       expect(query('[data-testid="learn-read-text"]')?.textContent).toContain('And the earth');
-      component.setLearnStage('fill');
+      store.setLearnStage('fill');
       fixture.detectChanges();
       expect(query('[data-testid="learn-fill-text"]')).toBeTruthy();
-      component.setLearnStage('recite');
+      store.setLearnStage('recite');
       fixture.detectChanges();
       expect(query('[data-testid="learn-recite-prompt"]')?.textContent).toContain('verses 1 to 2');
       expect(query('[data-testid="learn-revealed-text"]')).toBeFalsy();
-      component.revealLearn();
+      store.revealLearn();
       fixture.detectChanges();
       expect(query('[data-testid="learn-revealed-text"]')?.textContent).toContain(
         'In the beginning.',
@@ -1096,46 +1099,46 @@ describe('MemorizeViewComponent', () => {
 
     it('"Got it" marks the verse learned but never unlocks the next one', () => {
       loadLearn([chunk(ALL)]);
-      component.setViewMode('learn');
-      component.setLearnStage('recite');
-      component.revealLearn();
+      store.setViewMode('learn');
+      store.setLearnStage('recite');
+      store.revealLearn();
       fixture.detectChanges();
-      component.learnGotIt();
+      store.learnGotIt();
       expect(lastSavedLearn()).toEqual({ unlocked: 1, learned: 1, done: false });
-      expect(component.learnProgress().unlocked).toBe(1);
+      expect(store.learnProgress().unlocked).toBe(1);
     });
 
     it('unlocks the next verse only on an explicit tap, even if not marked learned', () => {
       loadLearn([chunk(ALL)]);
-      component.setViewMode('learn');
+      store.setViewMode('learn');
       fixture.detectChanges();
       expect(query('[data-testid="learn-unlock-hint"]')).toBeTruthy();
-      component.learnUnlockNext();
+      store.learnUnlockNext();
       expect(lastSavedLearn()).toEqual({ unlocked: 2, learned: 0, done: false });
-      expect(component.learnStage()).toBe('read');
+      expect(store.learnStage()).toBe('read');
     });
 
     it('"Not yet" sends the student back to Read and keeps the verse unlearned', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 1, learned: 1, done: false } })]);
-      component.setLearnStage('recite');
-      component.revealLearn();
-      component.learnNotYet();
+      store.setLearnStage('recite');
+      store.revealLearn();
+      store.learnNotYet();
       expect(lastSavedLearn()).toEqual({ unlocked: 1, learned: 0, done: false });
-      expect(component.learnStage()).toBe('read');
+      expect(store.learnStage()).toBe('read');
     });
 
     it('offers the chunk grade only when every verse is unlocked and learned', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 3, learned: 2, done: false } })]);
       fixture.detectChanges();
       expect(query('[data-testid="learn-grade"]')).toBeFalsy();
-      component.learnGrade('good'); // refused: not ready
+      store.learnGrade('good'); // refused: not ready
       expect(saveSpy).not.toHaveBeenCalled();
 
-      component.setLearnStage('recite');
-      component.revealLearn();
-      component.learnGotIt();
+      store.setLearnStage('recite');
+      store.revealLearn();
+      store.learnGotIt();
       fixture.detectChanges();
-      expect(component.learnReady()).toBe(true);
+      expect(store.learnReady()).toBe(true);
       expect(query('[data-testid="learn-grade"]')).toBeTruthy();
     });
 
@@ -1145,7 +1148,7 @@ describe('MemorizeViewComponent', () => {
         chunk({ start: 0, end: 5, verseRef: '9' }),
       ]);
       fixture.detectChanges();
-      component.learnGrade('good');
+      store.learnGrade('good');
       expect(saveSpy).toHaveBeenCalledTimes(1);
       const [, input] = saveSpy.mock.calls[0];
       const saved = (input.chunks as MemorizationChunk[])[0];
@@ -1154,18 +1157,18 @@ describe('MemorizeViewComponent', () => {
       expect(saved.lastReviewed).toBeTruthy();
       fixture.detectChanges();
       expect(query('[data-testid="learn-done"]')).toBeTruthy();
-      expect(component.learnNextIndex()).toBe(1);
-      component.learnNextChunk();
-      expect(component.learnIndex()).toBe(1);
+      expect(store.learnNextIndex()).toBe(1);
+      store.learnNextChunk();
+      expect(store.learnIndex()).toBe(1);
     });
 
     it('Again on the chunk grade is a miss: not done, last verse back to unlearned, back to Recite', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 3, learned: 3, done: false } })]);
-      component.learnGrade('again');
+      store.learnGrade('again');
       const saved = saveSpy.mock.calls[0][1].chunks[0] as MemorizationChunk;
       expect(saved.learn).toEqual({ unlocked: 3, learned: 2, done: false });
       expect(saved.repetitions).toBe(0);
-      expect(component.learnStage()).toBe('recite');
+      expect(store.learnStage()).toBe('recite');
     });
 
     it('Relearn resets Learn progress but leaves the SM-2 schedule alone', () => {
@@ -1179,9 +1182,9 @@ describe('MemorizeViewComponent', () => {
           learn: { unlocked: 3, learned: 3, done: true },
         }),
       ]);
-      component.setViewMode('learn');
-      component.selectLearnChunk(0);
-      component.learnRelearn();
+      store.setViewMode('learn');
+      store.selectLearnChunk(0);
+      store.learnRelearn();
       const saved = saveSpy.mock.calls[0][1].chunks[0] as MemorizationChunk;
       expect(saved.learn).toEqual({ unlocked: 1, learned: 0, done: false });
       expect(saved.intervalDays).toBe(6);
@@ -1190,16 +1193,16 @@ describe('MemorizeViewComponent', () => {
 
     it('shows the missed-word highlight for a voice result and never touches the schedule', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 1, learned: 0, done: false } })]);
-      component.setViewMode('learn');
-      component.setLearnStage('recite');
-      component.gradeResult.set({
+      store.setViewMode('learn');
+      store.setLearnStage('recite');
+      store.gradeResult.set({
         grade: 'hard',
         reason: 'dropped a word',
         accuracyPct: 67,
         missedWords: ['the'],
         transcript: 'in beginning',
       });
-      component.revealLearn();
+      store.revealLearn();
       fixture.detectChanges();
       const missed = Array.from(
         fixture.nativeElement.querySelectorAll('[data-testid="learn-revealed-text"] [data-missed]'),
@@ -1207,24 +1210,24 @@ describe('MemorizeViewComponent', () => {
       expect(missed).toContain('the');
       expect(query('[data-testid="learn-voice-result"]')?.textContent).toContain('67%');
       expect(saveSpy).not.toHaveBeenCalled();
-      expect(component.chunks()[0].repetitions).toBeUndefined();
+      expect(store.chunks()[0].repetitions).toBeUndefined();
     });
 
     it('clamps stale progress when the chunk now has fewer verses', () => {
       loadLearn([
         chunk({ start: 0, end: 19, verseRef: '1', learn: { unlocked: 3, learned: 3, done: true } }),
       ]);
-      component.setViewMode('learn');
-      component.selectLearnChunk(0);
-      expect(component.learnVerses().length).toBe(1);
-      expect(component.learnProgress()).toEqual({ unlocked: 1, learned: 1, done: true });
+      store.setViewMode('learn');
+      store.selectLearnChunk(0);
+      expect(store.learnVerses().length).toBe(1);
+      expect(store.learnProgress()).toEqual({ unlocked: 1, learned: 1, done: true });
     });
 
     it('shows the empty state with no chunks', () => {
       configure();
       getScrollSpy.mockReturnValue(of(makeScroll()));
       fixture.detectChanges();
-      component.setViewMode('learn');
+      store.setViewMode('learn');
       fixture.detectChanges();
       expect(query('[data-testid="learn-no-chunks"]')).toBeTruthy();
     });
