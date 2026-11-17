@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { ScrollViewComponent } from './scroll-view.component';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
+import { StepStatusService } from '../step-list/step-status.service';
 
 function makeStudy(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
   return {
@@ -36,6 +37,16 @@ describe('ScrollViewComponent', () => {
       providers: [
         provideRouter([]),
         { provide: ScrollStudyService, useValue: mockService },
+        {
+          provide: StepStatusService,
+          useValue: {
+            load: () =>
+              of({
+                statuses: { structure: 'in-progress', outline: 'not-started' },
+                memorizeDue: 2,
+              }),
+          },
+        },
         {
           provide: ActivatedRoute,
           useValue: { snapshot: { paramMap: new Map([['scrollStudyId', 's1']]) } },
@@ -151,16 +162,25 @@ describe('ScrollViewComponent', () => {
     getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
     fixture.detectChanges();
 
-    const link = query('[data-testid="find-pronouns-link"]') as HTMLAnchorElement;
+    const link = query('[data-testid="pronouns-link"]') as HTMLAnchorElement;
     expect(link).not.toBeNull();
     expect(link.getAttribute('href')).toBe('/scroll/s1/pronouns');
+  });
+
+  it('shows step statuses and the Memorize due count in the ready state', () => {
+    configure();
+    getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
+    fixture.detectChanges();
+
+    expect(query('[data-testid="step-status-structure"]')?.textContent).toContain('In progress');
+    expect(query('[data-testid="memorize-due"]')?.textContent).toContain('2 due');
   });
 
   it('does not show the Find pronouns link outside the ready state', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x', scrollText: '' })));
     fixture.detectChanges();
-    expect(query('[data-testid="find-pronouns-link"]')).toBeNull();
+    expect(query('[data-testid="pronouns-link"]')).toBeNull();
   });
 
   it('shows an Analyze structure link in the ready state targeting scroll/:id/structure', () => {
@@ -168,7 +188,7 @@ describe('ScrollViewComponent', () => {
     getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
     fixture.detectChanges();
 
-    const link = query('[data-testid="analyze-structure-link"]') as HTMLAnchorElement;
+    const link = query('[data-testid="structure-link"]') as HTMLAnchorElement;
     expect(link).not.toBeNull();
     expect(link.getAttribute('href')).toBe('/scroll/s1/structure');
   });
@@ -177,7 +197,7 @@ describe('ScrollViewComponent', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x', scrollText: '' })));
     fixture.detectChanges();
-    expect(query('[data-testid="analyze-structure-link"]')).toBeNull();
+    expect(query('[data-testid="structure-link"]')).toBeNull();
   });
 
   it('shows a Make an outline link in the ready state targeting scroll/:id/outline', () => {
@@ -185,7 +205,7 @@ describe('ScrollViewComponent', () => {
     getSpy.mockReturnValue(of(makeStudy({ status: 'ready' })));
     fixture.detectChanges();
 
-    const link = query('[data-testid="make-outline-link"]') as HTMLAnchorElement;
+    const link = query('[data-testid="outline-link"]') as HTMLAnchorElement;
     expect(link).not.toBeNull();
     expect(link.getAttribute('href')).toBe('/scroll/s1/outline');
   });
@@ -194,7 +214,7 @@ describe('ScrollViewComponent', () => {
     configure();
     getSpy.mockReturnValue(of(makeStudy({ status: 'failed', failureReason: 'x', scrollText: '' })));
     fixture.detectChanges();
-    expect(query('[data-testid="make-outline-link"]')).toBeNull();
+    expect(query('[data-testid="outline-link"]')).toBeNull();
   });
 
   it('navigates to /scroll/new on re-upload', () => {

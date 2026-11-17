@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { StudyCrudService } from '../study-crud.service';
 import { StudyWorksheet } from '../models';
 
@@ -8,12 +8,17 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 
 @Component({
   selector: 'app-study-list',
-  imports: [DatePipe],
+  imports: [DatePipe, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Saved word studies">
       <div class="container">
-        <h2 class="title is-4">My Word Studies</h2>
+        <div class="is-flex is-justify-content-space-between is-align-items-center mb-4">
+          <h2 class="title is-4 mb-0">My Word Studies</h2>
+          <a class="button is-primary is-small" routerLink="/study/new" data-testid="new-word-study"
+            >New Word Study</a
+          >
+        </div>
 
         @if (state() === 'loading') {
           <div

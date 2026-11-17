@@ -5,6 +5,8 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { BookStudyService } from '../book-study.service';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { BookStudy, Referent } from '../models';
+import { StepListComponent } from '../step-list/step-list.component';
+import { StepStatus, StepStatusService } from '../step-list/step-status.service';
 
 type DetailState = 'loading' | 'loaded' | 'notfound' | 'error';
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -14,7 +16,7 @@ const REFERENT_LONG_MAX = 1000;
 
 @Component({
   selector: 'app-book-study-detail',
-  imports: [DatePipe, RouterLink, FormsModule],
+  imports: [DatePipe, RouterLink, FormsModule, StepListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Book study detail">
@@ -83,81 +85,28 @@ const REFERENT_LONG_MAX = 1000;
 
             @if (linkedScroll(); as scroll) {
               <div class="box" data-testid="scroll-linked">
-                <div class="is-flex is-justify-content-space-between is-align-items-center mb-3">
-                  <span>
-                    <strong>Step 4 — Scroll</strong>
-                    <span class="tag ml-2" [class.is-success]="scroll.status === 'ready'">
-                      {{ scroll.status }}
-                    </span>
+                <p class="mb-3">
+                  <strong>Step 4 — Scroll</strong>
+                  <span class="tag ml-2" [class.is-success]="scroll.status === 'ready'">
+                    {{ scroll.status }}
                   </span>
-                  <a
-                    [routerLink]="['/scroll', scroll.id]"
-                    class="button is-link is-light is-small"
-                    data-testid="open-scroll-link"
-                    >Open scroll</a
-                  >
-                </div>
-
+                </p>
+                <app-step-list
+                  [scrollStudyId]="scroll.id"
+                  [scrollReady]="scrollReady()"
+                  [statuses]="stepStatuses()"
+                  [memorizeDue]="memorizeDue()"
+                />
                 @if (scrollReady()) {
-                  <div class="buttons are-small" data-testid="step-links">
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'pronouns']"
-                      class="button is-link is-outlined"
-                      >Step 6 — Pronouns</a
-                    >
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'antecedents']"
-                      class="button is-link is-outlined"
-                      >Step 6 — Antecedents</a
-                    >
-                    <button
-                      type="button"
-                      class="button is-link is-outlined"
-                      (click)="toggleReferents()"
-                      [attr.aria-expanded]="referentsOpen()"
-                      data-testid="toggle-referents"
-                    >
-                      Step 6 — Referents
-                    </button>
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'structure']"
-                      class="button is-link is-outlined"
-                      >Step 7 — Structure</a
-                    >
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'outline']"
-                      class="button is-link is-outlined"
-                      >Step 8 — Outline</a
-                    >
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'outline']"
-                      class="button is-link is-outlined"
-                      data-testid="theme-purpose-link"
-                      >Step 9 — Theme &amp; Purpose</a
-                    >
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'figures']"
-                      class="button is-link is-outlined"
-                      data-testid="figures-link"
-                      >Step 10 — Figures of Speech</a
-                    >
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'interrogate']"
-                      class="button is-link is-outlined"
-                      data-testid="interrogate-link"
-                      >Step 12 — Interrogate the Text</a
-                    >
-                    <a
-                      [routerLink]="['/scroll', scroll.id, 'memorize']"
-                      class="button is-primary is-outlined"
-                      data-testid="memorize-link"
-                      >Memorize the Scroll</a
-                    >
-                  </div>
-                } @else {
-                  <p class="is-size-7 has-text-grey" data-testid="steps-pending">
-                    Steps 6–10 become available once the scroll finishes processing.
-                  </p>
+                  <button
+                    type="button"
+                    class="button is-small is-link is-outlined mt-3"
+                    (click)="toggleReferents()"
+                    [attr.aria-expanded]="referentsOpen()"
+                    data-testid="toggle-referents"
+                  >
+                    Step 6 — Referents
+                  </button>
                 }
               </div>
             } @else {
@@ -172,6 +121,7 @@ const REFERENT_LONG_MAX = 1000;
                   Upload the scroll (Step 4)
                 </button>
               </div>
+              <app-step-list scrollStudyId="" [scrollReady]="false" />
             }
           </section>
 
@@ -469,12 +419,17 @@ export class BookStudyDetailComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly bookStudyService = inject(BookStudyService);
   private readonly scrollStudyService = inject(ScrollStudyService);
+  private readonly stepStatusService = inject(StepStatusService);
 
   readonly state = signal<DetailState>('loading');
   readonly bookStudy = signal<BookStudy | null>(null);
 
   /** The scroll linked to this book study (resolved by matching bookStudyId), or null. */
   readonly linkedScroll = signal<ScrollStudy | null>(null);
+  /** Per-step saved-work status for the linked scroll; fills in after the page renders. */
+  readonly stepStatuses = signal<Record<string, StepStatus>>({});
+  /** Chunks due today for Memorize, or null when there is no memorization study. */
+  readonly memorizeDue = signal<number | null>(null);
   /** Whether the Referents editor (Step 6) is expanded in the steps section. */
   readonly referentsOpen = signal(false);
 
@@ -530,10 +485,25 @@ export class BookStudyDetailComponent implements OnInit {
   private resolveLinkedScroll(): void {
     this.scrollStudyService.listScrollStudies().subscribe({
       next: (scrolls) => {
-        this.linkedScroll.set(scrolls.find((s) => s.bookStudyId === this.bookStudyId) ?? null);
+        const scroll = scrolls.find((s) => s.bookStudyId === this.bookStudyId) ?? null;
+        this.linkedScroll.set(scroll);
+        if (scroll && scroll.status === 'ready') this.loadStepStatuses(scroll.id);
       },
       error: () => {
         this.linkedScroll.set(null);
+      },
+    });
+  }
+
+  /** Non-blocking: the list renders at once and statuses fill in; a failure leaves them blank. */
+  private loadStepStatuses(scrollStudyId: string): void {
+    this.stepStatusService.load(scrollStudyId).subscribe({
+      next: (r) => {
+        this.stepStatuses.set(r.statuses);
+        this.memorizeDue.set(r.memorizeDue);
+      },
+      error: () => {
+        this.stepStatuses.set({});
       },
     });
   }
