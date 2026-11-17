@@ -17,6 +17,8 @@ interface StudyRecord {
   updatedAt: string;
   /** `englishDefinition` may be a legacy plain string (items saved before 2026-04-27). */
   wordStudies: (Omit<WordStudyEntry, 'englishDefinition'> & { englishDefinition?: unknown })[];
+  /** Books this word study is linked to (absent = none). */
+  bookStudyIds?: string[];
   /** May be present if the record was already mapped. */
   id?: string;
 }
@@ -27,6 +29,7 @@ function toWorksheet(record: StudyRecord): StudyWorksheet {
     userId: record.userId,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    bookStudyIds: record.bookStudyIds ?? [],
     wordStudies: (record.wordStudies ?? []).map((e) => ({
       ...e,
       englishDefinition: normalizeEnglishDefinition(e.englishDefinition, e.word),
@@ -67,6 +70,8 @@ export class StudyCrudService {
         userId: worksheet.userId,
         createdAt: worksheet.createdAt || undefined,
         wordStudies: worksheet.wordStudies,
+        // Always sent (even []) so the links round-trip on every save.
+        bookStudyIds: worksheet.bookStudyIds,
       })
       .pipe(map((res) => res.studyId));
   }

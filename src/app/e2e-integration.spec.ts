@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { StudyPageComponent } from './study-page/study-page.component';
 import { StrongsStudyResult, CrossReference, WordStudyEntry } from './models';
 import { environment } from './environment';
+import { BookStudyService } from './book-study.service';
+import { of } from 'rxjs';
 
 /**
  * End-to-end integration test for the wizard-based word study workflow.
@@ -57,6 +59,7 @@ describe('E2E Integration: Wizard Word Study Workflow', () => {
         provideHttpClientTesting(),
         provideRouter([]),
         { provide: ActivatedRoute, useValue: { snapshot } },
+        { provide: BookStudyService, useValue: { list: () => of([]) } },
       ],
     });
 

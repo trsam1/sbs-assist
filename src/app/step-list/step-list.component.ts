@@ -3,6 +3,13 @@ import { RouterLink } from '@angular/router';
 import { COMPANION_TOOLS, STEPS, StepDef, stepLabel, stepLink } from '../steps';
 import { StepStatus } from './step-status.service';
 
+/** The few fields Book home shows for a word study linked to the book. */
+export interface WordStudyLink {
+  id: string;
+  word: string;
+  strongsNumber: string;
+}
+
 /**
  * The method's steps as a list, built from the step catalog: each shipped step links to its page once the
  * scroll is ready; other steps show their software fit. Used by Book home and the scroll page.
@@ -43,18 +50,51 @@ import { StepStatus } from './step-status.service';
                   >{{ memorizeDue() }} due</span
                 >
               }
+              @if (s.id === 'word-study' && wordStudies() !== null) {
+                <span class="tag is-light ml-2" data-testid="word-study-count"
+                  >{{ wordStudies()!.length }} linked</span
+                >
+              }
             }
             <span class="is-block is-size-7 has-text-grey">{{ s.blurb }}</span>
+            @if (s.id === 'word-study' && (wordStudies()?.length ?? 0) > 0) {
+              <details class="is-size-7 mt-1" data-testid="word-study-list">
+                <summary>Show the word studies for this book</summary>
+                <ul class="ml-4">
+                  @for (w of wordStudies(); track w.id) {
+                    <li>
+                      <a [routerLink]="['/study', w.id]" data-testid="word-study-link">{{
+                        w.word
+                      }}</a>
+                      @if (w.strongsNumber) {
+                        <span class="has-text-grey"> ({{ w.strongsNumber }})</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              </details>
+            }
           </span>
 
           @if (s.fit === 'shipped') {
             @if (s.id === 'word-study') {
-              <a
-                class="button is-small is-link is-outlined"
-                routerLink="/studies"
-                data-testid="word-studies-link"
-                >Word studies</a
-              >
+              <span class="buttons are-small mb-0">
+                @if (bookStudyId()) {
+                  <a
+                    class="button is-primary is-outlined"
+                    routerLink="/study/new"
+                    [queryParams]="{ bookStudyId: bookStudyId() }"
+                    data-testid="add-word-study"
+                    >Add word study</a
+                  >
+                }
+                <a
+                  class="button is-link is-outlined"
+                  routerLink="/studies"
+                  data-testid="word-studies-link"
+                  >Word studies</a
+                >
+              </span>
             } @else if (s.route !== null && scrollStudyId() && (!s.needsScroll || scrollReady())) {
               <a
                 class="button is-small is-link is-outlined"
@@ -81,6 +121,10 @@ export class StepListComponent {
   readonly scrollReady = input<boolean>(false);
   readonly statuses = input<Record<string, StepStatus>>({});
   readonly memorizeDue = input<number | null>(null);
+  /** The book this list is shown for; enables the "Add word study" button on the Step 5 row. */
+  readonly bookStudyId = input<string>('');
+  /** Word studies linked to the book, or null when unknown (not loaded or the call failed). */
+  readonly wordStudies = input<readonly WordStudyLink[] | null>(null);
 
   readonly rows: readonly StepDef[] = [...STEPS, ...COMPANION_TOOLS];
 

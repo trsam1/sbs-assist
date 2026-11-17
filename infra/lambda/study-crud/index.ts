@@ -37,9 +37,42 @@ interface SaveStudyBody {
   userId: string;
   createdAt?: string;
   wordStudies: WordStudyEntry[];
+  /** undefined = the client did not say (keep what is stored); [] = unlink from every book. */
+  bookStudyIds?: string[];
 }
 
-function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
+const BOOK_ID_MAX_LENGTH = 64;
+const BOOK_IDS_MAX = 66;
+const BOOK_ID_PATTERN = /^[A-Za-z0-9-]+$/;
+
+const BOOK_IDS_MESSAGE =
+  'bookStudyIds must be an array of at most 66 ids (letters, digits, hyphens; 64 characters or fewer each).';
+
+/**
+ * Validate and de-duplicate `bookStudyIds`. Returns the cleaned list, or null when it is invalid.
+ * Duplicates are removed before the length check so repeating an id never trips the limit.
+ */
+function parseBookStudyIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (
+      typeof entry !== 'string' ||
+      entry.length === 0 ||
+      entry.length > BOOK_ID_MAX_LENGTH ||
+      !BOOK_ID_PATTERN.test(entry)
+    ) {
+      return null;
+    }
+    seen.add(entry);
+  }
+  if (seen.size > BOOK_IDS_MAX) return null;
+  return [...seen];
+}
+
+type ParsedSave = { ok: true; body: SaveStudyBody } | { ok: false; message: string };
+
+function parseSaveBody(body: string | null | undefined): ParsedSave | null {
   if (!body) return null;
 
   try {
@@ -50,14 +83,25 @@ function parseSaveBody(body: string | null | undefined): SaveStudyBody | null {
 
     if (!Array.isArray(obj['wordStudies'])) return null;
 
+    let bookStudyIds: string[] | undefined;
+    if (obj['bookStudyIds'] !== undefined) {
+      const cleaned = parseBookStudyIds(obj['bookStudyIds']);
+      if (cleaned === null) return { ok: false, message: BOOK_IDS_MESSAGE };
+      bookStudyIds = cleaned;
+    }
+
     return {
-      id: typeof obj['id'] === 'string' && obj['id'].length > 0 ? obj['id'] : undefined,
-      userId: '', // Will be set from Cognito claims
-      createdAt:
-        typeof obj['createdAt'] === 'string' && obj['createdAt'].length > 0
-          ? (obj['createdAt'] as string)
-          : undefined,
-      wordStudies: obj['wordStudies'] as WordStudyEntry[],
+      ok: true,
+      body: {
+        id: typeof obj['id'] === 'string' && obj['id'].length > 0 ? obj['id'] : undefined,
+        userId: '', // Will be set from Cognito claims
+        createdAt:
+          typeof obj['createdAt'] === 'string' && obj['createdAt'].length > 0
+            ? (obj['createdAt'] as string)
+            : undefined,
+        wordStudies: obj['wordStudies'] as WordStudyEntry[],
+        bookStudyIds,
+      },
     };
   } catch {
     return null;
@@ -68,6 +112,13 @@ async function saveWordStudy(body: SaveStudyBody): Promise<{ studyId: string }> 
   const now = new Date().toISOString();
   const studyId = body.id ?? randomUUID();
 
+  // Saves overwrite the whole record, so a client that does not mention the links must not erase them.
+  let bookStudyIds = body.bookStudyIds;
+  if (bookStudyIds === undefined && body.id) {
+    const existing = await getStudy(body.userId, studyId);
+    bookStudyIds = existing?.bookStudyIds;
+  }
+
   const record: WordStudyRecord = {
     PK: `USER#${body.userId}`,
     SK: `STUDY#${studyId}`,
@@ -76,6 +127,7 @@ async function saveWordStudy(body: SaveStudyBody): Promise<{ studyId: string }> 
     createdAt: body.createdAt ?? now,
     updatedAt: now,
     wordStudies: body.wordStudies,
+    ...(bookStudyIds && bookStudyIds.length > 0 ? { bookStudyIds } : {}),
     GSI1PK: `USER#${body.userId}`,
     GSI1SK: `UPDATED#${now}`,
   };
@@ -134,8 +186,8 @@ export const handler = async (event: APIGatewayEvent) => {
         return corsResponse(400, { message: 'Missing authentication.' }, origin);
       }
 
-      const body = parseSaveBody(event.body);
-      if (!body) {
+      const parsedSave = parseSaveBody(event.body);
+      if (!parsedSave) {
         return corsResponse(
           400,
           {
@@ -144,6 +196,10 @@ export const handler = async (event: APIGatewayEvent) => {
           origin,
         );
       }
+      if (!parsedSave.ok) {
+        return corsResponse(400, { message: parsedSave.message }, origin);
+      }
+      const body = parsedSave.body;
 
       // Override userId with the authenticated Cognito user
       body.userId = userId;

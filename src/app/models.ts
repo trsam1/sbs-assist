@@ -54,6 +54,8 @@ export interface StudyWorksheet {
   createdAt: string;
   updatedAt: string;
   wordStudies: WordStudyEntry[];
+  /** Books this word study is linked to; a key word can matter in several. [] = none. */
+  bookStudyIds: string[];
 }
 
 /** Input shape emitted by the study input form. */

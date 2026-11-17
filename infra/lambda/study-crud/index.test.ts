@@ -246,6 +246,100 @@ describe('Study CRUD Lambda', () => {
     });
   });
 
+  // --- bookStudyIds (a word study can be linked to several books) ---
+
+  describe('POST /studies bookStudyIds', () => {
+    function putItem(callIndex = 0): Record<string, unknown> {
+      const putInput = mockSend.mock.calls[callIndex][0].input as Record<string, unknown>;
+      return putInput['Item'] as Record<string, unknown>;
+    }
+
+    it('stores the ids of every linked book', async () => {
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(makePostEvent(validBody({ bookStudyIds: ['b-1', 'b-2'] })));
+      expect(res.statusCode).toBe(200);
+      expect(putItem()['bookStudyIds']).toEqual(['b-1', 'b-2']);
+    });
+
+    it('stores a duplicated id once', async () => {
+      mockSend.mockResolvedValueOnce({});
+      await handler(makePostEvent(validBody({ bookStudyIds: ['b-1', 'b-2', 'b-1'] })));
+      expect(putItem()['bookStudyIds']).toEqual(['b-1', 'b-2']);
+    });
+
+    it('stores no attribute for a new study that omits the field', async () => {
+      mockSend.mockResolvedValueOnce({});
+      await handler(makePostEvent(validBody()));
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect('bookStudyIds' in putItem()).toBe(false);
+    });
+
+    it('keeps the stored links when an update omits the field', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: { studyId: 'existing-id', bookStudyIds: ['b-1', 'b-2'] } })
+        .mockResolvedValueOnce({});
+      await handler(makePostEvent(validBody({ id: 'existing-id' })));
+      expect(putItem(1)['bookStudyIds']).toEqual(['b-1', 'b-2']);
+    });
+
+    it('reads the stored study with the authenticated user key, not one from the body', async () => {
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
+      await handler(makePostEvent(validBody({ id: 'existing-id', userId: 'evil' }), 'user-9'));
+      const getInput = mockSend.mock.calls[0][0].input as Record<string, unknown>;
+      expect(getInput['Key']).toEqual({ PK: 'USER#user-9', SK: 'STUDY#existing-id' });
+    });
+
+    it('removes the links when an update sends an empty list', async () => {
+      mockSend.mockResolvedValueOnce({});
+      await handler(makePostEvent(validBody({ id: 'existing-id', bookStudyIds: [] })));
+      // An explicit empty list is an answer, so nothing needs reading first.
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect('bookStudyIds' in putItem()).toBe(false);
+    });
+
+    it.each([
+      ['not an array', 'b-1'],
+      ['a non-string entry', ['b-1', 7]],
+      ['an empty id', ['']],
+      ['an id over 64 characters', ['a'.repeat(65)]],
+      ['an id with a space', ['b 1']],
+      ['an id with a slash', ['b/1']],
+      ['more than 66 distinct ids', Array.from({ length: 67 }, (_, i) => `b-${i}`)],
+      ['null', null],
+    ])('rejects %s with 400 and does not write', async (_label, value) => {
+      const res = await handler(makePostEvent(validBody({ bookStudyIds: value })));
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toContain('bookStudyIds');
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly 66 ids and a 64-character id', async () => {
+      mockSend.mockResolvedValueOnce({});
+      const ids = Array.from({ length: 65 }, (_, i) => `b-${i}`).concat(['a'.repeat(64)]);
+      const res = await handler(makePostEvent(validBody({ bookStudyIds: ids })));
+      expect(res.statusCode).toBe(200);
+      expect((putItem()['bookStudyIds'] as string[]).length).toBe(66);
+    });
+  });
+
+  describe('reading bookStudyIds', () => {
+    it('GET /studies/{id} returns the links', async () => {
+      mockSend.mockResolvedValueOnce({ Item: { studyId: 's1', bookStudyIds: ['b-1', 'b-2'] } });
+      const res = await handler(makeGetStudyEvent('user-1', 's1'));
+      expect(JSON.parse(res.body).bookStudyIds).toEqual(['b-1', 'b-2']);
+    });
+
+    it('GET /studies lists studies with and without links', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [{ studyId: 's1', bookStudyIds: ['b-1'] }, { studyId: 's2' }],
+      });
+      const res = await handler(makeListEvent('user-1'));
+      const items = JSON.parse(res.body);
+      expect(items[0].bookStudyIds).toEqual(['b-1']);
+      expect('bookStudyIds' in items[1]).toBe(false);
+    });
+  });
+
   // --- GET /studies/{studyId} ---
 
   describe('GET /studies/{studyId}', () => {

@@ -13,6 +13,7 @@ function makeStudy(overrides: Partial<StudyWorksheet> = {}): StudyWorksheet {
     userId: 'anonymous',
     createdAt: '2025-06-01T10:00:00.000Z',
     updatedAt: '2025-06-02T12:00:00.000Z',
+    bookStudyIds: [],
     wordStudies: [
       {
         word: 'love',
@@ -419,5 +420,64 @@ describe('StudyListComponent', () => {
     expect(modalCard!.getAttribute('aria-modal')).toBe('true');
     expect(modalCard!.getAttribute('aria-labelledby')).toBe('delete-modal-title');
     expect(modalCard!.getAttribute('aria-describedby')).toBe('delete-modal-body');
+  });
+
+  describe('books column and filter', () => {
+    const book = (id: string, name: string) => ({
+      id,
+      userId: 'u',
+      book: name,
+      title: '',
+      notes: '',
+      createdAt: '',
+      updatedAt: '',
+      referents: [],
+    });
+
+    function load(studies: StudyWorksheet[], books: ReturnType<typeof book>[] | 'fail'): void {
+      fixture.detectChanges();
+      httpTesting = getHttpTesting();
+      httpTesting.expectOne(`${environment.apiUrl}/studies`).flush(studies);
+      const req = httpTesting.expectOne(`${environment.apiUrl}/books`);
+      if (books === 'fail') req.flush('x', { status: 500, statusText: 'err' });
+      else req.flush(books);
+      fixture.detectChanges();
+    }
+
+    const grace = () => makeStudy({ id: 'grace', bookStudyIds: ['b1', 'b2'] });
+    const faith = () => makeStudy({ id: 'faith', bookStudyIds: ['b2'] });
+    const lone = () => makeStudy({ id: 'lone', bookStudyIds: [] });
+
+    it('shows every linked book name for a study, and a dash when there are none', () => {
+      load([grace(), lone()], [book('b1', 'Romans'), book('b2', 'Ephesians')]);
+      const cells = queryAll('[data-testid="study-books"]').map((c) => c.textContent?.trim());
+      expect(cells).toEqual(['Romans, Ephesians', '—']);
+    });
+
+    it('filters to a book and includes studies that are also linked to other books', () => {
+      load([grace(), faith(), lone()], [book('b1', 'Romans'), book('b2', 'Ephesians')]);
+      component.bookFilter.set('b2');
+      fixture.detectChanges();
+      expect(queryAll('[data-testid="study-row"]').length).toBe(2);
+
+      component.bookFilter.set('b1');
+      fixture.detectChanges();
+      expect(queryAll('[data-testid="study-row"]').length).toBe(1);
+    });
+
+    it('filters to studies with no book', () => {
+      load([grace(), lone()], [book('b1', 'Romans'), book('b2', 'Ephesians')]);
+      component.bookFilter.set('none');
+      fixture.detectChanges();
+      expect(queryAll('[data-testid="study-row"]').length).toBe(1);
+      expect(query('[data-testid="study-count"]')?.textContent).toContain('1 study');
+    });
+
+    it('hides the filter and shows dashes when the book list fails', () => {
+      load([grace()], 'fail');
+      expect(query('[data-testid="book-filter"]')).toBeNull();
+      expect(query('[data-testid="study-books"]')?.textContent?.trim()).toBe('—');
+      expect(queryAll('[data-testid="study-row"]').length).toBe(1);
+    });
   });
 });
