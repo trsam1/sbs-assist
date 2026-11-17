@@ -9,6 +9,8 @@ import {
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { ScrollStudy, ScrollStudyService, ScrollStatus } from '../scroll-study.service';
+import { StepListComponent } from '../step-list/step-list.component';
+import { StepStatus, StepStatusService } from '../step-list/step-status.service';
 
 type ViewState = 'loading' | 'processing' | 'ready' | 'failed' | 'timeout' | 'error';
 
@@ -18,7 +20,7 @@ const MAX_POLLS = 20;
 
 @Component({
   selector: 'app-scroll-view',
-  imports: [RouterLink],
+  imports: [RouterLink, StepListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Scroll study">
@@ -61,27 +63,13 @@ const MAX_POLLS = 20;
             <div class="box scroll-text-box" data-testid="scroll-text">
               <pre class="scroll-text">{{ study()?.scrollText }}</pre>
             </div>
-            <a
-              [routerLink]="['/scroll', scrollStudyId, 'pronouns']"
-              class="button is-link is-outlined mt-2"
-              data-testid="find-pronouns-link"
-            >
-              Find pronouns (Step 6)
-            </a>
-            <a
-              [routerLink]="['/scroll', scrollStudyId, 'structure']"
-              class="button is-link is-outlined mt-2 ml-2"
-              data-testid="analyze-structure-link"
-            >
-              Analyze structure (Step 7)
-            </a>
-            <a
-              [routerLink]="['/scroll', scrollStudyId, 'outline']"
-              class="button is-link is-outlined mt-2 ml-2"
-              data-testid="make-outline-link"
-            >
-              Make an outline (Step 8)
-            </a>
+            <h3 class="title is-5 mt-4">Study steps</h3>
+            <app-step-list
+              [scrollStudyId]="scrollStudyId"
+              [scrollReady]="true"
+              [statuses]="stepStatuses()"
+              [memorizeDue]="memorizeDue()"
+            />
           }
           @case ('failed') {
             <div class="notification is-danger" role="alert" data-testid="failed">
@@ -139,6 +127,9 @@ const MAX_POLLS = 20;
 })
 export class ScrollViewComponent implements OnInit, OnDestroy {
   private readonly scrollStudy = inject(ScrollStudyService);
+  private readonly stepStatusService = inject(StepStatusService);
+  readonly stepStatuses = signal<Record<string, StepStatus>>({});
+  readonly memorizeDue = signal<number | null>(null);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
@@ -181,7 +172,9 @@ export class ScrollViewComponent implements OnInit, OnDestroy {
   private applyStatus(status: ScrollStatus): void {
     if (status === 'ready') {
       this.stopPolling();
+      const wasReady = this.state() === 'ready';
       this.state.set('ready');
+      if (!wasReady) this.loadStepStatuses();
       return;
     }
     if (status === 'failed') {
@@ -192,6 +185,17 @@ export class ScrollViewComponent implements OnInit, OnDestroy {
     // uploading | extracting → keep polling until terminal or bounded timeout.
     this.state.set('processing');
     this.schedulePoll();
+  }
+
+  /** Non-blocking: the step list renders at once and statuses fill in; a failure leaves them blank. */
+  private loadStepStatuses(): void {
+    this.stepStatusService.load(this.scrollStudyId).subscribe({
+      next: (r) => {
+        this.stepStatuses.set(r.statuses);
+        this.memorizeDue.set(r.memorizeDue);
+      },
+      error: () => this.stepStatuses.set({}),
+    });
   }
 
   private schedulePoll(): void {

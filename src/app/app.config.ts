@@ -4,7 +4,7 @@ import {
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { provideRouter } from '@angular/router';
+import { provideRouter, withInMemoryScrolling } from '@angular/router';
 
 import { routes } from './app.routes';
 import { userIdInterceptor } from './user-id.interceptor';
@@ -26,6 +26,6 @@ export const appConfig: ApplicationConfig = {
       }
     }),
     provideHttpClient(withInterceptors([userIdInterceptor])),
-    provideRouter(routes),
+    provideRouter(routes, withInMemoryScrolling({ anchorScrolling: 'enabled' })),
   ],
 };

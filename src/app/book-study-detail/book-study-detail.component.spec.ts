@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { of } from 'rxjs';
 import { BookStudyDetailComponent } from './book-study-detail.component';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
+import { StepStatusService } from '../step-list/step-status.service';
 import { environment } from '../environment';
 
 /** Scrolls the mocked ScrollStudyService.listScrollStudies() returns; override per test. */
@@ -39,6 +40,13 @@ function configure(bookStudyId: string) {
       provideHttpClientTesting(),
       provideRouter([]),
       { provide: ScrollStudyService, useValue: mockScrollService },
+      {
+        provide: StepStatusService,
+        useValue: {
+          load: () =>
+            of({ statuses: { figures: 'in-progress', outline: 'not-started' }, memorizeDue: 3 }),
+        },
+      },
       {
         provide: ActivatedRoute,
         useValue: { snapshot: { paramMap: convertToParamMap({ bookStudyId }) } },
@@ -409,7 +417,7 @@ describe('BookStudyDetailComponent', () => {
     const open = query('[data-testid="open-scroll-link"]') as HTMLAnchorElement;
     expect(open.getAttribute('href')).toBe('/scroll/s9');
     const theme = query('[data-testid="theme-purpose-link"]') as HTMLAnchorElement;
-    expect(theme.getAttribute('href')).toBe('/scroll/s9/outline');
+    expect(theme.getAttribute('href')).toBe('/scroll/s9/outline#theme');
     const figures = query('[data-testid="figures-link"]') as HTMLAnchorElement;
     expect(figures.getAttribute('href')).toBe('/scroll/s9/figures');
     const interrogate = query('[data-testid="interrogate-link"]') as HTMLAnchorElement;
@@ -418,13 +426,44 @@ describe('BookStudyDetailComponent', () => {
     expect(memorize.getAttribute('href')).toBe('/scroll/s9/memorize');
   });
 
+  it('shows saved-work status per step and the Memorize due count', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="step-status-figures"]')?.textContent).toContain('In progress');
+    expect(query('[data-testid="step-status-outline"]')?.textContent).toContain('Not started');
+    expect(query('[data-testid="memorize-due"]')?.textContent).toContain('3 due');
+  });
+
+  it('lists planned and manual steps without links', () => {
+    mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'ready' })];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="step-row-pray"]')?.textContent).toContain('Pencil and paper');
+    expect(query('[data-testid="step-row-cross-refs"]')?.textContent).toContain('Not built yet');
+    expect(query('[data-testid="step-row-cross-refs"] a')).toBeNull();
+  });
+
+  it('shows the step list without links when there is no scroll yet', () => {
+    mockScrolls = [];
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="no-scroll"]')).not.toBeNull();
+    expect(query('[data-testid="step-row-structure"]')).not.toBeNull();
+    expect(query('[data-testid="structure-link"]')).toBeNull();
+  });
+
   it('gates steps 6–9 while the linked scroll is not ready', () => {
     mockScrolls = [makeScroll({ id: 's9', bookStudyId: 'b1', status: 'extracting' })];
     createWith('b1');
     flushBook('b1');
 
     expect(query('[data-testid="scroll-linked"]')).not.toBeNull();
-    expect(query('[data-testid="step-links"]')).toBeNull();
+    expect(query('[data-testid="figures-link"]')).toBeNull();
+    expect(query('[data-testid="memorize-link"]')).toBeNull();
     expect(query('[data-testid="steps-pending"]')).not.toBeNull();
   });
 

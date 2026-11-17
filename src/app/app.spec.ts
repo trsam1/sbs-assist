@@ -40,15 +40,20 @@ describe('App', () => {
     expect(fixture.nativeElement.textContent).toContain('test@example.com');
   });
 
-  it('should show both word-study and scroll-study navbar links', () => {
+  it('should show Books and Word Studies in the navbar', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     const links = Array.from(
       fixture.nativeElement.querySelectorAll('.navbar-start .navbar-item'),
     ).map((el) => (el as HTMLElement).textContent?.trim());
-    expect(links).toContain('Word Studies');
-    expect(links).toContain('New Word Study');
-    expect(links).toContain('Scroll Studies');
-    expect(links).toContain('New Scroll Study');
+    expect(links).toEqual(['Books', 'Word Studies']);
+  });
+
+  it('should brand the navbar and link it to the books home', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    const brand = fixture.nativeElement.querySelector('.navbar-brand .navbar-item') as HTMLElement;
+    expect(brand.textContent?.trim()).toBe('Axios Bible Study Tools');
+    expect(brand.getAttribute('href')).toBe('/books');
   });
 });

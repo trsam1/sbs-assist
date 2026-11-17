@@ -48,7 +48,7 @@ function normalize(
       <div class="container">
         <app-tool-shell stepId="outline" [ctx]="ctx" [scrollId]="scrollStudyId">
           <!-- Step 9: Theme & Purpose — pinned atop the outline, where the method states them -->
-          <div class="box" data-testid="theme-purpose-panel">
+          <div class="box" id="theme" data-testid="theme-purpose-panel">
             <h3 class="title is-5 mb-2">Theme &amp; Purpose (Step 9)</h3>
             <p class="help mb-3" data-testid="theme-purpose-help">
               Once your outline takes shape, state the book's <strong>theme</strong> — what it is
