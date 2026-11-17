@@ -1,14 +1,13 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ToolShellComponent } from '../tool-shell/tool-shell.component';
+import { ScrollToolContext } from '../tool-shell/scroll-tool-context';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { AntecedentStudyService } from '../antecedent-study.service';
 import { AntecedentAssignment } from '../models';
 import { parsePronounOccurrences } from '../pronoun-parse';
 import { suggestAntecedents } from '../antecedent-suggest';
 import { PRONOUN_TYPES, PRONOUN_TYPE_HINTS, PronounType, toPronounType } from '../pronoun-type';
-
-type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
 
 /** One worklist row: a pronoun occurrence plus its (editable) antecedent + grammatical type. */
 interface OccurrenceRow {
@@ -25,214 +24,160 @@ const SNIPPET_RADIUS = 30;
 
 @Component({
   selector: 'app-antecedent-view',
-  imports: [RouterLink, FormsModule],
+  imports: [RouterLink, FormsModule, ToolShellComponent],
+  providers: [ScrollToolContext],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Antecedent study">
       <div class="container">
-        @if (study(); as s) {
-          <h2 class="title is-4" data-testid="antecedent-book">{{ s.bookName }} — Antecedents</h2>
-        }
-
-        @switch (state()) {
-          @case ('loading') {
-            <div class="has-text-centered py-5" aria-live="polite" aria-busy="true">
-              <p>Loading…</p>
+        <app-tool-shell stepId="antecedents" [ctx]="ctx" [scrollId]="scrollStudyId">
+          @if (rows().length === 0) {
+            <div class="box" role="status" data-testid="antecedent-empty">
+              No pronouns found in this scroll.
             </div>
-          }
-          @case ('ready') {
-            @if (rows().length === 0) {
-              <div class="box" role="status" data-testid="antecedent-empty">
-                No pronouns found in this scroll.
-              </div>
-            } @else {
-              <p class="mb-3">
-                Assign an antecedent to each pronoun occurrence and, optionally, classify its
-                grammatical type. Pick a suggestion or type your own.
-              </p>
+          } @else {
+            <p class="mb-3">
+              Assign an antecedent to each pronoun occurrence and, optionally, classify its
+              grammatical type. Pick a suggestion or type your own.
+            </p>
 
-              <details class="box mb-3" data-testid="pronoun-type-hint-panel">
-                <summary
-                  class="has-text-weight-semibold"
-                  data-testid="pronoun-type-hint-toggle"
-                  aria-label="Show pronoun type hints"
-                >
-                  What are the pronoun types?
-                </summary>
-                <dl class="content mt-3">
-                  @for (type of pronounTypes; track type) {
-                    <div data-testid="pronoun-type-hint-item">
-                      <dt class="has-text-weight-semibold">{{ type }}</dt>
-                      <dd>{{ hints[type] }}</dd>
-                    </div>
-                  }
-                </dl>
-              </details>
-
-              <table
-                class="table is-striped is-fullwidth"
-                aria-label="Pronoun occurrences, their antecedents, and their grammatical types"
-                data-testid="antecedent-table"
+            <details class="box mb-3" data-testid="pronoun-type-hint-panel">
+              <summary
+                class="has-text-weight-semibold"
+                data-testid="pronoun-type-hint-toggle"
+                aria-label="Show pronoun type hints"
               >
-                <thead>
-                  <tr>
-                    <th>Pronoun</th>
-                    <th>Context</th>
-                    <th>Antecedent</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of rows(); track row.occurrence) {
-                    <tr data-testid="antecedent-row">
-                      <td data-testid="antecedent-word">{{ row.word }}</td>
-                      <td data-testid="antecedent-snippet">{{ row.snippet }}</td>
-                      <td>
-                        <div class="field has-addons">
-                          <div class="control">
-                            <div class="select is-small">
-                              <select
-                                [attr.aria-label]="
-                                  'Antecedent for ' + row.word + ' at position ' + row.start
-                                "
-                                [ngModel]="row.antecedent"
-                                (ngModelChange)="setAntecedent(row.occurrence, $event)"
-                                data-testid="antecedent-select"
-                              >
-                                <option value="">— none —</option>
-                                @for (opt of options(); track opt) {
-                                  <option [value]="opt">{{ opt }}</option>
-                                }
-                              </select>
-                            </div>
-                          </div>
-                          <div class="control">
-                            <input
-                              class="input is-small"
-                              type="text"
-                              maxlength="200"
-                              placeholder="Add antecedent"
-                              [attr.aria-label]="'Add a new antecedent for ' + row.word"
-                              [ngModel]="draft(row.occurrence)"
-                              (ngModelChange)="setDraft(row.occurrence, $event)"
-                              data-testid="antecedent-add-input"
-                            />
-                          </div>
-                          <div class="control">
-                            <button
-                              class="button is-small"
-                              type="button"
-                              (click)="addAntecedent(row.occurrence)"
-                              data-testid="antecedent-add"
-                            >
-                              Add
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <div class="select is-small">
-                          <select
-                            [attr.aria-label]="
-                              'Grammatical type for ' + row.word + ' at position ' + row.start
-                            "
-                            [ngModel]="row.pronounType"
-                            (ngModelChange)="setPronounType(row.occurrence, $event)"
-                            data-testid="pronoun-type-select"
-                          >
-                            <option value="">— unclassified —</option>
-                            @for (type of pronounTypes; track type) {
-                              <option [value]="type">{{ type }}</option>
-                            }
-                          </select>
-                        </div>
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-
-              <div class="field">
-                <button
-                  class="button is-primary"
-                  type="button"
-                  [class.is-loading]="saving()"
-                  [disabled]="saving()"
-                  (click)="save()"
-                  data-testid="antecedent-save"
-                >
-                  Save
-                </button>
-              </div>
-
-              <div aria-live="polite">
-                @if (saved()) {
-                  <p class="has-text-success" data-testid="antecedent-saved">Saved.</p>
+                What are the pronoun types?
+              </summary>
+              <dl class="content mt-3">
+                @for (type of pronounTypes; track type) {
+                  <div data-testid="pronoun-type-hint-item">
+                    <dt class="has-text-weight-semibold">{{ type }}</dt>
+                    <dd>{{ hints[type] }}</dd>
+                  </div>
                 }
-                @if (saveError()) {
-                  <p class="has-text-danger" data-testid="antecedent-save-error">
-                    Could not save. Your selections are still here — try again.
-                  </p>
-                }
-              </div>
-            }
-          }
-          @case ('preparing') {
-            <div
-              class="notification is-info"
-              role="status"
-              aria-live="polite"
-              data-testid="antecedent-preparing"
+              </dl>
+            </details>
+
+            <table
+              class="table is-striped is-fullwidth"
+              aria-label="Pronoun occurrences, their antecedents, and their grammatical types"
+              data-testid="antecedent-table"
             >
-              <p>
-                The scroll text is still being prepared. Open the scroll view to wait for it to
-                finish, then come back.
-              </p>
-              <a
-                [routerLink]="['/scroll', scrollStudyId]"
-                class="button is-info is-outlined is-small mt-2"
-                data-testid="antecedent-preparing-back"
-              >
-                Back to scroll
-              </a>
-            </div>
-          }
-          @case ('failed') {
-            <div class="notification is-danger" role="alert" data-testid="antecedent-failed">
-              <p>{{ failedMessage() }}</p>
-              <a
-                routerLink="/scrolls"
-                class="button is-danger is-outlined is-small mt-2"
-                data-testid="antecedent-failed-back"
-              >
-                Back to scroll list
-              </a>
-            </div>
-          }
-          @case ('error') {
-            <div class="notification is-danger" role="alert" data-testid="antecedent-error">
-              <p>Could not load this scroll study.</p>
+              <thead>
+                <tr>
+                  <th>Pronoun</th>
+                  <th>Context</th>
+                  <th>Antecedent</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of rows(); track row.occurrence) {
+                  <tr data-testid="antecedent-row">
+                    <td data-testid="antecedent-word">{{ row.word }}</td>
+                    <td data-testid="antecedent-snippet">{{ row.snippet }}</td>
+                    <td>
+                      <div class="field has-addons">
+                        <div class="control">
+                          <div class="select is-small">
+                            <select
+                              [attr.aria-label]="
+                                'Antecedent for ' + row.word + ' at position ' + row.start
+                              "
+                              [ngModel]="row.antecedent"
+                              (ngModelChange)="setAntecedent(row.occurrence, $event)"
+                              data-testid="antecedent-select"
+                            >
+                              <option value="">— none —</option>
+                              @for (opt of options(); track opt) {
+                                <option [value]="opt">{{ opt }}</option>
+                              }
+                            </select>
+                          </div>
+                        </div>
+                        <div class="control">
+                          <input
+                            class="input is-small"
+                            type="text"
+                            maxlength="200"
+                            placeholder="Add antecedent"
+                            [attr.aria-label]="'Add a new antecedent for ' + row.word"
+                            [ngModel]="draft(row.occurrence)"
+                            (ngModelChange)="setDraft(row.occurrence, $event)"
+                            data-testid="antecedent-add-input"
+                          />
+                        </div>
+                        <div class="control">
+                          <button
+                            class="button is-small"
+                            type="button"
+                            (click)="addAntecedent(row.occurrence)"
+                            data-testid="antecedent-add"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="select is-small">
+                        <select
+                          [attr.aria-label]="
+                            'Grammatical type for ' + row.word + ' at position ' + row.start
+                          "
+                          [ngModel]="row.pronounType"
+                          (ngModelChange)="setPronounType(row.occurrence, $event)"
+                          data-testid="pronoun-type-select"
+                        >
+                          <option value="">— unclassified —</option>
+                          @for (type of pronounTypes; track type) {
+                            <option [value]="type">{{ type }}</option>
+                          }
+                        </select>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+
+            <div class="field">
               <button
-                class="button is-danger is-outlined is-small mt-2"
-                (click)="load()"
-                data-testid="antecedent-retry-button"
+                class="button is-primary"
+                type="button"
+                [class.is-loading]="saving()"
+                [disabled]="saving()"
+                (click)="save()"
+                data-testid="antecedent-save"
               >
-                Retry
+                Save
               </button>
             </div>
+
+            <div aria-live="polite">
+              @if (saved()) {
+                <p class="has-text-success" data-testid="antecedent-saved">Saved.</p>
+              }
+              @if (saveError()) {
+                <p class="has-text-danger" data-testid="antecedent-save-error">
+                  Could not save. Your selections are still here — try again.
+                </p>
+              }
+            </div>
           }
-        }
+        </app-tool-shell>
       </div>
     </section>
   `,
 })
 export class AntecedentViewComponent implements OnInit {
-  private readonly scrollStudy = inject(ScrollStudyService);
   private readonly antecedentStudy = inject(AntecedentStudyService);
   private readonly route = inject(ActivatedRoute);
 
-  readonly state = signal<ViewState>('loading');
-  readonly study = signal<ScrollStudy | null>(null);
+  readonly ctx = inject(ScrollToolContext);
+  readonly state = this.ctx.state;
+  readonly study = this.ctx.study;
   readonly rows = signal<OccurrenceRow[]>([]);
   readonly options = signal<string[]>([]);
   readonly saving = signal(false);
@@ -254,27 +199,15 @@ export class AntecedentViewComponent implements OnInit {
     this.load();
   }
 
-  /** Load the scroll study, derive the worklist, and pre-fill from any saved antecedent study. */
   load(): void {
-    this.state.set('loading');
-    this.saved.set(false);
-    this.saveError.set(false);
-    this.scrollStudy.getScrollStudy(this.scrollStudyId).subscribe({
-      next: (s) => {
-        this.study.set(s);
-        if (s.status === 'ready') {
-          this.buildWorklist(s.scrollText);
-          this.state.set('ready');
-          this.loadSaved();
-        } else if (s.status === 'failed') {
-          this.state.set('failed');
-        } else {
-          // uploading | extracting
-          this.state.set('preparing');
-        }
+    this.ctx.load(this.scrollStudyId, {
+      onStart: () => {
+        this.saved.set(false);
+        this.saveError.set(false);
       },
-      error: (err: { status?: number }) => {
-        this.state.set(err?.status === 404 ? 'failed' : 'error');
+      onReady: (s) => {
+        this.buildWorklist(s.scrollText);
+        this.loadSaved();
       },
     });
   }
@@ -415,9 +348,5 @@ export class AntecedentViewComponent implements OnInit {
         this.saveError.set(true);
       },
     });
-  }
-
-  failedMessage(): string {
-    return this.study()?.failureReason || 'This scroll could not be found.';
   }
 }

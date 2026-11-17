@@ -253,8 +253,8 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll({ status: 'uploading' })));
     fixture.detectChanges();
     expect(component.state()).toBe('preparing');
-    expect(query('[data-testid="memorize-preparing"]')).toBeTruthy();
-    expect(query('[data-testid="memorize-preparing-back"]')).toBeTruthy();
+    expect(query('[data-testid="tool-preparing"]')).toBeTruthy();
+    expect(query('[data-testid="tool-preparing-back"]')).toBeTruthy();
   });
 
   it('shows failed + back link for a failed scroll', () => {
@@ -262,7 +262,7 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(of(makeScroll({ status: 'failed', failureReason: 'bad file' })));
     fixture.detectChanges();
     expect(component.state()).toBe('failed');
-    expect(query('[data-testid="memorize-failed"]')?.textContent).toContain('bad file');
+    expect(query('[data-testid="tool-failed"]')?.textContent).toContain('bad file');
   });
 
   it('treats a 404 scroll as failed and a transient error as recoverable', () => {
@@ -276,7 +276,7 @@ describe('MemorizeViewComponent', () => {
     getScrollSpy.mockReturnValue(throwError(() => ({ status: 500 })));
     fixture.detectChanges();
     expect(component.state()).toBe('error');
-    expect(query('[data-testid="memorize-retry-button"]')).toBeTruthy();
+    expect(query('[data-testid="tool-retry"]')).toBeTruthy();
   });
 
   // --- chunk editing ---

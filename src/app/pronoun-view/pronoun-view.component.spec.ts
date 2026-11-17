@@ -107,9 +107,9 @@ describe('PronounViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('preparing');
-    expect(query('[data-testid="pronoun-preparing"]')).not.toBeNull();
+    expect(query('[data-testid="tool-preparing"]')).not.toBeNull();
     expect(query('[data-testid="pronoun-list"]')).toBeNull();
-    const back = query('[data-testid="pronoun-preparing-back"]') as HTMLAnchorElement;
+    const back = query('[data-testid="tool-preparing-back"]') as HTMLAnchorElement;
     expect(back.getAttribute('href')).toBe('/scroll/s1');
   });
 
@@ -120,7 +120,7 @@ describe('PronounViewComponent', () => {
     expect(component.state()).toBe('preparing');
   });
 
-  it('shows the failed notification with the reason and a back link to /scrolls', () => {
+  it('shows the failed notification with the reason and a back link to the book', () => {
     configure();
     getSpy.mockReturnValue(
       of(makeStudy({ status: 'failed', failureReason: 'file too large', scrollText: '' })),
@@ -128,9 +128,9 @@ describe('PronounViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('failed');
-    expect(query('[data-testid="pronoun-failed"]')?.textContent).toContain('file too large');
-    const back = query('[data-testid="pronoun-failed-back"]') as HTMLAnchorElement;
-    expect(back.getAttribute('href')).toBe('/scrolls');
+    expect(query('[data-testid="tool-failed"]')?.textContent).toContain('file too large');
+    const back = query('[data-testid="tool-failed-back"]') as HTMLAnchorElement;
+    expect(back.getAttribute('href')).toBe('/books/b1');
   });
 
   it('treats a 404 as a terminal failed state', () => {
@@ -139,7 +139,7 @@ describe('PronounViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('failed');
-    expect(query('[data-testid="pronoun-failed"]')?.textContent).toContain(
+    expect(query('[data-testid="tool-failed"]')?.textContent).toContain(
       'This scroll could not be found.',
     );
   });
@@ -152,7 +152,7 @@ describe('PronounViewComponent', () => {
     fixture.detectChanges();
 
     expect(component.state()).toBe('error');
-    (query('[data-testid="pronoun-retry-button"]') as HTMLButtonElement).click();
+    (query('[data-testid="tool-retry"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(getSpy).toHaveBeenCalledTimes(2);
     expect(component.state()).toBe('ready');

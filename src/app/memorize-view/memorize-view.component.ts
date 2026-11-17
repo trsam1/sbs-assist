@@ -7,9 +7,10 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
+import { ToolShellComponent } from '../tool-shell/tool-shell.component';
+import { ScrollToolContext } from '../tool-shell/scroll-tool-context';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
 import { RecitationGradeService } from '../recitation-grade.service';
 import { OutlineStudyService } from '../outline-study.service';
@@ -71,7 +72,6 @@ import {
   DEFAULT_SWIPE_OPTIONS,
 } from './gestures';
 
-type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
 type ViewMode = 'learn' | 'review' | 'test' | 'edit';
 type LearnStage = 'read' | 'fill' | 'recite';
 type DrillMode = 'chain' | 'reveal' | 'cloze';
@@ -87,899 +87,462 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
 
 @Component({
   selector: 'app-memorize-view',
-  imports: [RouterLink, FormsModule],
+  imports: [RouterLink, FormsModule, ToolShellComponent],
+  providers: [ScrollToolContext],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Memorize the scroll">
       <div class="container">
-        @if (study(); as s) {
-          <h2 class="title is-4" data-testid="memorize-book">{{ s.bookName }} — Memorize</h2>
-        }
+        <app-tool-shell stepId="memorize" [ctx]="ctx" [scrollId]="scrollStudyId">
+          <p class="mb-4">
+            Memorize the book from your own scroll. Seed chunks either by a verse count (learn N
+            verses at a time) or from your Step 8 paragraphs, then drill chunk by chunk — chaining
+            each onto the run, revealing progressively, or filling the blanks. Verse references are
+            kept as labels. Your progress is saved.
+          </p>
 
-        @switch (state()) {
-          @case ('loading') {
-            <div class="has-text-centered py-5" aria-live="polite" aria-busy="true">
-              <p>Loading…</p>
-            </div>
-          }
-          @case ('ready') {
-            <p class="mb-4">
-              Memorize the book from your own scroll. Seed chunks either by a verse count (learn N
-              verses at a time) or from your Step 8 paragraphs, then drill chunk by chunk — chaining
-              each onto the run, revealing progressively, or filling the blanks. Verse references
-              are kept as labels. Your progress is saved.
-            </p>
-
-            <!-- Review / Edit mode toggle. Review = the mobile-first flashcard deck; Edit = the
+          <!-- Review / Edit mode toggle. Review = the mobile-first flashcard deck; Edit = the
                  full worksheet (seed, chunk editor, drill, reminder pref). -->
-            <div
-              class="buttons has-addons mb-4"
-              role="group"
-              aria-label="Review or edit mode"
-              data-testid="memorize-mode-toggle"
+          <div
+            class="buttons has-addons mb-4"
+            role="group"
+            aria-label="Review or edit mode"
+            data-testid="memorize-mode-toggle"
+          >
+            <button
+              type="button"
+              class="button"
+              [class.is-link]="viewMode() === 'learn'"
+              [attr.aria-pressed]="viewMode() === 'learn'"
+              (click)="setViewMode('learn')"
+              data-testid="mode-learn"
             >
-              <button
-                type="button"
-                class="button"
-                [class.is-link]="viewMode() === 'learn'"
-                [attr.aria-pressed]="viewMode() === 'learn'"
-                (click)="setViewMode('learn')"
-                data-testid="mode-learn"
-              >
-                Learn
-              </button>
-              <button
-                type="button"
-                class="button"
-                [class.is-link]="viewMode() === 'review'"
-                [attr.aria-pressed]="viewMode() === 'review'"
-                (click)="setViewMode('review')"
-                data-testid="mode-review"
-              >
-                Review
-              </button>
-              <button
-                type="button"
-                class="button"
-                [class.is-link]="viewMode() === 'test'"
-                [attr.aria-pressed]="viewMode() === 'test'"
-                (click)="setViewMode('test')"
-                data-testid="mode-test"
-              >
-                Test
-              </button>
-              <button
-                type="button"
-                class="button"
-                [class.is-link]="viewMode() === 'edit'"
-                [attr.aria-pressed]="viewMode() === 'edit'"
-                (click)="setViewMode('edit')"
-                data-testid="mode-edit"
-              >
-                Edit
-              </button>
-            </div>
+              Learn
+            </button>
+            <button
+              type="button"
+              class="button"
+              [class.is-link]="viewMode() === 'review'"
+              [attr.aria-pressed]="viewMode() === 'review'"
+              (click)="setViewMode('review')"
+              data-testid="mode-review"
+            >
+              Review
+            </button>
+            <button
+              type="button"
+              class="button"
+              [class.is-link]="viewMode() === 'test'"
+              [attr.aria-pressed]="viewMode() === 'test'"
+              (click)="setViewMode('test')"
+              data-testid="mode-test"
+            >
+              Test
+            </button>
+            <button
+              type="button"
+              class="button"
+              [class.is-link]="viewMode() === 'edit'"
+              [attr.aria-pressed]="viewMode() === 'edit'"
+              (click)="setViewMode('edit')"
+              data-testid="mode-edit"
+            >
+              Edit
+            </button>
+          </div>
 
-            @if (viewMode() === 'review' || viewMode() === 'test') {
-              <!-- Shared drill settings: how many new chunks/day, and what "Again" does. -->
-              <div class="field is-grouped is-grouped-multiline mb-4" data-testid="drill-settings">
-                <div class="control">
-                  <label class="label is-small mb-1" for="new-per-day">New chunks per day</label>
-                  <input
-                    id="new-per-day"
-                    class="input is-small"
-                    type="number"
-                    [min]="NEW_PER_DAY_MIN"
-                    [max]="NEW_PER_DAY_MAX"
-                    [ngModel]="newPerDay()"
-                    (ngModelChange)="setNewPerDay(+$event)"
-                    data-testid="new-per-day"
-                    style="width: 5rem"
-                  />
-                  <p class="help is-size-7">
-                    {{ newChunkCount() }} new chunk(s) waiting — introduced {{ newPerDay() }}/day.
-                  </p>
-                </div>
-                <div class="control">
-                  <span class="label is-small mb-1">On “Again”</span>
-                  <div
-                    class="buttons has-addons are-small mb-0"
-                    role="group"
-                    aria-label="Again behavior"
+          @if (viewMode() === 'review' || viewMode() === 'test') {
+            <!-- Shared drill settings: how many new chunks/day, and what "Again" does. -->
+            <div class="field is-grouped is-grouped-multiline mb-4" data-testid="drill-settings">
+              <div class="control">
+                <label class="label is-small mb-1" for="new-per-day">New chunks per day</label>
+                <input
+                  id="new-per-day"
+                  class="input is-small"
+                  type="number"
+                  [min]="NEW_PER_DAY_MIN"
+                  [max]="NEW_PER_DAY_MAX"
+                  [ngModel]="newPerDay()"
+                  (ngModelChange)="setNewPerDay(+$event)"
+                  data-testid="new-per-day"
+                  style="width: 5rem"
+                />
+                <p class="help is-size-7">
+                  {{ newChunkCount() }} new chunk(s) waiting — introduced {{ newPerDay() }}/day.
+                </p>
+              </div>
+              <div class="control">
+                <span class="label is-small mb-1">On “Again”</span>
+                <div
+                  class="buttons has-addons are-small mb-0"
+                  role="group"
+                  aria-label="Again behavior"
+                >
+                  <button
+                    type="button"
+                    class="button"
+                    [class.is-link]="againMode() === 'now'"
+                    [attr.aria-pressed]="againMode() === 'now'"
+                    (click)="setAgainMode('now')"
+                    data-testid="again-now"
                   >
-                    <button
-                      type="button"
-                      class="button"
-                      [class.is-link]="againMode() === 'now'"
-                      [attr.aria-pressed]="againMode() === 'now'"
-                      (click)="setAgainMode('now')"
-                      data-testid="again-now"
-                    >
-                      Redo now
-                    </button>
-                    <button
-                      type="button"
-                      class="button"
-                      [class.is-link]="againMode() === 'later'"
-                      [attr.aria-pressed]="againMode() === 'later'"
-                      (click)="setAgainMode('later')"
-                      data-testid="again-later"
-                    >
-                      Later this session
-                    </button>
-                  </div>
+                    Redo now
+                  </button>
+                  <button
+                    type="button"
+                    class="button"
+                    [class.is-link]="againMode() === 'later'"
+                    [attr.aria-pressed]="againMode() === 'later'"
+                    (click)="setAgainMode('later')"
+                    data-testid="again-later"
+                  >
+                    Later this session
+                  </button>
                 </div>
               </div>
-            }
+            </div>
+          }
 
-            @if (viewMode() === 'learn') {
-              <!-- ===== Learn mode: one chunk, verse by verse, at the student's pace ===== -->
-              <div data-testid="memorize-learn">
-                @if (chunks().length === 0) {
-                  <div class="box has-text-centered" data-testid="learn-no-chunks">
-                    <p class="mb-3">
-                      No chunks yet. Switch to <strong>Edit</strong> to seed this book into chunks,
-                      then come back to learn them.
-                    </p>
-                    <button
-                      type="button"
-                      class="button is-link"
-                      (click)="setViewMode('edit')"
-                      data-testid="learn-go-edit"
+          @if (viewMode() === 'learn') {
+            <!-- ===== Learn mode: one chunk, verse by verse, at the student's pace ===== -->
+            <div data-testid="memorize-learn">
+              @if (chunks().length === 0) {
+                <div class="box has-text-centered" data-testid="learn-no-chunks">
+                  <p class="mb-3">
+                    No chunks yet. Switch to <strong>Edit</strong> to seed this book into chunks,
+                    then come back to learn them.
+                  </p>
+                  <button
+                    type="button"
+                    class="button is-link"
+                    (click)="setViewMode('edit')"
+                    data-testid="learn-go-edit"
+                  >
+                    Go to Edit
+                  </button>
+                </div>
+              } @else {
+                <div class="field mb-3">
+                  <label class="label is-small" for="learn-chunk">Chunk to learn</label>
+                  <div class="select is-fullwidth">
+                    <select
+                      id="learn-chunk"
+                      [ngModel]="learnIndex()"
+                      (ngModelChange)="selectLearnChunk(+$event)"
+                      data-testid="learn-chunk-select"
                     >
-                      Go to Edit
-                    </button>
-                  </div>
-                } @else {
-                  <div class="field mb-3">
-                    <label class="label is-small" for="learn-chunk">Chunk to learn</label>
-                    <div class="select is-fullwidth">
-                      <select
-                        id="learn-chunk"
-                        [ngModel]="learnIndex()"
-                        (ngModelChange)="selectLearnChunk(+$event)"
-                        data-testid="learn-chunk-select"
-                      >
-                        @for (c of chunks(); track $index) {
-                          <option [ngValue]="$index">
-                            {{ $index + 1 }}. {{ c.verseRef || 'Chunk ' + ($index + 1)
-                            }}{{ c.learn?.done ? ' (learned)' : '' }}
-                          </option>
-                        }
-                      </select>
-                    </div>
-                  </div>
-
-                  @if (learnChunk(); as lc) {
-                    <p class="is-size-6 mb-3" aria-live="polite" data-testid="learn-progress">
-                      Chunk {{ learnIndex() + 1 }} of {{ chunks().length }}
-                      @if (lc.verseRef) {
-                        <span class="tag is-light ml-2">{{ lc.verseRef }}</span>
+                      @for (c of chunks(); track $index) {
+                        <option [ngValue]="$index">
+                          {{ $index + 1 }}. {{ c.verseRef || 'Chunk ' + ($index + 1)
+                          }}{{ c.learn?.done ? ' (learned)' : '' }}
+                        </option>
                       }
-                      <span class="ml-2 has-text-grey">
-                        {{ learnProgress().unlocked }} of {{ learnVerses().length }} verses unlocked
-                      </span>
-                    </p>
+                    </select>
+                  </div>
+                </div>
 
-                    @if (learnVerses().length === 0) {
-                      <div class="notification is-warning is-light" data-testid="learn-no-verses">
-                        This chunk has no text to learn. Fix its range in Edit.
-                      </div>
-                    } @else {
-                      <ol class="mb-4" style="list-style: none; margin: 0; padding: 0">
-                        @for (v of learnVerses(); track $index) {
-                          @if ($index >= learnProgress().unlocked) {
-                            <li class="box learn-locked py-2" data-testid="learn-verse-locked">
-                              <span aria-hidden="true">🔒</span> {{ v.label }}
-                              <span class="has-text-grey is-size-7">(locked)</span>
-                            </li>
-                          } @else if ($index < learnProgress().unlocked - 1) {
-                            <li class="mb-2" data-testid="learn-verse-earlier">
-                              <details class="box py-2">
-                                <summary>
-                                  {{ v.label }}
-                                  @if ($index < learnProgress().learned) {
-                                    <span class="has-text-success">✓ learned</span>
-                                  } @else {
-                                    <span class="has-text-grey">· not marked learned</span>
-                                  }
-                                </summary>
-                                <p class="learn-text mt-2">{{ v.text }}</p>
-                              </details>
-                            </li>
-                          } @else {
-                            <li class="box" data-testid="learn-verse-current">
-                              <p class="card-ref mb-2">{{ v.label }}</p>
-                              <div
-                                class="buttons has-addons mb-3"
-                                role="group"
-                                aria-label="Learn stage"
+                @if (learnChunk(); as lc) {
+                  <p class="is-size-6 mb-3" aria-live="polite" data-testid="learn-progress">
+                    Chunk {{ learnIndex() + 1 }} of {{ chunks().length }}
+                    @if (lc.verseRef) {
+                      <span class="tag is-light ml-2">{{ lc.verseRef }}</span>
+                    }
+                    <span class="ml-2 has-text-grey">
+                      {{ learnProgress().unlocked }} of {{ learnVerses().length }} verses unlocked
+                    </span>
+                  </p>
+
+                  @if (learnVerses().length === 0) {
+                    <div class="notification is-warning is-light" data-testid="learn-no-verses">
+                      This chunk has no text to learn. Fix its range in Edit.
+                    </div>
+                  } @else {
+                    <ol class="mb-4" style="list-style: none; margin: 0; padding: 0">
+                      @for (v of learnVerses(); track $index) {
+                        @if ($index >= learnProgress().unlocked) {
+                          <li class="box learn-locked py-2" data-testid="learn-verse-locked">
+                            <span aria-hidden="true">🔒</span> {{ v.label }}
+                            <span class="has-text-grey is-size-7">(locked)</span>
+                          </li>
+                        } @else if ($index < learnProgress().unlocked - 1) {
+                          <li class="mb-2" data-testid="learn-verse-earlier">
+                            <details class="box py-2">
+                              <summary>
+                                {{ v.label }}
+                                @if ($index < learnProgress().learned) {
+                                  <span class="has-text-success">✓ learned</span>
+                                } @else {
+                                  <span class="has-text-grey">· not marked learned</span>
+                                }
+                              </summary>
+                              <p class="learn-text mt-2">{{ v.text }}</p>
+                            </details>
+                          </li>
+                        } @else {
+                          <li class="box" data-testid="learn-verse-current">
+                            <p class="card-ref mb-2">{{ v.label }}</p>
+                            <div
+                              class="buttons has-addons mb-3"
+                              role="group"
+                              aria-label="Learn stage"
+                            >
+                              <button
+                                type="button"
+                                class="button"
+                                [class.is-link]="learnStage() === 'read'"
+                                [attr.aria-pressed]="learnStage() === 'read'"
+                                (click)="setLearnStage('read')"
+                                data-testid="learn-stage-read"
                               >
-                                <button
-                                  type="button"
-                                  class="button"
-                                  [class.is-link]="learnStage() === 'read'"
-                                  [attr.aria-pressed]="learnStage() === 'read'"
-                                  (click)="setLearnStage('read')"
-                                  data-testid="learn-stage-read"
-                                >
-                                  Read
-                                </button>
-                                <button
-                                  type="button"
-                                  class="button"
-                                  [class.is-link]="learnStage() === 'fill'"
-                                  [attr.aria-pressed]="learnStage() === 'fill'"
-                                  (click)="setLearnStage('fill')"
-                                  data-testid="learn-stage-fill"
-                                >
-                                  Fill
-                                </button>
-                                <button
-                                  type="button"
-                                  class="button"
-                                  [class.is-link]="learnStage() === 'recite'"
-                                  [attr.aria-pressed]="learnStage() === 'recite'"
-                                  (click)="setLearnStage('recite')"
-                                  data-testid="learn-stage-recite"
-                                >
-                                  Recite
-                                </button>
-                              </div>
+                                Read
+                              </button>
+                              <button
+                                type="button"
+                                class="button"
+                                [class.is-link]="learnStage() === 'fill'"
+                                [attr.aria-pressed]="learnStage() === 'fill'"
+                                (click)="setLearnStage('fill')"
+                                data-testid="learn-stage-fill"
+                              >
+                                Fill
+                              </button>
+                              <button
+                                type="button"
+                                class="button"
+                                [class.is-link]="learnStage() === 'recite'"
+                                [attr.aria-pressed]="learnStage() === 'recite'"
+                                (click)="setLearnStage('recite')"
+                                data-testid="learn-stage-recite"
+                              >
+                                Recite
+                              </button>
+                            </div>
 
-                              @switch (learnStage()) {
-                                @case ('read') {
-                                  <p class="learn-text mb-3" data-testid="learn-read-text">
-                                    {{ v.text }}
-                                  </p>
+                            @switch (learnStage()) {
+                              @case ('read') {
+                                <p class="learn-text mb-3" data-testid="learn-read-text">
+                                  {{ v.text }}
+                                </p>
+                                <button
+                                  type="button"
+                                  class="button is-link"
+                                  (click)="setLearnStage('fill')"
+                                  data-testid="learn-next-stage"
+                                >
+                                  Next: Fill
+                                </button>
+                              }
+                              @case ('fill') {
+                                <div class="field mb-2">
+                                  <label class="label is-small" for="learn-fill-n">
+                                    Blank every Nth word
+                                  </label>
+                                  <input
+                                    id="learn-fill-n"
+                                    class="input is-small"
+                                    type="number"
+                                    min="2"
+                                    max="10"
+                                    [ngModel]="clozeN()"
+                                    (ngModelChange)="setClozeN(+$event)"
+                                    data-testid="learn-fill-n"
+                                    style="width: 5rem"
+                                  />
+                                </div>
+                                <p class="learn-text mb-3" data-testid="learn-fill-text">
+                                  @for (t of learnFillTokens(); track $index) {
+                                    @if (t.blank && !learnFillRevealed()) {
+                                      <span aria-label="blank">{{ blankOf(t.text) }}</span>
+                                    } @else if (t.blank) {
+                                      <strong>{{ t.text }}</strong>
+                                    } @else {
+                                      <span>{{ t.text }}</span>
+                                    }
+                                  }
+                                </p>
+                                <div class="buttons">
+                                  <button
+                                    type="button"
+                                    class="button"
+                                    (click)="toggleLearnFill()"
+                                    data-testid="learn-fill-check"
+                                  >
+                                    {{ learnFillRevealed() ? 'Hide answers' : 'Check' }}
+                                  </button>
                                   <button
                                     type="button"
                                     class="button is-link"
-                                    (click)="setLearnStage('fill')"
+                                    (click)="setLearnStage('recite')"
                                     data-testid="learn-next-stage"
                                   >
-                                    Next: Fill
+                                    Next: Recite
                                   </button>
-                                }
-                                @case ('fill') {
-                                  <div class="field mb-2">
-                                    <label class="label is-small" for="learn-fill-n">
-                                      Blank every Nth word
-                                    </label>
-                                    <input
-                                      id="learn-fill-n"
-                                      class="input is-small"
-                                      type="number"
-                                      min="2"
-                                      max="10"
-                                      [ngModel]="clozeN()"
-                                      (ngModelChange)="setClozeN(+$event)"
-                                      data-testid="learn-fill-n"
-                                      style="width: 5rem"
-                                    />
-                                  </div>
-                                  <p class="learn-text mb-3" data-testid="learn-fill-text">
-                                    @for (t of learnFillTokens(); track $index) {
-                                      @if (t.blank && !learnFillRevealed()) {
-                                        <span aria-label="blank">{{ blankOf(t.text) }}</span>
-                                      } @else if (t.blank) {
-                                        <strong>{{ t.text }}</strong>
-                                      } @else {
-                                        <span>{{ t.text }}</span>
-                                      }
+                                </div>
+                              }
+                              @case ('recite') {
+                                @if (!learnRevealed()) {
+                                  <p class="has-text-grey mb-3" data-testid="learn-recite-prompt">
+                                    Recite
+                                    @if (learnProgress().unlocked > 1) {
+                                      verses 1 to {{ learnProgress().unlocked }}
+                                    } @else {
+                                      this verse
                                     }
+                                    from memory.
                                   </p>
                                   <div class="buttons">
-                                    <button
-                                      type="button"
-                                      class="button"
-                                      (click)="toggleLearnFill()"
-                                      data-testid="learn-fill-check"
-                                    >
-                                      {{ learnFillRevealed() ? 'Hide answers' : 'Check' }}
-                                    </button>
+                                    @if (recordingSupported()) {
+                                      @if (testPhase() === 'recording') {
+                                        <button
+                                          type="button"
+                                          class="button is-danger"
+                                          (click)="stopRecording()"
+                                          data-testid="learn-stop"
+                                        >
+                                          ■ Done reciting
+                                        </button>
+                                      } @else if (testPhase() === 'grading') {
+                                        <span class="has-text-grey" data-testid="learn-grading">
+                                          Grading your recitation…
+                                        </span>
+                                      } @else {
+                                        <button
+                                          type="button"
+                                          class="button is-link is-light"
+                                          (click)="startRecording()"
+                                          data-testid="learn-record"
+                                        >
+                                          🎙 Check by voice
+                                        </button>
+                                      }
+                                    }
                                     <button
                                       type="button"
                                       class="button is-link"
-                                      (click)="setLearnStage('recite')"
-                                      data-testid="learn-next-stage"
+                                      [disabled]="
+                                        testPhase() === 'recording' || testPhase() === 'grading'
+                                      "
+                                      (click)="revealLearn()"
+                                      data-testid="learn-reveal"
                                     >
-                                      Next: Recite
+                                      Reveal
+                                    </button>
+                                  </div>
+                                } @else {
+                                  @if (reciteDiff(); as diff) {
+                                    <p class="learn-text mb-2" data-testid="learn-revealed-text">
+                                      @for (t of diff.verse; track $index) {
+                                        <span
+                                          [class.missed-word]="!t.matched"
+                                          [attr.data-missed]="t.matched ? null : 'true'"
+                                          >{{ t.text }}</span
+                                        >{{ ' ' }}
+                                      }
+                                    </p>
+                                    <p
+                                      class="is-size-7 has-text-grey mb-2"
+                                      data-testid="learn-missed-summary"
+                                    >
+                                      @if (reciteMissedCount() === 0) {
+                                        Every word was there.
+                                      } @else {
+                                        Missed {{ reciteMissedCount() }}
+                                        {{ reciteMissedCount() === 1 ? 'word' : 'words' }}
+                                        (underlined).
+                                      }
+                                    </p>
+                                    <p class="is-size-6 mb-3" data-testid="learn-said">
+                                      <span class="has-text-grey">You said: </span>
+                                      @for (t of diff.said; track $index) {
+                                        <span [class.extra-word]="!t.matched">{{ t.text }}</span
+                                        >{{ ' ' }}
+                                      }
+                                    </p>
+                                  } @else {
+                                    <p class="learn-text mb-3" data-testid="learn-revealed-text">
+                                      {{ learnRangeText() }}
+                                    </p>
+                                    @if (testError()) {
+                                      <p
+                                        class="is-size-7 has-text-grey mb-3"
+                                        data-testid="learn-voice-error"
+                                      >
+                                        Voice check wasn't available. Check yourself below.
+                                      </p>
+                                    }
+                                  }
+                                  @if (gradeResult(); as r) {
+                                    <p
+                                      class="is-size-7 has-text-grey mb-3"
+                                      data-testid="learn-voice-result"
+                                    >
+                                      Voice check: {{ gradeLabel(r.grade) }}, {{ r.accuracyPct }}%
+                                      match. This doesn't change your review schedule.
+                                    </p>
+                                  }
+                                  <div class="buttons">
+                                    <button
+                                      type="button"
+                                      class="button is-success"
+                                      [disabled]="saving()"
+                                      (click)="learnGotIt()"
+                                      data-testid="learn-got-it"
+                                    >
+                                      Got it
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="button"
+                                      [disabled]="saving()"
+                                      (click)="learnNotYet()"
+                                      data-testid="learn-not-yet"
+                                    >
+                                      Not yet
                                     </button>
                                   </div>
                                 }
-                                @case ('recite') {
-                                  @if (!learnRevealed()) {
-                                    <p class="has-text-grey mb-3" data-testid="learn-recite-prompt">
-                                      Recite
-                                      @if (learnProgress().unlocked > 1) {
-                                        verses 1 to {{ learnProgress().unlocked }}
-                                      } @else {
-                                        this verse
-                                      }
-                                      from memory.
-                                    </p>
-                                    <div class="buttons">
-                                      @if (recordingSupported()) {
-                                        @if (testPhase() === 'recording') {
-                                          <button
-                                            type="button"
-                                            class="button is-danger"
-                                            (click)="stopRecording()"
-                                            data-testid="learn-stop"
-                                          >
-                                            ■ Done reciting
-                                          </button>
-                                        } @else if (testPhase() === 'grading') {
-                                          <span class="has-text-grey" data-testid="learn-grading">
-                                            Grading your recitation…
-                                          </span>
-                                        } @else {
-                                          <button
-                                            type="button"
-                                            class="button is-link is-light"
-                                            (click)="startRecording()"
-                                            data-testid="learn-record"
-                                          >
-                                            🎙 Check by voice
-                                          </button>
-                                        }
-                                      }
-                                      <button
-                                        type="button"
-                                        class="button is-link"
-                                        [disabled]="
-                                          testPhase() === 'recording' || testPhase() === 'grading'
-                                        "
-                                        (click)="revealLearn()"
-                                        data-testid="learn-reveal"
-                                      >
-                                        Reveal
-                                      </button>
-                                    </div>
-                                  } @else {
-                                    @if (reciteDiff(); as diff) {
-                                      <p class="learn-text mb-2" data-testid="learn-revealed-text">
-                                        @for (t of diff.verse; track $index) {
-                                          <span
-                                            [class.missed-word]="!t.matched"
-                                            [attr.data-missed]="t.matched ? null : 'true'"
-                                            >{{ t.text }}</span
-                                          >{{ ' ' }}
-                                        }
-                                      </p>
-                                      <p
-                                        class="is-size-7 has-text-grey mb-2"
-                                        data-testid="learn-missed-summary"
-                                      >
-                                        @if (reciteMissedCount() === 0) {
-                                          Every word was there.
-                                        } @else {
-                                          Missed {{ reciteMissedCount() }}
-                                          {{ reciteMissedCount() === 1 ? 'word' : 'words' }}
-                                          (underlined).
-                                        }
-                                      </p>
-                                      <p class="is-size-6 mb-3" data-testid="learn-said">
-                                        <span class="has-text-grey">You said: </span>
-                                        @for (t of diff.said; track $index) {
-                                          <span [class.extra-word]="!t.matched">{{ t.text }}</span
-                                          >{{ ' ' }}
-                                        }
-                                      </p>
-                                    } @else {
-                                      <p class="learn-text mb-3" data-testid="learn-revealed-text">
-                                        {{ learnRangeText() }}
-                                      </p>
-                                      @if (testError()) {
-                                        <p
-                                          class="is-size-7 has-text-grey mb-3"
-                                          data-testid="learn-voice-error"
-                                        >
-                                          Voice check wasn't available. Check yourself below.
-                                        </p>
-                                      }
-                                    }
-                                    @if (gradeResult(); as r) {
-                                      <p
-                                        class="is-size-7 has-text-grey mb-3"
-                                        data-testid="learn-voice-result"
-                                      >
-                                        Voice check: {{ gradeLabel(r.grade) }}, {{ r.accuracyPct }}%
-                                        match. This doesn't change your review schedule.
-                                      </p>
-                                    }
-                                    <div class="buttons">
-                                      <button
-                                        type="button"
-                                        class="button is-success"
-                                        [disabled]="saving()"
-                                        (click)="learnGotIt()"
-                                        data-testid="learn-got-it"
-                                      >
-                                        Got it
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="button"
-                                        [disabled]="saving()"
-                                        (click)="learnNotYet()"
-                                        data-testid="learn-not-yet"
-                                      >
-                                        Not yet
-                                      </button>
-                                    </div>
-                                  }
-                                }
                               }
-                            </li>
-                          }
-                        }
-                      </ol>
-
-                      @if (learnProgress().done) {
-                        <div class="box has-text-centered" data-testid="learn-done">
-                          <p class="is-size-5 mb-2">Chunk learned ✓</p>
-                          <div class="buttons is-centered">
-                            @if (learnNextIndex() >= 0) {
-                              <button
-                                type="button"
-                                class="button is-link"
-                                (click)="learnNextChunk()"
-                                data-testid="learn-next-chunk"
-                              >
-                                Next chunk
-                              </button>
                             }
+                          </li>
+                        }
+                      }
+                    </ol>
+
+                    @if (learnProgress().done) {
+                      <div class="box has-text-centered" data-testid="learn-done">
+                        <p class="is-size-5 mb-2">Chunk learned ✓</p>
+                        <div class="buttons is-centered">
+                          @if (learnNextIndex() >= 0) {
                             <button
                               type="button"
-                              class="button is-light"
-                              [disabled]="saving()"
-                              (click)="learnRelearn()"
-                              data-testid="learn-relearn"
+                              class="button is-link"
+                              (click)="learnNextChunk()"
+                              data-testid="learn-next-chunk"
                             >
-                              Relearn this chunk
+                              Next chunk
                             </button>
-                          </div>
-                        </div>
-                      } @else if (learnReady()) {
-                        <div data-testid="learn-grade">
-                          <p class="mb-2">All verses are learned. How did the whole chunk go?</p>
-                          <div class="grade-row" role="group" aria-label="Grade the whole chunk">
-                            <button
-                              type="button"
-                              class="button is-danger is-light grade-btn"
-                              [disabled]="saving()"
-                              (click)="learnGrade('again')"
-                              data-testid="learn-grade-again"
-                            >
-                              Again
-                            </button>
-                            <button
-                              type="button"
-                              class="button grade-btn"
-                              [disabled]="saving()"
-                              (click)="learnGrade('hard')"
-                              data-testid="learn-grade-hard"
-                            >
-                              Hard
-                            </button>
-                            <button
-                              type="button"
-                              class="button grade-btn"
-                              [disabled]="saving()"
-                              (click)="learnGrade('good')"
-                              data-testid="learn-grade-good"
-                            >
-                              Good
-                            </button>
-                            <button
-                              type="button"
-                              class="button grade-btn"
-                              [disabled]="saving()"
-                              (click)="learnGrade('easy')"
-                              data-testid="learn-grade-easy"
-                            >
-                              Easy
-                            </button>
-                          </div>
-                        </div>
-                      } @else if (learnProgress().unlocked < learnVerses().length) {
-                        <div>
+                          }
                           <button
                             type="button"
-                            class="button is-link is-fullwidth"
+                            class="button is-light"
                             [disabled]="saving()"
-                            (click)="learnUnlockNext()"
-                            data-testid="learn-unlock-next"
+                            (click)="learnRelearn()"
+                            data-testid="learn-relearn"
                           >
-                            Unlock next verse
+                            Relearn this chunk
                           </button>
-                          @if (learnProgress().learned < learnProgress().unlocked) {
-                            <p class="help" data-testid="learn-unlock-hint">
-                              The current verse isn't marked learned yet. You can still move on.
-                            </p>
-                          }
                         </div>
-                      }
-                    }
-                  } @else {
-                    <div class="box has-text-centered" data-testid="learn-all-done">
-                      <p class="is-size-5 mb-2">Every chunk is learned ✓</p>
-                      <p class="has-text-grey">
-                        Pick a chunk above to relearn it, or use Review for what's due.
-                      </p>
-                    </div>
-                  }
-                }
-              </div>
-            }
-
-            @if (viewMode() === 'review') {
-              <!-- ===== Review mode: flashcard deck driven by the due queue ===== -->
-              <div class="review-deck" data-testid="memorize-review">
-                @if (chunks().length === 0) {
-                  <div class="box has-text-centered" data-testid="review-no-chunks">
-                    <p class="mb-3">
-                      No chunks to review yet. Switch to <strong>Edit</strong> to seed this book
-                      into chunks, then come back to review them.
-                    </p>
-                    <button
-                      type="button"
-                      class="button is-link"
-                      (click)="setViewMode('edit')"
-                      data-testid="review-go-edit"
-                    >
-                      Go to Edit
-                    </button>
-                  </div>
-                } @else if (deckComplete()) {
-                  <div class="box has-text-centered" data-testid="review-complete">
-                    <p class="is-size-5 mb-2">All caught up ✓</p>
-                    <p class="has-text-grey">
-                      Nothing due right now — well memorized. Come back when the next review falls
-                      due.
-                    </p>
-                  </div>
-                } @else {
-                  <!-- Deck progress -->
-                  <p
-                    class="is-size-6 has-text-centered mb-3"
-                    aria-live="polite"
-                    data-testid="review-progress"
-                  >
-                    Card {{ deckProgress().pos + 1 }} of {{ deckProgress().total }} due
-                    @if (cardRef()) {
-                      <span class="tag is-light ml-2">{{ cardRef() }}</span>
-                    }
-                  </p>
-
-                  <!-- The review card: plain flowing layout (no fixed height, no 3-D flip), so a
-                       multi-verse chunk wraps and scrolls. Tap / Space reveals. -->
-                  <div
-                    class="review-card box"
-                    role="button"
-                    tabindex="0"
-                    [attr.aria-label]="
-                      flipped()
-                        ? 'Card revealed. Grade your recall, or tap to hide.'
-                        : 'Hidden card. Tap or press space to reveal.'
-                    "
-                    (click)="flip()"
-                    (keydown)="onCardKeydown($event)"
-                    (pointerdown)="onCardPointerDown($event)"
-                    (pointerup)="onCardPointerUp($event)"
-                    data-testid="review-card"
-                  >
-                    @if (!flipped()) {
-                      <div class="has-text-centered" data-testid="review-card-front">
-                        <p class="card-ref">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
-                        <p class="card-prompt has-text-grey">Recite from memory, then reveal.</p>
-                        @if (scaffold() === 'first') {
-                          <p class="card-scaffold" data-testid="review-scaffold">
-                            {{ cardScaffoldText() }}
-                          </p>
-                        }
                       </div>
-                    } @else {
-                      <div data-testid="review-card-back">
-                        <p class="card-ref has-text-centered mb-3">
-                          {{ cardRef() || 'Chunk ' + cardChunkNumber() }}
-                        </p>
-                        <p class="card-text review-text">{{ cardBackText() }}</p>
-                      </div>
-                    }
-                  </div>
-
-                  <!-- Front controls: scaffold toggle + explicit reveal -->
-                  @if (!flipped()) {
-                    <div class="buttons is-centered mt-3">
-                      <button
-                        type="button"
-                        class="button is-small is-light"
-                        (click)="toggleScaffold(); $event.stopPropagation()"
-                        [attr.aria-pressed]="scaffold() === 'first'"
-                        data-testid="review-scaffold-toggle"
-                      >
-                        {{ scaffold() === 'first' ? 'Hide hint' : 'Show first letters' }}
-                      </button>
-                      <button
-                        type="button"
-                        class="button is-small is-link"
-                        (click)="flip(); $event.stopPropagation()"
-                        data-testid="review-reveal"
-                      >
-                        Reveal
-                      </button>
-                    </div>
-                  }
-
-                  <!-- Grade controls: large, full-width, bottom-anchored on phones. -->
-                  @if (flipped()) {
-                    <p class="is-size-7 has-text-grey has-text-centered mt-3 mb-2">
-                      Next review after a pass:
-                      <span data-testid="review-next-due">{{ activeDueLabel() }}</span>
-                    </p>
-                    <div
-                      class="grade-row"
-                      role="group"
-                      aria-label="Grade your recall"
-                      data-testid="review-grade-row"
-                    >
-                      <button
-                        type="button"
-                        class="button is-danger is-light grade-btn"
-                        [disabled]="saving()"
-                        (click)="gradeCard('again')"
-                        data-testid="review-grade-again"
-                      >
-                        Again
-                      </button>
-                      <button
-                        type="button"
-                        class="button grade-btn"
-                        [disabled]="saving()"
-                        (click)="gradeCard('hard')"
-                        data-testid="review-grade-hard"
-                      >
-                        Hard
-                      </button>
-                      <button
-                        type="button"
-                        class="button grade-btn"
-                        [disabled]="saving()"
-                        (click)="gradeCard('good')"
-                        data-testid="review-grade-good"
-                      >
-                        Good
-                      </button>
-                      <button
-                        type="button"
-                        class="button is-success is-light grade-btn"
-                        [disabled]="saving()"
-                        (click)="gradeCard('easy')"
-                        data-testid="review-grade-easy"
-                      >
-                        Easy
-                      </button>
-                    </div>
-                  }
-
-                  <!-- Shortcut legend: makes the hands-free controls discoverable. -->
-                  @if (!legendDismissed()) {
-                    <div
-                      class="notification is-light p-2 mt-3 is-size-7"
-                      data-testid="review-legend"
-                    >
-                      <button
-                        type="button"
-                        class="delete is-small"
-                        (click)="dismissLegend()"
-                        aria-label="Dismiss shortcuts help"
-                        data-testid="review-legend-dismiss"
-                      ></button>
-                      <strong>Hands-free:</strong> tap / Space / swipe&nbsp;up to flip; then
-                      <strong>1</strong> Again · <strong>2</strong> Hard · <strong>3</strong> Good ·
-                      <strong>4</strong> Easy, or swipe left (Again) / right (Easy).
-                    </div>
-                  }
-
-                  @if (saveError()) {
-                    <p
-                      class="has-text-danger has-text-centered mt-2"
-                      data-testid="review-save-error"
-                    >
-                      Could not save that grade — it's kept; try again.
-                    </p>
-                  }
-                }
-              </div>
-            } @else if (viewMode() === 'test') {
-              <!-- ===== Test mode: recite aloud → auto-grade (Transcribe + Bedrock) ===== -->
-              <div class="review-deck" data-testid="memorize-test">
-                @if (chunks().length === 0) {
-                  <div class="box has-text-centered" data-testid="test-no-chunks">
-                    <p class="mb-3">
-                      No chunks to test yet. Switch to <strong>Edit</strong> to seed this book into
-                      chunks, then come back to test your recall.
-                    </p>
-                    <button
-                      type="button"
-                      class="button is-link"
-                      (click)="setViewMode('edit')"
-                      data-testid="test-go-edit"
-                    >
-                      Go to Edit
-                    </button>
-                  </div>
-                } @else if (deckComplete()) {
-                  <div class="box has-text-centered" data-testid="test-complete">
-                    <p class="is-size-5 mb-2">All caught up ✓</p>
-                    <p class="has-text-grey">Nothing due to test right now — well memorized.</p>
-                  </div>
-                } @else {
-                  <!-- Deck progress + drive/desk toggle -->
-                  <div class="level is-mobile mb-2">
-                    <div class="level-left">
-                      <p class="is-size-6" aria-live="polite" data-testid="test-progress">
-                        Card {{ deckProgress().pos + 1 }} of {{ deckProgress().total }} due
-                        @if (cardRef()) {
-                          <span class="tag is-light ml-2">{{ cardRef() }}</span>
-                        }
-                      </p>
-                    </div>
-                    <div class="level-right">
-                      <div
-                        class="buttons has-addons are-small mb-0"
-                        role="group"
-                        aria-label="Grading mode"
-                        data-testid="test-grade-mode"
-                      >
-                        <button
-                          type="button"
-                          class="button"
-                          [class.is-link]="testDriveMode() === 'desk'"
-                          [attr.aria-pressed]="testDriveMode() === 'desk'"
-                          (click)="setTestDriveMode('desk')"
-                          data-testid="test-mode-desk"
-                        >
-                          Desk
-                        </button>
-                        <button
-                          type="button"
-                          class="button"
-                          [class.is-link]="testDriveMode() === 'drive'"
-                          [attr.aria-pressed]="testDriveMode() === 'drive'"
-                          (click)="setTestDriveMode('drive')"
-                          data-testid="test-mode-drive"
-                        >
-                          Drive (hands-free)
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="box has-text-centered" data-testid="test-card">
-                    <p class="card-ref mb-3">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
-
-                    @if (!recordingSupported()) {
-                      <!-- No MediaRecorder / permission: fall back to manual grading. -->
-                      <div class="notification is-warning is-light" data-testid="test-no-mic">
-                        Voice grading isn't available in this browser. Recite from memory, reveal
-                        the text, and grade yourself.
-                      </div>
-                      <p class="card-text mt-3" data-testid="test-manual-text">
-                        {{ cardBackText() }}
-                      </p>
-                    } @else if (testPhase() === 'idle') {
-                      <p class="has-text-grey mb-4">
-                        Recite this passage from memory, then stop — I'll listen and grade you.
-                      </p>
-                      <button
-                        type="button"
-                        class="button is-link is-large"
-                        (click)="startRecording()"
-                        data-testid="test-record"
-                        style="min-height: 56px"
-                      >
-                        🎙 Start reciting
-                      </button>
-                    } @else if (testPhase() === 'recording') {
-                      <p class="has-text-danger mb-4" aria-live="polite">● Listening…</p>
-                      <button
-                        type="button"
-                        class="button is-danger is-large"
-                        (click)="stopRecording()"
-                        data-testid="test-stop"
-                        style="min-height: 56px"
-                      >
-                        ■ Done reciting
-                      </button>
-                    } @else if (testPhase() === 'grading') {
-                      <p class="has-text-grey" aria-live="polite" data-testid="test-grading">
-                        Grading your recitation…
-                      </p>
-                    } @else if (testPhase() === 'graded') {
-                      <!-- The result: proposal (desk) or committed (drive). -->
-                      @if (reciteDiff(); as diff) {
-                        <p class="card-text recite-words mb-3" data-testid="test-revealed-text">
-                          @for (t of diff.verse; track $index) {
-                            <span
-                              [class.missed-word]="!t.matched"
-                              [attr.data-missed]="t.matched ? null : 'true'"
-                              >{{ t.text }}</span
-                            >{{ ' ' }}
-                          }
-                        </p>
-                        <p class="is-size-7 has-text-grey mb-3" data-testid="test-missed-summary">
-                          @if (reciteMissedCount() === 0) {
-                            Every word was there.
-                          } @else {
-                            Missed {{ reciteMissedCount() }}
-                            {{ reciteMissedCount() === 1 ? 'word' : 'words' }} (underlined).
-                          }
-                        </p>
-                        <p class="is-size-6 mb-3" data-testid="test-said">
-                          <span class="has-text-grey">You said: </span>
-                          @for (t of diff.said; track $index) {
-                            <span [class.extra-word]="!t.matched">{{ t.text }}</span
-                            >{{ ' ' }}
-                          }
-                        </p>
-                      } @else {
-                        <p class="card-text mb-3" data-testid="test-revealed-text">
-                          {{ cardBackText() }}
-                        </p>
-                        @if (gradeResult()) {
-                          <p class="is-size-7 has-text-grey mb-3" data-testid="test-no-transcript">
-                            No transcript was captured, so missed words can't be highlighted.
-                          </p>
-                        }
-                      }
-                      <div aria-live="polite" data-testid="test-result">
-                        <p class="is-size-5 mb-1">
-                          <span
-                            class="tag is-medium"
-                            [class.is-danger]="gradeResult()?.grade === 'again'"
-                            [class.is-warning]="gradeResult()?.grade === 'hard'"
-                            [class.is-success]="
-                              gradeResult()?.grade === 'good' || gradeResult()?.grade === 'easy'
-                            "
-                            data-testid="test-grade-value"
-                          >
-                            {{ gradeLabel(gradeResult()?.grade) }}
-                          </span>
-                          <span class="is-size-6 has-text-grey ml-2" data-testid="test-accuracy">
-                            {{ gradeResult()?.accuracyPct }}% match
-                          </span>
-                        </p>
-                        <p class="is-size-7 has-text-grey" data-testid="test-reason">
-                          {{ gradeResult()?.reason }}
-                        </p>
-                        @if (gradeResult()?.degraded) {
-                          <p class="is-size-7 has-text-warning" data-testid="test-degraded">
-                            (Auto-grade was unavailable — scored by word match. Adjust below.)
-                          </p>
-                        }
-                      </div>
-
-                      @if (testDriveMode() === 'desk') {
-                        <!-- Desk: propose; the student confirms or overrides before it commits. -->
-                        <p class="is-size-7 has-text-grey mt-3 mb-2">
-                          Confirm the grade, or override:
-                        </p>
-                        <div
-                          class="grade-row"
-                          role="group"
-                          aria-label="Confirm or override the grade"
-                          data-testid="test-grade-row"
-                        >
+                    } @else if (learnReady()) {
+                      <div data-testid="learn-grade">
+                        <p class="mb-2">All verses are learned. How did the whole chunk go?</p>
+                        <div class="grade-row" role="group" aria-label="Grade the whole chunk">
                           <button
                             type="button"
                             class="button is-danger is-light grade-btn"
                             [disabled]="saving()"
-                            (click)="commitTestGrade('again')"
-                            data-testid="test-grade-again"
+                            (click)="learnGrade('again')"
+                            data-testid="learn-grade-again"
                           >
                             Again
                           </button>
@@ -987,8 +550,8 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                             type="button"
                             class="button grade-btn"
                             [disabled]="saving()"
-                            (click)="commitTestGrade('hard')"
-                            data-testid="test-grade-hard"
+                            (click)="learnGrade('hard')"
+                            data-testid="learn-grade-hard"
                           >
                             Hard
                           </button>
@@ -996,59 +559,412 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                             type="button"
                             class="button grade-btn"
                             [disabled]="saving()"
-                            (click)="commitTestGrade('good')"
-                            data-testid="test-grade-good"
+                            (click)="learnGrade('good')"
+                            data-testid="learn-grade-good"
                           >
                             Good
                           </button>
                           <button
                             type="button"
-                            class="button is-success is-light grade-btn"
+                            class="button grade-btn"
                             [disabled]="saving()"
-                            (click)="commitTestGrade('easy')"
-                            data-testid="test-grade-easy"
+                            (click)="learnGrade('easy')"
+                            data-testid="learn-grade-easy"
                           >
                             Easy
                           </button>
                         </div>
-                      } @else {
-                        <p
-                          class="is-size-7 has-text-grey mt-3"
-                          aria-live="polite"
-                          data-testid="test-drive-advancing"
+                      </div>
+                    } @else if (learnProgress().unlocked < learnVerses().length) {
+                      <div>
+                        <button
+                          type="button"
+                          class="button is-link is-fullwidth"
+                          [disabled]="saving()"
+                          (click)="learnUnlockNext()"
+                          data-testid="learn-unlock-next"
                         >
-                          Recorded — next verse coming up…
+                          Unlock next verse
+                        </button>
+                        @if (learnProgress().learned < learnProgress().unlocked) {
+                          <p class="help" data-testid="learn-unlock-hint">
+                            The current verse isn't marked learned yet. You can still move on.
+                          </p>
+                        }
+                      </div>
+                    }
+                  }
+                } @else {
+                  <div class="box has-text-centered" data-testid="learn-all-done">
+                    <p class="is-size-5 mb-2">Every chunk is learned ✓</p>
+                    <p class="has-text-grey">
+                      Pick a chunk above to relearn it, or use Review for what's due.
+                    </p>
+                  </div>
+                }
+              }
+            </div>
+          }
+
+          @if (viewMode() === 'review') {
+            <!-- ===== Review mode: flashcard deck driven by the due queue ===== -->
+            <div class="review-deck" data-testid="memorize-review">
+              @if (chunks().length === 0) {
+                <div class="box has-text-centered" data-testid="review-no-chunks">
+                  <p class="mb-3">
+                    No chunks to review yet. Switch to <strong>Edit</strong> to seed this book into
+                    chunks, then come back to review them.
+                  </p>
+                  <button
+                    type="button"
+                    class="button is-link"
+                    (click)="setViewMode('edit')"
+                    data-testid="review-go-edit"
+                  >
+                    Go to Edit
+                  </button>
+                </div>
+              } @else if (deckComplete()) {
+                <div class="box has-text-centered" data-testid="review-complete">
+                  <p class="is-size-5 mb-2">All caught up ✓</p>
+                  <p class="has-text-grey">
+                    Nothing due right now — well memorized. Come back when the next review falls
+                    due.
+                  </p>
+                </div>
+              } @else {
+                <!-- Deck progress -->
+                <p
+                  class="is-size-6 has-text-centered mb-3"
+                  aria-live="polite"
+                  data-testid="review-progress"
+                >
+                  Card {{ deckProgress().pos + 1 }} of {{ deckProgress().total }} due
+                  @if (cardRef()) {
+                    <span class="tag is-light ml-2">{{ cardRef() }}</span>
+                  }
+                </p>
+
+                <!-- The review card: plain flowing layout (no fixed height, no 3-D flip), so a
+                       multi-verse chunk wraps and scrolls. Tap / Space reveals. -->
+                <div
+                  class="review-card box"
+                  role="button"
+                  tabindex="0"
+                  [attr.aria-label]="
+                    flipped()
+                      ? 'Card revealed. Grade your recall, or tap to hide.'
+                      : 'Hidden card. Tap or press space to reveal.'
+                  "
+                  (click)="flip()"
+                  (keydown)="onCardKeydown($event)"
+                  (pointerdown)="onCardPointerDown($event)"
+                  (pointerup)="onCardPointerUp($event)"
+                  data-testid="review-card"
+                >
+                  @if (!flipped()) {
+                    <div class="has-text-centered" data-testid="review-card-front">
+                      <p class="card-ref">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
+                      <p class="card-prompt has-text-grey">Recite from memory, then reveal.</p>
+                      @if (scaffold() === 'first') {
+                        <p class="card-scaffold" data-testid="review-scaffold">
+                          {{ cardScaffoldText() }}
+                        </p>
+                      }
+                    </div>
+                  } @else {
+                    <div data-testid="review-card-back">
+                      <p class="card-ref has-text-centered mb-3">
+                        {{ cardRef() || 'Chunk ' + cardChunkNumber() }}
+                      </p>
+                      <p class="card-text review-text">{{ cardBackText() }}</p>
+                    </div>
+                  }
+                </div>
+
+                <!-- Front controls: scaffold toggle + explicit reveal -->
+                @if (!flipped()) {
+                  <div class="buttons is-centered mt-3">
+                    <button
+                      type="button"
+                      class="button is-small is-light"
+                      (click)="toggleScaffold(); $event.stopPropagation()"
+                      [attr.aria-pressed]="scaffold() === 'first'"
+                      data-testid="review-scaffold-toggle"
+                    >
+                      {{ scaffold() === 'first' ? 'Hide hint' : 'Show first letters' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="button is-small is-link"
+                      (click)="flip(); $event.stopPropagation()"
+                      data-testid="review-reveal"
+                    >
+                      Reveal
+                    </button>
+                  </div>
+                }
+
+                <!-- Grade controls: large, full-width, bottom-anchored on phones. -->
+                @if (flipped()) {
+                  <p class="is-size-7 has-text-grey has-text-centered mt-3 mb-2">
+                    Next review after a pass:
+                    <span data-testid="review-next-due">{{ activeDueLabel() }}</span>
+                  </p>
+                  <div
+                    class="grade-row"
+                    role="group"
+                    aria-label="Grade your recall"
+                    data-testid="review-grade-row"
+                  >
+                    <button
+                      type="button"
+                      class="button is-danger is-light grade-btn"
+                      [disabled]="saving()"
+                      (click)="gradeCard('again')"
+                      data-testid="review-grade-again"
+                    >
+                      Again
+                    </button>
+                    <button
+                      type="button"
+                      class="button grade-btn"
+                      [disabled]="saving()"
+                      (click)="gradeCard('hard')"
+                      data-testid="review-grade-hard"
+                    >
+                      Hard
+                    </button>
+                    <button
+                      type="button"
+                      class="button grade-btn"
+                      [disabled]="saving()"
+                      (click)="gradeCard('good')"
+                      data-testid="review-grade-good"
+                    >
+                      Good
+                    </button>
+                    <button
+                      type="button"
+                      class="button is-success is-light grade-btn"
+                      [disabled]="saving()"
+                      (click)="gradeCard('easy')"
+                      data-testid="review-grade-easy"
+                    >
+                      Easy
+                    </button>
+                  </div>
+                }
+
+                <!-- Shortcut legend: makes the hands-free controls discoverable. -->
+                @if (!legendDismissed()) {
+                  <div class="notification is-light p-2 mt-3 is-size-7" data-testid="review-legend">
+                    <button
+                      type="button"
+                      class="delete is-small"
+                      (click)="dismissLegend()"
+                      aria-label="Dismiss shortcuts help"
+                      data-testid="review-legend-dismiss"
+                    ></button>
+                    <strong>Hands-free:</strong> tap / Space / swipe&nbsp;up to flip; then
+                    <strong>1</strong> Again · <strong>2</strong> Hard · <strong>3</strong> Good ·
+                    <strong>4</strong> Easy, or swipe left (Again) / right (Easy).
+                  </div>
+                }
+
+                @if (saveError()) {
+                  <p class="has-text-danger has-text-centered mt-2" data-testid="review-save-error">
+                    Could not save that grade — it's kept; try again.
+                  </p>
+                }
+              }
+            </div>
+          } @else if (viewMode() === 'test') {
+            <!-- ===== Test mode: recite aloud → auto-grade (Transcribe + Bedrock) ===== -->
+            <div class="review-deck" data-testid="memorize-test">
+              @if (chunks().length === 0) {
+                <div class="box has-text-centered" data-testid="test-no-chunks">
+                  <p class="mb-3">
+                    No chunks to test yet. Switch to <strong>Edit</strong> to seed this book into
+                    chunks, then come back to test your recall.
+                  </p>
+                  <button
+                    type="button"
+                    class="button is-link"
+                    (click)="setViewMode('edit')"
+                    data-testid="test-go-edit"
+                  >
+                    Go to Edit
+                  </button>
+                </div>
+              } @else if (deckComplete()) {
+                <div class="box has-text-centered" data-testid="test-complete">
+                  <p class="is-size-5 mb-2">All caught up ✓</p>
+                  <p class="has-text-grey">Nothing due to test right now — well memorized.</p>
+                </div>
+              } @else {
+                <!-- Deck progress + drive/desk toggle -->
+                <div class="level is-mobile mb-2">
+                  <div class="level-left">
+                    <p class="is-size-6" aria-live="polite" data-testid="test-progress">
+                      Card {{ deckProgress().pos + 1 }} of {{ deckProgress().total }} due
+                      @if (cardRef()) {
+                        <span class="tag is-light ml-2">{{ cardRef() }}</span>
+                      }
+                    </p>
+                  </div>
+                  <div class="level-right">
+                    <div
+                      class="buttons has-addons are-small mb-0"
+                      role="group"
+                      aria-label="Grading mode"
+                      data-testid="test-grade-mode"
+                    >
+                      <button
+                        type="button"
+                        class="button"
+                        [class.is-link]="testDriveMode() === 'desk'"
+                        [attr.aria-pressed]="testDriveMode() === 'desk'"
+                        (click)="setTestDriveMode('desk')"
+                        data-testid="test-mode-desk"
+                      >
+                        Desk
+                      </button>
+                      <button
+                        type="button"
+                        class="button"
+                        [class.is-link]="testDriveMode() === 'drive'"
+                        [attr.aria-pressed]="testDriveMode() === 'drive'"
+                        (click)="setTestDriveMode('drive')"
+                        data-testid="test-mode-drive"
+                      >
+                        Drive (hands-free)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="box has-text-centered" data-testid="test-card">
+                  <p class="card-ref mb-3">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
+
+                  @if (!recordingSupported()) {
+                    <!-- No MediaRecorder / permission: fall back to manual grading. -->
+                    <div class="notification is-warning is-light" data-testid="test-no-mic">
+                      Voice grading isn't available in this browser. Recite from memory, reveal the
+                      text, and grade yourself.
+                    </div>
+                    <p class="card-text mt-3" data-testid="test-manual-text">
+                      {{ cardBackText() }}
+                    </p>
+                  } @else if (testPhase() === 'idle') {
+                    <p class="has-text-grey mb-4">
+                      Recite this passage from memory, then stop — I'll listen and grade you.
+                    </p>
+                    <button
+                      type="button"
+                      class="button is-link is-large"
+                      (click)="startRecording()"
+                      data-testid="test-record"
+                      style="min-height: 56px"
+                    >
+                      🎙 Start reciting
+                    </button>
+                  } @else if (testPhase() === 'recording') {
+                    <p class="has-text-danger mb-4" aria-live="polite">● Listening…</p>
+                    <button
+                      type="button"
+                      class="button is-danger is-large"
+                      (click)="stopRecording()"
+                      data-testid="test-stop"
+                      style="min-height: 56px"
+                    >
+                      ■ Done reciting
+                    </button>
+                  } @else if (testPhase() === 'grading') {
+                    <p class="has-text-grey" aria-live="polite" data-testid="test-grading">
+                      Grading your recitation…
+                    </p>
+                  } @else if (testPhase() === 'graded') {
+                    <!-- The result: proposal (desk) or committed (drive). -->
+                    @if (reciteDiff(); as diff) {
+                      <p class="card-text recite-words mb-3" data-testid="test-revealed-text">
+                        @for (t of diff.verse; track $index) {
+                          <span
+                            [class.missed-word]="!t.matched"
+                            [attr.data-missed]="t.matched ? null : 'true'"
+                            >{{ t.text }}</span
+                          >{{ ' ' }}
+                        }
+                      </p>
+                      <p class="is-size-7 has-text-grey mb-3" data-testid="test-missed-summary">
+                        @if (reciteMissedCount() === 0) {
+                          Every word was there.
+                        } @else {
+                          Missed {{ reciteMissedCount() }}
+                          {{ reciteMissedCount() === 1 ? 'word' : 'words' }} (underlined).
+                        }
+                      </p>
+                      <p class="is-size-6 mb-3" data-testid="test-said">
+                        <span class="has-text-grey">You said: </span>
+                        @for (t of diff.said; track $index) {
+                          <span [class.extra-word]="!t.matched">{{ t.text }}</span
+                          >{{ ' ' }}
+                        }
+                      </p>
+                    } @else {
+                      <p class="card-text mb-3" data-testid="test-revealed-text">
+                        {{ cardBackText() }}
+                      </p>
+                      @if (gradeResult()) {
+                        <p class="is-size-7 has-text-grey mb-3" data-testid="test-no-transcript">
+                          No transcript was captured, so missed words can't be highlighted.
                         </p>
                       }
                     }
-
-                    @if (testError()) {
-                      <p class="has-text-danger mt-3" data-testid="test-error">
-                        Something went wrong grading that — recite again, or grade yourself below.
+                    <div aria-live="polite" data-testid="test-result">
+                      <p class="is-size-5 mb-1">
+                        <span
+                          class="tag is-medium"
+                          [class.is-danger]="gradeResult()?.grade === 'again'"
+                          [class.is-warning]="gradeResult()?.grade === 'hard'"
+                          [class.is-success]="
+                            gradeResult()?.grade === 'good' || gradeResult()?.grade === 'easy'
+                          "
+                          data-testid="test-grade-value"
+                        >
+                          {{ gradeLabel(gradeResult()?.grade) }}
+                        </span>
+                        <span class="is-size-6 has-text-grey ml-2" data-testid="test-accuracy">
+                          {{ gradeResult()?.accuracyPct }}% match
+                        </span>
                       </p>
-                    }
+                      <p class="is-size-7 has-text-grey" data-testid="test-reason">
+                        {{ gradeResult()?.reason }}
+                      </p>
+                      @if (gradeResult()?.degraded) {
+                        <p class="is-size-7 has-text-warning" data-testid="test-degraded">
+                          (Auto-grade was unavailable — scored by word match. Adjust below.)
+                        </p>
+                      }
+                    </div>
 
-                    <!-- Manual grade buttons, always available as the escape hatch. -->
-                    @if (
-                      !recordingSupported() ||
-                      testPhase() === 'idle' ||
-                      testError() ||
-                      (testPhase() === 'graded' && testDriveMode() === 'desk')
-                    ) {
-                      <!-- (rendered above for the graded/desk case; this covers the no-mic path) -->
-                    }
-                    @if (!recordingSupported()) {
+                    @if (testDriveMode() === 'desk') {
+                      <!-- Desk: propose; the student confirms or overrides before it commits. -->
+                      <p class="is-size-7 has-text-grey mt-3 mb-2">
+                        Confirm the grade, or override:
+                      </p>
                       <div
-                        class="grade-row mt-3"
+                        class="grade-row"
                         role="group"
-                        aria-label="Grade your recall"
-                        data-testid="test-manual-grade-row"
+                        aria-label="Confirm or override the grade"
+                        data-testid="test-grade-row"
                       >
                         <button
                           type="button"
                           class="button is-danger is-light grade-btn"
                           [disabled]="saving()"
                           (click)="commitTestGrade('again')"
+                          data-testid="test-grade-again"
                         >
                           Again
                         </button>
@@ -1057,6 +973,7 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                           class="button grade-btn"
                           [disabled]="saving()"
                           (click)="commitTestGrade('hard')"
+                          data-testid="test-grade-hard"
                         >
                           Hard
                         </button>
@@ -1065,6 +982,7 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                           class="button grade-btn"
                           [disabled]="saving()"
                           (click)="commitTestGrade('good')"
+                          data-testid="test-grade-good"
                         >
                           Good
                         </button>
@@ -1073,551 +991,570 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                           class="button is-success is-light grade-btn"
                           [disabled]="saving()"
                           (click)="commitTestGrade('easy')"
+                          data-testid="test-grade-easy"
                         >
                           Easy
                         </button>
                       </div>
-                    }
-                  </div>
-                }
-              </div>
-            } @else {
-              <!-- ===== Edit mode: the full worksheet (unchanged) ===== -->
-
-              <!-- Progress summary + chunking controls -->
-              <div class="box">
-                <div class="level is-mobile mb-3">
-                  <div class="level-left">
-                    <p class="is-size-6" data-testid="memorize-progress">{{ progressLabel() }}</p>
-                  </div>
-                </div>
-
-                <!-- Due-today review queue (SM-2). Derived client-side; never persisted. -->
-                @if (chunks().length > 0) {
-                  <div class="box p-3 mb-3" data-testid="memorize-due-queue">
-                    <p class="is-size-6 mb-2">
-                      <strong data-testid="memorize-due-count">{{ dueCount() }}</strong>
-                      {{ dueCount() === 1 ? 'chunk' : 'chunks' }} due for review today
-                    </p>
-                    @if (dueQueue().length > 0) {
-                      <ul>
-                        @for (row of dueQueue(); track row.index) {
-                          <li class="mb-1" data-testid="memorize-due-row">
-                            <button
-                              class="button is-small is-link is-light"
-                              type="button"
-                              (click)="setActive(row.index)"
-                              [attr.aria-label]="
-                                'Review chunk ' +
-                                (row.index + 1) +
-                                (row.verseRef ? ' (' + row.verseRef + ')' : '')
-                              "
-                            >
-                              {{ row.index + 1 }}{{ row.verseRef ? ' — ' + row.verseRef : '' }}
-                            </button>
-                            <span class="is-size-7 has-text-grey ml-2">{{ row.dueLabel }}</span>
-                          </li>
-                        }
-                      </ul>
                     } @else {
-                      <p class="is-size-7 has-text-grey" data-testid="memorize-due-empty">
-                        Nothing due today — well memorized. Come back when the next review falls
-                        due.
+                      <p
+                        class="is-size-7 has-text-grey mt-3"
+                        aria-live="polite"
+                        data-testid="test-drive-advancing"
+                      >
+                        Recorded — next verse coming up…
                       </p>
                     }
-                  </div>
-                }
-
-                <!-- Daily reminder preference (opt-in, default off; per-user, not scroll-scoped). -->
-                <div class="box p-3 mb-3" data-testid="reminder-pref">
-                  <label class="checkbox is-size-7">
-                    <input
-                      type="checkbox"
-                      [checked]="reminderOptIn()"
-                      (change)="setReminderOptIn($any($event.target).checked)"
-                      data-testid="reminder-optin"
-                      aria-label="Email me a daily reminder when chunks are due for review"
-                    />
-                    Email me a daily reminder when chunks are due for review
-                  </label>
-                  @if (reminderOptIn()) {
-                    <div class="field is-grouped is-align-items-end mt-2">
-                      <div class="control">
-                        <label class="label is-small mb-1" for="reminder-hour"
-                          >Preferred hour (0–23)</label
-                        >
-                        <input
-                          id="reminder-hour"
-                          class="input is-small"
-                          type="number"
-                          min="0"
-                          max="23"
-                          [ngModel]="reminderHour()"
-                          (ngModelChange)="setReminderHour($event)"
-                          data-testid="reminder-hour"
-                          aria-label="Preferred reminder hour, 0 to 23"
-                          style="width: 6rem"
-                        />
-                      </div>
-                    </div>
                   }
-                  @if (reminderError()) {
-                    <p class="help is-danger" data-testid="reminder-error">{{ reminderError() }}</p>
-                  }
-                </div>
 
-                <!-- Seed methods -->
-                <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
-                  <div class="control">
-                    <label class="label is-small mb-1" for="verses-per-chunk"
-                      >Verses per chunk</label
-                    >
-                    <input
-                      id="verses-per-chunk"
-                      class="input is-small"
-                      type="number"
-                      [min]="VERSES_PER_CHUNK_MIN"
-                      [max]="VERSES_PER_CHUNK_MAX"
-                      [ngModel]="versesPerChunk()"
-                      (ngModelChange)="setVersesPerChunk(+$event)"
-                      data-testid="verses-per-chunk"
-                      style="width: 6rem"
-                    />
-                  </div>
-                  <div class="control">
-                    <button
-                      class="button is-small"
-                      type="button"
-                      [disabled]="!hasVerseMarkers()"
-                      (click)="seedByVerseCount()"
-                      data-testid="seed-by-verses"
-                    >
-                      {{ chunks().length === 0 ? 'Seed by verses' : 'Re-seed by verses' }}
-                    </button>
-                  </div>
-                  @if (outlineParagraphs().length > 0) {
-                    <div class="control">
-                      <button
-                        class="button is-small"
-                        type="button"
-                        (click)="seedFromOutline()"
-                        data-testid="seed-from-step8"
-                      >
-                        {{
-                          chunks().length === 0
-                            ? 'Seed from Step 8 paragraphs'
-                            : 'Re-seed from Step 8'
-                        }}
-                      </button>
-                    </div>
-                  }
-                </div>
-
-                @if (!hasVerseMarkers() && outlineParagraphs().length === 0) {
-                  <div
-                    class="notification is-warning is-light"
-                    role="status"
-                    data-testid="seed-blocked"
-                  >
-                    This scroll has no verse markers and no Step 8 outline yet, so chunks can't be
-                    seeded. Add verse references to your scroll text, or complete Step 8 (Outline),
-                    then come back.
-                  </div>
-                } @else if (chunks().length === 0) {
-                  <div role="status" data-testid="memorize-empty">
-                    No chunks yet. Seed by a verse count, or from your Step 8 paragraphs, then
-                    adjust the boundaries.
-                  </div>
-                }
-
-                @if (seedUnmapped().length > 0) {
-                  <div
-                    class="notification is-warning is-light"
-                    role="alert"
-                    data-testid="seed-unmapped"
-                  >
-                    {{ seedUnmapped().length }} Step 8 paragraph(s) referenced a location not found
-                    in the scroll text and were skipped. Check those paragraphs' references, or
-                    adjust the chunks below by hand.
-                  </div>
-                }
-
-                <!-- Chunk editor -->
-                @for (chunk of chunks(); track $index) {
-                  <div class="box p-3 mb-2" data-testid="memorize-chunk-row">
-                    <div class="field is-grouped is-align-items-end mb-2">
-                      <div class="control">
-                        <label class="label is-small mb-1" [attr.for]="'verseref-' + $index"
-                          >Reference (label only)</label
-                        >
-                        <input
-                          [id]="'verseref-' + $index"
-                          class="input is-small"
-                          type="text"
-                          [maxlength]="VERSE_REF_MAX"
-                          placeholder="e.g. 2:5-8"
-                          [ngModel]="chunk.verseRef"
-                          (ngModelChange)="setVerseRef($index, $event)"
-                          data-testid="chunk-verseref"
-                        />
-                      </div>
-                      <div class="control">
-                        <span class="label is-small mb-1">Progress</span>
-                        <span
-                          class="tag is-small"
-                          [class.is-light]="chunkStates()[$index] === 'new'"
-                          [class.is-info]="chunkStates()[$index] === 'learning'"
-                          [class.is-link]="chunkStates()[$index] === 'chained'"
-                          [class.is-success]="chunkStates()[$index] === 'solid'"
-                          data-testid="chunk-state"
-                          title="Earned automatically from your review history"
-                        >
-                          {{ stateLabels[chunkStates()[$index]] }}
-                        </span>
-                      </div>
-                      <div class="control is-expanded"></div>
-                      <div class="control">
-                        <button
-                          class="button is-small"
-                          type="button"
-                          [disabled]="$index === 0"
-                          (click)="moveUp($index)"
-                          [attr.aria-label]="'Move chunk ' + ($index + 1) + ' up'"
-                          data-testid="chunk-reorder"
-                        >
-                          ↑
-                        </button>
-                      </div>
-                      <div class="control">
-                        <button
-                          class="button is-small"
-                          type="button"
-                          [disabled]="$index === 0"
-                          (click)="mergeUp($index)"
-                          [attr.aria-label]="'Merge chunk ' + ($index + 1) + ' into the one above'"
-                          data-testid="chunk-merge"
-                        >
-                          Merge up
-                        </button>
-                      </div>
-                      <div class="control">
-                        <button
-                          class="button is-small is-danger is-outlined"
-                          type="button"
-                          (click)="removeChunk($index)"
-                          [attr.aria-label]="'Remove chunk ' + ($index + 1)"
-                          data-testid="chunk-remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                    @if (chunk.verseRef) {
-                      <span class="tag is-light is-small mr-2" aria-label="Reference">{{
-                        chunk.verseRef
-                      }}</span>
-                    }
-                    @if (outOfRange($index)) {
-                      <p class="help is-warning" role="alert" data-testid="chunk-out-of-range">
-                        This chunk's range no longer fits the scroll text — re-seed to fix it.
-                      </p>
-                    }
-                    <p class="is-size-7 has-text-grey" data-testid="chunk-preview">
-                      {{ preview($index) }}
+                  @if (testError()) {
+                    <p class="has-text-danger mt-3" data-testid="test-error">
+                      Something went wrong grading that — recite again, or grade yourself below.
                     </p>
-                  </div>
-                }
-              </div>
+                  }
 
-              <!-- Drill surface -->
-              @if (chunks().length > 0) {
-                <div class="box" data-testid="memorize-drill">
-                  <h3 class="title is-5">Drill</h3>
-                  <div class="buttons has-addons are-small" role="group" aria-label="Drill mode">
-                    <button
-                      type="button"
-                      class="button"
-                      [class.is-link]="mode() === 'chain'"
-                      [attr.aria-pressed]="mode() === 'chain'"
-                      (click)="setMode('chain')"
-                      data-testid="drill-mode-chain"
-                    >
-                      Chain
-                    </button>
-                    <button
-                      type="button"
-                      class="button"
-                      [class.is-link]="mode() === 'reveal'"
-                      [attr.aria-pressed]="mode() === 'reveal'"
-                      (click)="setMode('reveal')"
-                      data-testid="drill-mode-reveal"
-                    >
-                      Reveal
-                    </button>
-                    <button
-                      type="button"
-                      class="button"
-                      [class.is-link]="mode() === 'cloze'"
-                      [attr.aria-pressed]="mode() === 'cloze'"
-                      (click)="setMode('cloze')"
-                      data-testid="drill-mode-cloze"
-                    >
-                      Fill blanks
-                    </button>
-                  </div>
-
-                  <!-- Chunk selector -->
-                  <div class="field">
-                    <label class="label is-small mb-1" for="active-chunk">Chunk</label>
-                    <div class="select is-small">
-                      <select
-                        id="active-chunk"
-                        [ngModel]="activeIndex()"
-                        (ngModelChange)="setActive(+$event)"
-                        data-testid="active-chunk"
-                      >
-                        @for (chunk of chunks(); track $index) {
-                          <option [value]="$index">
-                            {{ $index + 1 }}{{ chunk.verseRef ? ' — ' + chunk.verseRef : '' }}
-                          </option>
-                        }
-                      </select>
-                    </div>
-                  </div>
-
-                  <!-- Review schedule: next-due label + three-button grade (SM-2). Separate axis
-                     from the learned-state ladder — grading never changes the state value. -->
-                  <div class="field" data-testid="memorize-grade">
-                    <p class="is-size-7 has-text-grey mb-2">
-                      Next review: <span data-testid="chunk-next-due">{{ activeDueLabel() }}</span>
-                    </p>
+                  <!-- Manual grade buttons, always available as the escape hatch. -->
+                  @if (
+                    !recordingSupported() ||
+                    testPhase() === 'idle' ||
+                    testError() ||
+                    (testPhase() === 'graded' && testDriveMode() === 'desk')
+                  ) {
+                    <!-- (rendered above for the graded/desk case; this covers the no-mic path) -->
+                  }
+                  @if (!recordingSupported()) {
                     <div
-                      class="buttons has-addons are-small"
+                      class="grade-row mt-3"
                       role="group"
                       aria-label="Grade your recall"
+                      data-testid="test-manual-grade-row"
                     >
                       <button
                         type="button"
-                        class="button is-danger is-light"
+                        class="button is-danger is-light grade-btn"
                         [disabled]="saving()"
-                        (click)="grade('again')"
-                        data-testid="grade-again"
+                        (click)="commitTestGrade('again')"
                       >
                         Again
                       </button>
                       <button
                         type="button"
-                        class="button"
+                        class="button grade-btn"
                         [disabled]="saving()"
-                        (click)="grade('hard')"
-                        data-testid="grade-hard"
+                        (click)="commitTestGrade('hard')"
                       >
                         Hard
                       </button>
                       <button
                         type="button"
-                        class="button"
+                        class="button grade-btn"
                         [disabled]="saving()"
-                        (click)="grade('good')"
-                        data-testid="grade-good"
+                        (click)="commitTestGrade('good')"
                       >
                         Good
                       </button>
                       <button
                         type="button"
-                        class="button is-success is-light"
+                        class="button is-success is-light grade-btn"
                         [disabled]="saving()"
-                        (click)="grade('easy')"
-                        data-testid="grade-easy"
+                        (click)="commitTestGrade('easy')"
                       >
                         Easy
                       </button>
                     </div>
-                  </div>
+                  }
+                </div>
+              }
+            </div>
+          } @else {
+            <!-- ===== Edit mode: the full worksheet (unchanged) ===== -->
 
-                  @switch (mode()) {
-                    @case ('chain') {
-                      <p class="help mb-2">
-                        Recite this chunk, then recite the whole run chained from the first learned
-                        chunk.
-                      </p>
-                      <div class="content" data-testid="chain-active">{{ activeText() }}</div>
-                      <h4 class="title is-6">Chained run</h4>
-                      <div class="content" data-testid="chain-run">{{ chainRun() }}</div>
-                    }
-                    @case ('reveal') {
-                      <div class="buttons are-small">
-                        <button
-                          class="button"
-                          [class.is-link]="revealLevel() === 'full'"
-                          type="button"
-                          (click)="setReveal('full')"
-                          data-testid="reveal-full"
-                        >
-                          Full
-                        </button>
-                        <button
-                          class="button"
-                          [class.is-link]="revealLevel() === 'first'"
-                          type="button"
-                          (click)="setReveal('first')"
-                          data-testid="reveal-first"
-                        >
-                          First letters
-                        </button>
-                        <button
-                          class="button"
-                          [class.is-link]="revealLevel() === 'blank'"
-                          type="button"
-                          (click)="setReveal('blank')"
-                          data-testid="reveal-blank"
-                        >
-                          Blank
-                        </button>
-                      </div>
-                      <div class="content" data-testid="reveal-text">{{ revealText() }}</div>
-                    }
-                    @case ('cloze') {
-                      <div class="field is-grouped is-align-items-center mb-3">
-                        <div class="control">
-                          <label class="label is-small mb-0 mr-2" for="cloze-n">Hide every</label>
-                        </div>
-                        <div class="control">
-                          <input
-                            id="cloze-n"
-                            class="input is-small"
-                            type="number"
-                            min="2"
-                            max="10"
-                            [ngModel]="clozeN()"
-                            (ngModelChange)="setClozeN(+$event)"
-                            data-testid="cloze-n"
-                            style="width: 5rem"
-                          />
-                        </div>
-                        <div class="control"><span class="is-size-7">word(s)</span></div>
-                        <div class="control">
+            <!-- Progress summary + chunking controls -->
+            <div class="box">
+              <div class="level is-mobile mb-3">
+                <div class="level-left">
+                  <p class="is-size-6" data-testid="memorize-progress">{{ progressLabel() }}</p>
+                </div>
+              </div>
+
+              <!-- Due-today review queue (SM-2). Derived client-side; never persisted. -->
+              @if (chunks().length > 0) {
+                <div class="box p-3 mb-3" data-testid="memorize-due-queue">
+                  <p class="is-size-6 mb-2">
+                    <strong data-testid="memorize-due-count">{{ dueCount() }}</strong>
+                    {{ dueCount() === 1 ? 'chunk' : 'chunks' }} due for review today
+                  </p>
+                  @if (dueQueue().length > 0) {
+                    <ul>
+                      @for (row of dueQueue(); track row.index) {
+                        <li class="mb-1" data-testid="memorize-due-row">
                           <button
-                            class="button is-small"
+                            class="button is-small is-link is-light"
                             type="button"
-                            (click)="toggleClozeReveal()"
-                            data-testid="cloze-reveal-toggle"
+                            (click)="setActive(row.index)"
+                            [attr.aria-label]="
+                              'Review chunk ' +
+                              (row.index + 1) +
+                              (row.verseRef ? ' (' + row.verseRef + ')' : '')
+                            "
                           >
-                            {{ clozeRevealed() ? 'Hide answers' : 'Reveal answers' }}
+                            {{ row.index + 1 }}{{ row.verseRef ? ' — ' + row.verseRef : '' }}
                           </button>
-                        </div>
-                      </div>
-                      <div class="content" data-testid="cloze-tokens">
-                        @for (tok of clozeTokens(); track $index) {
-                          @if (tok.blank) {
-                            <span
-                              class="tag is-light"
-                              [class.is-success]="clozeResult()[$index] === true"
-                              [class.is-danger]="clozeResult()[$index] === false"
-                              data-testid="cloze-slot"
-                            >
-                              @if (clozeRevealed()) {
-                                {{ tok.text }}
-                              } @else {
-                                <input
-                                  class="input is-small"
-                                  type="text"
-                                  [ngModel]="clozeTyped()[$index] ?? ''"
-                                  (ngModelChange)="setClozeTyped($index, $event)"
-                                  [attr.aria-label]="'Blank ' + ($index + 1)"
-                                  data-testid="cloze-input"
-                                  style="width: 6rem"
-                                />
-                              }
-                            </span>
-                          } @else {
-                            <span>{{ tok.text }}</span>
-                          }
-                        }
-                      </div>
-                      <button
-                        class="button is-small"
-                        type="button"
-                        (click)="checkCloze()"
-                        data-testid="cloze-check"
-                      >
-                        Check
-                      </button>
-                    }
+                          <span class="is-size-7 has-text-grey ml-2">{{ row.dueLabel }}</span>
+                        </li>
+                      }
+                    </ul>
+                  } @else {
+                    <p class="is-size-7 has-text-grey" data-testid="memorize-due-empty">
+                      Nothing due today — well memorized. Come back when the next review falls due.
+                    </p>
                   }
                 </div>
               }
 
-              <!-- Save -->
-              <div class="field">
-                <button
-                  class="button is-primary"
-                  type="button"
-                  [class.is-loading]="saving()"
-                  [disabled]="saving()"
-                  (click)="save()"
-                  data-testid="memorize-save"
-                >
-                  Save
-                </button>
-              </div>
-              <div aria-live="polite">
-                @if (saved()) {
-                  <p class="has-text-success" data-testid="memorize-saved">Saved.</p>
+              <!-- Daily reminder preference (opt-in, default off; per-user, not scroll-scoped). -->
+              <div class="box p-3 mb-3" data-testid="reminder-pref">
+                <label class="checkbox is-size-7">
+                  <input
+                    type="checkbox"
+                    [checked]="reminderOptIn()"
+                    (change)="setReminderOptIn($any($event.target).checked)"
+                    data-testid="reminder-optin"
+                    aria-label="Email me a daily reminder when chunks are due for review"
+                  />
+                  Email me a daily reminder when chunks are due for review
+                </label>
+                @if (reminderOptIn()) {
+                  <div class="field is-grouped is-align-items-end mt-2">
+                    <div class="control">
+                      <label class="label is-small mb-1" for="reminder-hour"
+                        >Preferred hour (0–23)</label
+                      >
+                      <input
+                        id="reminder-hour"
+                        class="input is-small"
+                        type="number"
+                        min="0"
+                        max="23"
+                        [ngModel]="reminderHour()"
+                        (ngModelChange)="setReminderHour($event)"
+                        data-testid="reminder-hour"
+                        aria-label="Preferred reminder hour, 0 to 23"
+                        style="width: 6rem"
+                      />
+                    </div>
+                  </div>
                 }
-                @if (saveError()) {
-                  <p class="has-text-danger" data-testid="memorize-save-error">
-                    Could not save. Your work is still here — try again.
+                @if (reminderError()) {
+                  <p class="help is-danger" data-testid="reminder-error">{{ reminderError() }}</p>
+                }
+              </div>
+
+              <!-- Seed methods -->
+              <div class="field is-grouped is-align-items-end mb-3" data-testid="seed-controls">
+                <div class="control">
+                  <label class="label is-small mb-1" for="verses-per-chunk">Verses per chunk</label>
+                  <input
+                    id="verses-per-chunk"
+                    class="input is-small"
+                    type="number"
+                    [min]="VERSES_PER_CHUNK_MIN"
+                    [max]="VERSES_PER_CHUNK_MAX"
+                    [ngModel]="versesPerChunk()"
+                    (ngModelChange)="setVersesPerChunk(+$event)"
+                    data-testid="verses-per-chunk"
+                    style="width: 6rem"
+                  />
+                </div>
+                <div class="control">
+                  <button
+                    class="button is-small"
+                    type="button"
+                    [disabled]="!hasVerseMarkers()"
+                    (click)="seedByVerseCount()"
+                    data-testid="seed-by-verses"
+                  >
+                    {{ chunks().length === 0 ? 'Seed by verses' : 'Re-seed by verses' }}
+                  </button>
+                </div>
+                @if (outlineParagraphs().length > 0) {
+                  <div class="control">
+                    <button
+                      class="button is-small"
+                      type="button"
+                      (click)="seedFromOutline()"
+                      data-testid="seed-from-step8"
+                    >
+                      {{
+                        chunks().length === 0
+                          ? 'Seed from Step 8 paragraphs'
+                          : 'Re-seed from Step 8'
+                      }}
+                    </button>
+                  </div>
+                }
+              </div>
+
+              @if (!hasVerseMarkers() && outlineParagraphs().length === 0) {
+                <div
+                  class="notification is-warning is-light"
+                  role="status"
+                  data-testid="seed-blocked"
+                >
+                  This scroll has no verse markers and no Step 8 outline yet, so chunks can't be
+                  seeded. Add verse references to your scroll text, or complete Step 8 (Outline),
+                  then come back.
+                </div>
+              } @else if (chunks().length === 0) {
+                <div role="status" data-testid="memorize-empty">
+                  No chunks yet. Seed by a verse count, or from your Step 8 paragraphs, then adjust
+                  the boundaries.
+                </div>
+              }
+
+              @if (seedUnmapped().length > 0) {
+                <div
+                  class="notification is-warning is-light"
+                  role="alert"
+                  data-testid="seed-unmapped"
+                >
+                  {{ seedUnmapped().length }} Step 8 paragraph(s) referenced a location not found in
+                  the scroll text and were skipped. Check those paragraphs' references, or adjust
+                  the chunks below by hand.
+                </div>
+              }
+
+              <!-- Chunk editor -->
+              @for (chunk of chunks(); track $index) {
+                <div class="box p-3 mb-2" data-testid="memorize-chunk-row">
+                  <div class="field is-grouped is-align-items-end mb-2">
+                    <div class="control">
+                      <label class="label is-small mb-1" [attr.for]="'verseref-' + $index"
+                        >Reference (label only)</label
+                      >
+                      <input
+                        [id]="'verseref-' + $index"
+                        class="input is-small"
+                        type="text"
+                        [maxlength]="VERSE_REF_MAX"
+                        placeholder="e.g. 2:5-8"
+                        [ngModel]="chunk.verseRef"
+                        (ngModelChange)="setVerseRef($index, $event)"
+                        data-testid="chunk-verseref"
+                      />
+                    </div>
+                    <div class="control">
+                      <span class="label is-small mb-1">Progress</span>
+                      <span
+                        class="tag is-small"
+                        [class.is-light]="chunkStates()[$index] === 'new'"
+                        [class.is-info]="chunkStates()[$index] === 'learning'"
+                        [class.is-link]="chunkStates()[$index] === 'chained'"
+                        [class.is-success]="chunkStates()[$index] === 'solid'"
+                        data-testid="chunk-state"
+                        title="Earned automatically from your review history"
+                      >
+                        {{ stateLabels[chunkStates()[$index]] }}
+                      </span>
+                    </div>
+                    <div class="control is-expanded"></div>
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        [disabled]="$index === 0"
+                        (click)="moveUp($index)"
+                        [attr.aria-label]="'Move chunk ' + ($index + 1) + ' up'"
+                        data-testid="chunk-reorder"
+                      >
+                        ↑
+                      </button>
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small"
+                        type="button"
+                        [disabled]="$index === 0"
+                        (click)="mergeUp($index)"
+                        [attr.aria-label]="'Merge chunk ' + ($index + 1) + ' into the one above'"
+                        data-testid="chunk-merge"
+                      >
+                        Merge up
+                      </button>
+                    </div>
+                    <div class="control">
+                      <button
+                        class="button is-small is-danger is-outlined"
+                        type="button"
+                        (click)="removeChunk($index)"
+                        [attr.aria-label]="'Remove chunk ' + ($index + 1)"
+                        data-testid="chunk-remove"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                  @if (chunk.verseRef) {
+                    <span class="tag is-light is-small mr-2" aria-label="Reference">{{
+                      chunk.verseRef
+                    }}</span>
+                  }
+                  @if (outOfRange($index)) {
+                    <p class="help is-warning" role="alert" data-testid="chunk-out-of-range">
+                      This chunk's range no longer fits the scroll text — re-seed to fix it.
+                    </p>
+                  }
+                  <p class="is-size-7 has-text-grey" data-testid="chunk-preview">
+                    {{ preview($index) }}
                   </p>
+                </div>
+              }
+            </div>
+
+            <!-- Drill surface -->
+            @if (chunks().length > 0) {
+              <div class="box" data-testid="memorize-drill">
+                <h3 class="title is-5">Drill</h3>
+                <div class="buttons has-addons are-small" role="group" aria-label="Drill mode">
+                  <button
+                    type="button"
+                    class="button"
+                    [class.is-link]="mode() === 'chain'"
+                    [attr.aria-pressed]="mode() === 'chain'"
+                    (click)="setMode('chain')"
+                    data-testid="drill-mode-chain"
+                  >
+                    Chain
+                  </button>
+                  <button
+                    type="button"
+                    class="button"
+                    [class.is-link]="mode() === 'reveal'"
+                    [attr.aria-pressed]="mode() === 'reveal'"
+                    (click)="setMode('reveal')"
+                    data-testid="drill-mode-reveal"
+                  >
+                    Reveal
+                  </button>
+                  <button
+                    type="button"
+                    class="button"
+                    [class.is-link]="mode() === 'cloze'"
+                    [attr.aria-pressed]="mode() === 'cloze'"
+                    (click)="setMode('cloze')"
+                    data-testid="drill-mode-cloze"
+                  >
+                    Fill blanks
+                  </button>
+                </div>
+
+                <!-- Chunk selector -->
+                <div class="field">
+                  <label class="label is-small mb-1" for="active-chunk">Chunk</label>
+                  <div class="select is-small">
+                    <select
+                      id="active-chunk"
+                      [ngModel]="activeIndex()"
+                      (ngModelChange)="setActive(+$event)"
+                      data-testid="active-chunk"
+                    >
+                      @for (chunk of chunks(); track $index) {
+                        <option [value]="$index">
+                          {{ $index + 1 }}{{ chunk.verseRef ? ' — ' + chunk.verseRef : '' }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Review schedule: next-due label + three-button grade (SM-2). Separate axis
+                     from the learned-state ladder — grading never changes the state value. -->
+                <div class="field" data-testid="memorize-grade">
+                  <p class="is-size-7 has-text-grey mb-2">
+                    Next review: <span data-testid="chunk-next-due">{{ activeDueLabel() }}</span>
+                  </p>
+                  <div
+                    class="buttons has-addons are-small"
+                    role="group"
+                    aria-label="Grade your recall"
+                  >
+                    <button
+                      type="button"
+                      class="button is-danger is-light"
+                      [disabled]="saving()"
+                      (click)="grade('again')"
+                      data-testid="grade-again"
+                    >
+                      Again
+                    </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [disabled]="saving()"
+                      (click)="grade('hard')"
+                      data-testid="grade-hard"
+                    >
+                      Hard
+                    </button>
+                    <button
+                      type="button"
+                      class="button"
+                      [disabled]="saving()"
+                      (click)="grade('good')"
+                      data-testid="grade-good"
+                    >
+                      Good
+                    </button>
+                    <button
+                      type="button"
+                      class="button is-success is-light"
+                      [disabled]="saving()"
+                      (click)="grade('easy')"
+                      data-testid="grade-easy"
+                    >
+                      Easy
+                    </button>
+                  </div>
+                </div>
+
+                @switch (mode()) {
+                  @case ('chain') {
+                    <p class="help mb-2">
+                      Recite this chunk, then recite the whole run chained from the first learned
+                      chunk.
+                    </p>
+                    <div class="content" data-testid="chain-active">{{ activeText() }}</div>
+                    <h4 class="title is-6">Chained run</h4>
+                    <div class="content" data-testid="chain-run">{{ chainRun() }}</div>
+                  }
+                  @case ('reveal') {
+                    <div class="buttons are-small">
+                      <button
+                        class="button"
+                        [class.is-link]="revealLevel() === 'full'"
+                        type="button"
+                        (click)="setReveal('full')"
+                        data-testid="reveal-full"
+                      >
+                        Full
+                      </button>
+                      <button
+                        class="button"
+                        [class.is-link]="revealLevel() === 'first'"
+                        type="button"
+                        (click)="setReveal('first')"
+                        data-testid="reveal-first"
+                      >
+                        First letters
+                      </button>
+                      <button
+                        class="button"
+                        [class.is-link]="revealLevel() === 'blank'"
+                        type="button"
+                        (click)="setReveal('blank')"
+                        data-testid="reveal-blank"
+                      >
+                        Blank
+                      </button>
+                    </div>
+                    <div class="content" data-testid="reveal-text">{{ revealText() }}</div>
+                  }
+                  @case ('cloze') {
+                    <div class="field is-grouped is-align-items-center mb-3">
+                      <div class="control">
+                        <label class="label is-small mb-0 mr-2" for="cloze-n">Hide every</label>
+                      </div>
+                      <div class="control">
+                        <input
+                          id="cloze-n"
+                          class="input is-small"
+                          type="number"
+                          min="2"
+                          max="10"
+                          [ngModel]="clozeN()"
+                          (ngModelChange)="setClozeN(+$event)"
+                          data-testid="cloze-n"
+                          style="width: 5rem"
+                        />
+                      </div>
+                      <div class="control"><span class="is-size-7">word(s)</span></div>
+                      <div class="control">
+                        <button
+                          class="button is-small"
+                          type="button"
+                          (click)="toggleClozeReveal()"
+                          data-testid="cloze-reveal-toggle"
+                        >
+                          {{ clozeRevealed() ? 'Hide answers' : 'Reveal answers' }}
+                        </button>
+                      </div>
+                    </div>
+                    <div class="content" data-testid="cloze-tokens">
+                      @for (tok of clozeTokens(); track $index) {
+                        @if (tok.blank) {
+                          <span
+                            class="tag is-light"
+                            [class.is-success]="clozeResult()[$index] === true"
+                            [class.is-danger]="clozeResult()[$index] === false"
+                            data-testid="cloze-slot"
+                          >
+                            @if (clozeRevealed()) {
+                              {{ tok.text }}
+                            } @else {
+                              <input
+                                class="input is-small"
+                                type="text"
+                                [ngModel]="clozeTyped()[$index] ?? ''"
+                                (ngModelChange)="setClozeTyped($index, $event)"
+                                [attr.aria-label]="'Blank ' + ($index + 1)"
+                                data-testid="cloze-input"
+                                style="width: 6rem"
+                              />
+                            }
+                          </span>
+                        } @else {
+                          <span>{{ tok.text }}</span>
+                        }
+                      }
+                    </div>
+                    <button
+                      class="button is-small"
+                      type="button"
+                      (click)="checkCloze()"
+                      data-testid="cloze-check"
+                    >
+                      Check
+                    </button>
+                  }
                 }
               </div>
             }
-          }
-          @case ('preparing') {
-            <div
-              class="notification is-info"
-              role="status"
-              aria-live="polite"
-              data-testid="memorize-preparing"
-            >
-              <p>
-                The scroll text is still being prepared. Open the scroll view to wait for it to
-                finish, then come back.
-              </p>
-              <a
-                [routerLink]="['/scroll', scrollStudyId]"
-                class="button is-info is-outlined is-small mt-2"
-                data-testid="memorize-preparing-back"
-              >
-                Back to scroll
-              </a>
-            </div>
-          }
-          @case ('failed') {
-            <div class="notification is-danger" role="alert" data-testid="memorize-failed">
-              <p>{{ failedMessage() }}</p>
-              <a
-                routerLink="/scrolls"
-                class="button is-danger is-outlined is-small mt-2"
-                data-testid="memorize-failed-back"
-              >
-                Back to scroll list
-              </a>
-            </div>
-          }
-          @case ('error') {
-            <div class="notification is-danger" role="alert" data-testid="memorize-error">
-              <p>Could not load this scroll study.</p>
+
+            <!-- Save -->
+            <div class="field">
               <button
-                class="button is-danger is-outlined is-small mt-2"
-                (click)="load()"
-                data-testid="memorize-retry-button"
+                class="button is-primary"
+                type="button"
+                [class.is-loading]="saving()"
+                [disabled]="saving()"
+                (click)="save()"
+                data-testid="memorize-save"
               >
-                Retry
+                Save
               </button>
             </div>
+            <div aria-live="polite">
+              @if (saved()) {
+                <p class="has-text-success" data-testid="memorize-saved">Saved.</p>
+              }
+              @if (saveError()) {
+                <p class="has-text-danger" data-testid="memorize-save-error">
+                  Could not save. Your work is still here — try again.
+                </p>
+              }
+            </div>
           }
-        }
+        </app-tool-shell>
       </div>
     </section>
   `,
@@ -1703,14 +1640,14 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
   ],
 })
 export class MemorizeViewComponent implements OnInit {
-  private readonly scrollStudy = inject(ScrollStudyService);
   private readonly memorizationStudy = inject(MemorizationStudyService);
   private readonly recitationGrade = inject(RecitationGradeService);
   private readonly outlineStudy = inject(OutlineStudyService);
   private readonly route = inject(ActivatedRoute);
 
-  readonly state = signal<ViewState>('loading');
-  readonly study = signal<ScrollStudy | null>(null);
+  readonly ctx = inject(ScrollToolContext);
+  readonly state = this.ctx.state;
+  readonly study = this.ctx.study;
 
   readonly chunks = signal<MemorizationChunk[]>([]);
 
@@ -1984,25 +1921,15 @@ export class MemorizeViewComponent implements OnInit {
   }
 
   load(): void {
-    this.state.set('loading');
-    this.saved.set(false);
-    this.saveError.set(false);
-    this.scrollStudy.getScrollStudy(this.scrollStudyId).subscribe({
-      next: (s) => {
-        this.study.set(s);
-        if (s.status === 'ready') {
-          this.state.set('ready');
-          this.loadSaved();
-          this.loadOutline();
-          this.loadReminderPref();
-        } else if (s.status === 'failed') {
-          this.state.set('failed');
-        } else {
-          this.state.set('preparing');
-        }
+    this.ctx.load(this.scrollStudyId, {
+      onStart: () => {
+        this.saved.set(false);
+        this.saveError.set(false);
       },
-      error: (err: { status?: number }) => {
-        this.state.set(err?.status === 404 ? 'failed' : 'error');
+      onReady: () => {
+        this.loadSaved();
+        this.loadOutline();
+        this.loadReminderPref();
       },
     });
   }
@@ -2085,14 +2012,6 @@ export class MemorizeViewComponent implements OnInit {
         this.reminderError.set('Could not save the reminder preference. Please try again.');
       },
     });
-  }
-
-  failedMessage(): string {
-    const s = this.study();
-    if (s?.status === 'failed') {
-      return s.failureReason || 'This scroll could not be prepared.';
-    }
-    return 'This scroll could not be found.';
   }
 
   // --- chunk editing ---
