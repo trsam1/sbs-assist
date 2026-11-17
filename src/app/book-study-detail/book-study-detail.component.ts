@@ -7,6 +7,7 @@ import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { BookStudy, Referent } from '../models';
 import { StepListComponent, WordStudyLink } from '../step-list/step-list.component';
 import { StudyCrudService } from '../study-crud.service';
+import { BookExportComponent } from '../book-bundle/book-export.component';
 import { StepStatus, StepStatusService } from '../step-list/step-status.service';
 
 type DetailState = 'loading' | 'loaded' | 'notfound' | 'error';
@@ -17,7 +18,7 @@ const REFERENT_LONG_MAX = 1000;
 
 @Component({
   selector: 'app-book-study-detail',
-  imports: [DatePipe, RouterLink, FormsModule, StepListComponent],
+  imports: [DatePipe, RouterLink, FormsModule, StepListComponent, BookExportComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Book study detail">
@@ -132,6 +133,8 @@ const REFERENT_LONG_MAX = 1000;
               />
             }
           </section>
+
+          <app-book-export [book]="bs" [scrollStudyId]="linkedScroll()?.id ?? ''" />
 
           @if (referentsOpen()) {
             <section class="mt-5" aria-label="Referents" data-testid="referents-section">
