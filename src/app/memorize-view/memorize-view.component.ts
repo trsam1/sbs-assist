@@ -16,6 +16,7 @@ import { OutlineStudyService } from '../outline-study.service';
 import {
   MemorizationChunk,
   MemorizationChunkState,
+  MemorizationLearnProgress,
   MemorizationReminderPref,
   OutlineParagraph,
   RecitationGradeResult,
@@ -51,6 +52,18 @@ import {
 } from './srs';
 import { reciteDiff, ReciteDiff } from './recite-diff';
 import {
+  splitVerses,
+  rangeText,
+  clampLearn,
+  markLearned,
+  unmarkLearned,
+  unlockNext,
+  isReadyToGrade,
+  markDone,
+  nextChunkToLearn,
+  initialLearn,
+} from './learn';
+import {
   classifySwipe,
   swipeToGrade,
   keyToGrade,
@@ -59,7 +72,8 @@ import {
 } from './gestures';
 
 type ViewState = 'loading' | 'ready' | 'preparing' | 'failed' | 'error';
-type ViewMode = 'review' | 'test' | 'edit';
+type ViewMode = 'learn' | 'review' | 'test' | 'edit';
+type LearnStage = 'read' | 'fill' | 'recite';
 type DrillMode = 'chain' | 'reveal' | 'cloze';
 type RevealLevel = 'full' | 'first' | 'blank';
 
@@ -104,6 +118,16 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
               aria-label="Review or edit mode"
               data-testid="memorize-mode-toggle"
             >
+              <button
+                type="button"
+                class="button"
+                [class.is-link]="viewMode() === 'learn'"
+                [attr.aria-pressed]="viewMode() === 'learn'"
+                (click)="setViewMode('learn')"
+                data-testid="mode-learn"
+              >
+                Learn
+              </button>
               <button
                 type="button"
                 class="button"
@@ -188,6 +212,409 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
               </div>
             }
 
+            @if (viewMode() === 'learn') {
+              <!-- ===== Learn mode: one chunk, verse by verse, at the student's pace ===== -->
+              <div data-testid="memorize-learn">
+                @if (chunks().length === 0) {
+                  <div class="box has-text-centered" data-testid="learn-no-chunks">
+                    <p class="mb-3">
+                      No chunks yet. Switch to <strong>Edit</strong> to seed this book into chunks,
+                      then come back to learn them.
+                    </p>
+                    <button
+                      type="button"
+                      class="button is-link"
+                      (click)="setViewMode('edit')"
+                      data-testid="learn-go-edit"
+                    >
+                      Go to Edit
+                    </button>
+                  </div>
+                } @else {
+                  <div class="field mb-3">
+                    <label class="label is-small" for="learn-chunk">Chunk to learn</label>
+                    <div class="select is-fullwidth">
+                      <select
+                        id="learn-chunk"
+                        [ngModel]="learnIndex()"
+                        (ngModelChange)="selectLearnChunk(+$event)"
+                        data-testid="learn-chunk-select"
+                      >
+                        @for (c of chunks(); track $index) {
+                          <option [ngValue]="$index">
+                            {{ $index + 1 }}. {{ c.verseRef || 'Chunk ' + ($index + 1)
+                            }}{{ c.learn?.done ? ' (learned)' : '' }}
+                          </option>
+                        }
+                      </select>
+                    </div>
+                  </div>
+
+                  @if (learnChunk(); as lc) {
+                    <p class="is-size-6 mb-3" aria-live="polite" data-testid="learn-progress">
+                      Chunk {{ learnIndex() + 1 }} of {{ chunks().length }}
+                      @if (lc.verseRef) {
+                        <span class="tag is-light ml-2">{{ lc.verseRef }}</span>
+                      }
+                      <span class="ml-2 has-text-grey">
+                        {{ learnProgress().unlocked }} of {{ learnVerses().length }} verses unlocked
+                      </span>
+                    </p>
+
+                    @if (learnVerses().length === 0) {
+                      <div class="notification is-warning is-light" data-testid="learn-no-verses">
+                        This chunk has no text to learn. Fix its range in Edit.
+                      </div>
+                    } @else {
+                      <ol class="mb-4" style="list-style: none; margin: 0; padding: 0">
+                        @for (v of learnVerses(); track $index) {
+                          @if ($index >= learnProgress().unlocked) {
+                            <li class="box learn-locked py-2" data-testid="learn-verse-locked">
+                              <span aria-hidden="true">🔒</span> {{ v.label }}
+                              <span class="has-text-grey is-size-7">(locked)</span>
+                            </li>
+                          } @else if ($index < learnProgress().unlocked - 1) {
+                            <li class="mb-2" data-testid="learn-verse-earlier">
+                              <details class="box py-2">
+                                <summary>
+                                  {{ v.label }}
+                                  @if ($index < learnProgress().learned) {
+                                    <span class="has-text-success">✓ learned</span>
+                                  } @else {
+                                    <span class="has-text-grey">· not marked learned</span>
+                                  }
+                                </summary>
+                                <p class="learn-text mt-2">{{ v.text }}</p>
+                              </details>
+                            </li>
+                          } @else {
+                            <li class="box" data-testid="learn-verse-current">
+                              <p class="card-ref mb-2">{{ v.label }}</p>
+                              <div
+                                class="buttons has-addons mb-3"
+                                role="group"
+                                aria-label="Learn stage"
+                              >
+                                <button
+                                  type="button"
+                                  class="button"
+                                  [class.is-link]="learnStage() === 'read'"
+                                  [attr.aria-pressed]="learnStage() === 'read'"
+                                  (click)="setLearnStage('read')"
+                                  data-testid="learn-stage-read"
+                                >
+                                  Read
+                                </button>
+                                <button
+                                  type="button"
+                                  class="button"
+                                  [class.is-link]="learnStage() === 'fill'"
+                                  [attr.aria-pressed]="learnStage() === 'fill'"
+                                  (click)="setLearnStage('fill')"
+                                  data-testid="learn-stage-fill"
+                                >
+                                  Fill
+                                </button>
+                                <button
+                                  type="button"
+                                  class="button"
+                                  [class.is-link]="learnStage() === 'recite'"
+                                  [attr.aria-pressed]="learnStage() === 'recite'"
+                                  (click)="setLearnStage('recite')"
+                                  data-testid="learn-stage-recite"
+                                >
+                                  Recite
+                                </button>
+                              </div>
+
+                              @switch (learnStage()) {
+                                @case ('read') {
+                                  <p class="learn-text mb-3" data-testid="learn-read-text">
+                                    {{ v.text }}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    class="button is-link"
+                                    (click)="setLearnStage('fill')"
+                                    data-testid="learn-next-stage"
+                                  >
+                                    Next: Fill
+                                  </button>
+                                }
+                                @case ('fill') {
+                                  <div class="field mb-2">
+                                    <label class="label is-small" for="learn-fill-n">
+                                      Blank every Nth word
+                                    </label>
+                                    <input
+                                      id="learn-fill-n"
+                                      class="input is-small"
+                                      type="number"
+                                      min="2"
+                                      max="10"
+                                      [ngModel]="clozeN()"
+                                      (ngModelChange)="setClozeN(+$event)"
+                                      data-testid="learn-fill-n"
+                                      style="width: 5rem"
+                                    />
+                                  </div>
+                                  <p class="learn-text mb-3" data-testid="learn-fill-text">
+                                    @for (t of learnFillTokens(); track $index) {
+                                      @if (t.blank && !learnFillRevealed()) {
+                                        <span aria-label="blank">{{ blankOf(t.text) }}</span>
+                                      } @else if (t.blank) {
+                                        <strong>{{ t.text }}</strong>
+                                      } @else {
+                                        <span>{{ t.text }}</span>
+                                      }
+                                    }
+                                  </p>
+                                  <div class="buttons">
+                                    <button
+                                      type="button"
+                                      class="button"
+                                      (click)="toggleLearnFill()"
+                                      data-testid="learn-fill-check"
+                                    >
+                                      {{ learnFillRevealed() ? 'Hide answers' : 'Check' }}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="button is-link"
+                                      (click)="setLearnStage('recite')"
+                                      data-testid="learn-next-stage"
+                                    >
+                                      Next: Recite
+                                    </button>
+                                  </div>
+                                }
+                                @case ('recite') {
+                                  @if (!learnRevealed()) {
+                                    <p class="has-text-grey mb-3" data-testid="learn-recite-prompt">
+                                      Recite
+                                      @if (learnProgress().unlocked > 1) {
+                                        verses 1 to {{ learnProgress().unlocked }}
+                                      } @else {
+                                        this verse
+                                      }
+                                      from memory.
+                                    </p>
+                                    <div class="buttons">
+                                      @if (recordingSupported()) {
+                                        @if (testPhase() === 'recording') {
+                                          <button
+                                            type="button"
+                                            class="button is-danger"
+                                            (click)="stopRecording()"
+                                            data-testid="learn-stop"
+                                          >
+                                            ■ Done reciting
+                                          </button>
+                                        } @else if (testPhase() === 'grading') {
+                                          <span class="has-text-grey" data-testid="learn-grading">
+                                            Grading your recitation…
+                                          </span>
+                                        } @else {
+                                          <button
+                                            type="button"
+                                            class="button is-link is-light"
+                                            (click)="startRecording()"
+                                            data-testid="learn-record"
+                                          >
+                                            🎙 Check by voice
+                                          </button>
+                                        }
+                                      }
+                                      <button
+                                        type="button"
+                                        class="button is-link"
+                                        [disabled]="
+                                          testPhase() === 'recording' || testPhase() === 'grading'
+                                        "
+                                        (click)="revealLearn()"
+                                        data-testid="learn-reveal"
+                                      >
+                                        Reveal
+                                      </button>
+                                    </div>
+                                  } @else {
+                                    @if (reciteDiff(); as diff) {
+                                      <p class="learn-text mb-2" data-testid="learn-revealed-text">
+                                        @for (t of diff.verse; track $index) {
+                                          <span
+                                            [class.missed-word]="!t.matched"
+                                            [attr.data-missed]="t.matched ? null : 'true'"
+                                            >{{ t.text }}</span
+                                          >{{ ' ' }}
+                                        }
+                                      </p>
+                                      <p
+                                        class="is-size-7 has-text-grey mb-2"
+                                        data-testid="learn-missed-summary"
+                                      >
+                                        @if (reciteMissedCount() === 0) {
+                                          Every word was there.
+                                        } @else {
+                                          Missed {{ reciteMissedCount() }}
+                                          {{ reciteMissedCount() === 1 ? 'word' : 'words' }}
+                                          (underlined).
+                                        }
+                                      </p>
+                                      <p class="is-size-6 mb-3" data-testid="learn-said">
+                                        <span class="has-text-grey">You said: </span>
+                                        @for (t of diff.said; track $index) {
+                                          <span [class.extra-word]="!t.matched">{{ t.text }}</span
+                                          >{{ ' ' }}
+                                        }
+                                      </p>
+                                    } @else {
+                                      <p class="learn-text mb-3" data-testid="learn-revealed-text">
+                                        {{ learnRangeText() }}
+                                      </p>
+                                      @if (testError()) {
+                                        <p
+                                          class="is-size-7 has-text-grey mb-3"
+                                          data-testid="learn-voice-error"
+                                        >
+                                          Voice check wasn't available. Check yourself below.
+                                        </p>
+                                      }
+                                    }
+                                    @if (gradeResult(); as r) {
+                                      <p
+                                        class="is-size-7 has-text-grey mb-3"
+                                        data-testid="learn-voice-result"
+                                      >
+                                        Voice check: {{ gradeLabel(r.grade) }}, {{ r.accuracyPct }}%
+                                        match. This doesn't change your review schedule.
+                                      </p>
+                                    }
+                                    <div class="buttons">
+                                      <button
+                                        type="button"
+                                        class="button is-success"
+                                        [disabled]="saving()"
+                                        (click)="learnGotIt()"
+                                        data-testid="learn-got-it"
+                                      >
+                                        Got it
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class="button"
+                                        [disabled]="saving()"
+                                        (click)="learnNotYet()"
+                                        data-testid="learn-not-yet"
+                                      >
+                                        Not yet
+                                      </button>
+                                    </div>
+                                  }
+                                }
+                              }
+                            </li>
+                          }
+                        }
+                      </ol>
+
+                      @if (learnProgress().done) {
+                        <div class="box has-text-centered" data-testid="learn-done">
+                          <p class="is-size-5 mb-2">Chunk learned ✓</p>
+                          <div class="buttons is-centered">
+                            @if (learnNextIndex() >= 0) {
+                              <button
+                                type="button"
+                                class="button is-link"
+                                (click)="learnNextChunk()"
+                                data-testid="learn-next-chunk"
+                              >
+                                Next chunk
+                              </button>
+                            }
+                            <button
+                              type="button"
+                              class="button is-light"
+                              [disabled]="saving()"
+                              (click)="learnRelearn()"
+                              data-testid="learn-relearn"
+                            >
+                              Relearn this chunk
+                            </button>
+                          </div>
+                        </div>
+                      } @else if (learnReady()) {
+                        <div data-testid="learn-grade">
+                          <p class="mb-2">All verses are learned. How did the whole chunk go?</p>
+                          <div class="grade-row" role="group" aria-label="Grade the whole chunk">
+                            <button
+                              type="button"
+                              class="button is-danger is-light grade-btn"
+                              [disabled]="saving()"
+                              (click)="learnGrade('again')"
+                              data-testid="learn-grade-again"
+                            >
+                              Again
+                            </button>
+                            <button
+                              type="button"
+                              class="button grade-btn"
+                              [disabled]="saving()"
+                              (click)="learnGrade('hard')"
+                              data-testid="learn-grade-hard"
+                            >
+                              Hard
+                            </button>
+                            <button
+                              type="button"
+                              class="button grade-btn"
+                              [disabled]="saving()"
+                              (click)="learnGrade('good')"
+                              data-testid="learn-grade-good"
+                            >
+                              Good
+                            </button>
+                            <button
+                              type="button"
+                              class="button grade-btn"
+                              [disabled]="saving()"
+                              (click)="learnGrade('easy')"
+                              data-testid="learn-grade-easy"
+                            >
+                              Easy
+                            </button>
+                          </div>
+                        </div>
+                      } @else if (learnProgress().unlocked < learnVerses().length) {
+                        <div>
+                          <button
+                            type="button"
+                            class="button is-link is-fullwidth"
+                            [disabled]="saving()"
+                            (click)="learnUnlockNext()"
+                            data-testid="learn-unlock-next"
+                          >
+                            Unlock next verse
+                          </button>
+                          @if (learnProgress().learned < learnProgress().unlocked) {
+                            <p class="help" data-testid="learn-unlock-hint">
+                              The current verse isn't marked learned yet. You can still move on.
+                            </p>
+                          }
+                        </div>
+                      }
+                    }
+                  } @else {
+                    <div class="box has-text-centered" data-testid="learn-all-done">
+                      <p class="is-size-5 mb-2">Every chunk is learned ✓</p>
+                      <p class="has-text-grey">
+                        Pick a chunk above to relearn it, or use Review for what's due.
+                      </p>
+                    </div>
+                  }
+                }
+              </div>
+            }
+
             @if (viewMode() === 'review') {
               <!-- ===== Review mode: flashcard deck driven by the due queue ===== -->
               <div class="review-deck" data-testid="memorize-review">
@@ -227,16 +654,16 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                     }
                   </p>
 
-                  <!-- The flashcard: tap / Space / swipe-up to flip. -->
+                  <!-- The review card: plain flowing layout (no fixed height, no 3-D flip), so a
+                       multi-verse chunk wraps and scrolls. Tap / Space reveals. -->
                   <div
-                    class="flashcard"
-                    [class.is-flipped]="flipped()"
+                    class="review-card box"
                     role="button"
                     tabindex="0"
                     [attr.aria-label]="
                       flipped()
-                        ? 'Card revealed. Grade your recall, or tap to flip back.'
-                        : 'Hidden card. Tap, press space, or swipe up to reveal.'
+                        ? 'Card revealed. Grade your recall, or tap to hide.'
+                        : 'Hidden card. Tap or press space to reveal.'
                     "
                     (click)="flip()"
                     (keydown)="onCardKeydown($event)"
@@ -244,22 +671,24 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
                     (pointerup)="onCardPointerUp($event)"
                     data-testid="review-card"
                   >
-                    <div class="flashcard-inner">
-                      <!-- Front: reference label + optional first-letters scaffold -->
-                      <div class="flashcard-face flashcard-front" data-testid="review-card-front">
+                    @if (!flipped()) {
+                      <div class="has-text-centered" data-testid="review-card-front">
                         <p class="card-ref">{{ cardRef() || 'Chunk ' + cardChunkNumber() }}</p>
-                        <p class="card-prompt has-text-grey">Recite from memory, then flip.</p>
+                        <p class="card-prompt has-text-grey">Recite from memory, then reveal.</p>
                         @if (scaffold() === 'first') {
                           <p class="card-scaffold" data-testid="review-scaffold">
                             {{ cardScaffoldText() }}
                           </p>
                         }
                       </div>
-                      <!-- Back: the full chunk text from the student's own scroll -->
-                      <div class="flashcard-face flashcard-back" data-testid="review-card-back">
-                        <p class="card-text">{{ cardBackText() }}</p>
+                    } @else {
+                      <div data-testid="review-card-back">
+                        <p class="card-ref has-text-centered mb-3">
+                          {{ cardRef() || 'Chunk ' + cardChunkNumber() }}
+                        </p>
+                        <p class="card-text review-text">{{ cardBackText() }}</p>
                       </div>
-                    </div>
+                    }
                   </div>
 
                   <!-- Front controls: scaffold toggle + explicit reveal -->
@@ -1194,44 +1623,24 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
   `,
   styles: [
     `
-      /* Flashcard flip — GPU-composited transform; themed via Bulma CSS variables. */
-      .flashcard {
-        perspective: 1200px;
+      /* Review card: flowing layout, themed via Bulma CSS variables. */
+      .review-card {
         cursor: pointer;
         outline: none;
       }
-      .flashcard:focus-visible {
+      .review-card:focus-visible {
         outline: 2px solid var(--bulma-link, #485fc7);
         outline-offset: 3px;
-        border-radius: 8px;
       }
-      .flashcard-inner {
-        position: relative;
-        width: 100%;
-        min-height: 12rem;
-        transform-style: preserve-3d;
-        transition: transform 0.45s cubic-bezier(0.4, 0.2, 0.2, 1);
+      .review-text {
+        text-align: left;
       }
-      .flashcard.is-flipped .flashcard-inner {
-        transform: rotateY(180deg);
+      .learn-text {
+        font-size: 1.15rem;
+        line-height: 1.6;
       }
-      .flashcard-face {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 1.5rem 1rem;
-        border-radius: 10px;
-        backface-visibility: hidden;
-        -webkit-backface-visibility: hidden;
-        background: var(--bulma-scheme-main-bis, #f5f5f5);
-        color: var(--bulma-text, #363636);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-      }
-      .flashcard-back {
-        transform: rotateY(180deg);
+      .learn-locked {
+        opacity: 0.7;
       }
       .card-ref {
         font-size: 1.5rem;
@@ -1279,9 +1688,6 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
         font-size: 1rem;
       }
       @media (max-width: 480px) {
-        .flashcard-inner {
-          min-height: 16rem;
-        }
         .grade-row {
           position: sticky;
           bottom: 0;
@@ -1291,34 +1697,6 @@ const STATE_ORDER: MemorizationChunkState[] = ['new', 'learning', 'chained', 'so
         }
         .grade-row .grade-btn {
           min-height: 52px;
-        }
-      }
-      /* Respect reduced motion: no 3-D rotation, just a cross-fade between faces. */
-      @media (prefers-reduced-motion: reduce) {
-        .flashcard-inner {
-          transform-style: flat;
-          transition: none;
-        }
-        .flashcard.is-flipped .flashcard-inner {
-          transform: none;
-        }
-        .flashcard-face {
-          backface-visibility: visible;
-          -webkit-backface-visibility: visible;
-          transition: opacity 0.2s linear;
-        }
-        .flashcard-back {
-          transform: none;
-          opacity: 0;
-        }
-        .flashcard:not(.is-flipped) .flashcard-front {
-          opacity: 1;
-        }
-        .flashcard.is-flipped .flashcard-front {
-          opacity: 0;
-        }
-        .flashcard.is-flipped .flashcard-back {
-          opacity: 1;
         }
       }
     `,
@@ -1380,6 +1758,14 @@ export class MemorizeViewComponent implements OnInit {
   readonly testPhase = signal<'idle' | 'recording' | 'grading' | 'graded'>('idle');
   readonly gradeResult = signal<RecitationGradeResult | null>(null);
   readonly testError = signal(false);
+  /** Which mode a mic recitation belongs to: Test commits SM-2; Learn only shows the result. */
+  readonly gradeTarget = signal<'test' | 'learn'>('test');
+
+  // Learn-mode state. Progress itself lives on the chunk (persisted); these are transient view state.
+  readonly learnIndex = signal(-1);
+  readonly learnStage = signal<LearnStage>('read');
+  readonly learnRevealed = signal(false);
+  readonly learnFillRevealed = signal(false);
   private mediaRecorder: MediaRecorder | null = null;
   private recordedChunks: Blob[] = [];
   private mediaStream: MediaStream | null = null;
@@ -1537,12 +1923,55 @@ export class MemorizeViewComponent implements OnInit {
   readonly reciteDiff = computed<ReciteDiff | null>(() => {
     const transcript = this.gradeResult()?.transcript?.trim();
     if (!transcript) return null;
-    return reciteDiff(this.cardBackText(), transcript);
+    return reciteDiff(this.gradeReferenceText(), transcript);
   });
 
   /** Count of verse words the student missed, for the summary line. */
   readonly reciteMissedCount = computed(
     () => this.reciteDiff()?.verse.filter((t) => !t.matched).length ?? 0,
+  );
+
+  // --- Learn-mode derived state ---
+
+  /** The chunk being learned, or null when none is selected / the index is stale. */
+  readonly learnChunk = computed(() => {
+    const i = this.learnIndex();
+    const cs = this.chunks();
+    return i >= 0 && i < cs.length ? cs[i] : null;
+  });
+
+  /** The chunk's verses, split from the student's own scroll. */
+  readonly learnVerses = computed(() => {
+    const c = this.learnChunk();
+    return c ? splitVerses(this.scrollText(), c) : [];
+  });
+
+  /** Stored Learn progress clamped to the current verse count (fresh when none stored). */
+  readonly learnProgress = computed(() =>
+    clampLearn(this.learnChunk()?.learn, this.learnVerses().length),
+  );
+
+  /** Verses 1..unlocked joined: what the cumulative Recite stage tests. */
+  readonly learnRangeText = computed(() =>
+    rangeText(this.learnVerses(), this.learnProgress().unlocked),
+  );
+
+  /** The current (newest unlocked) verse, blanked for the Fill stage. */
+  readonly learnFillTokens = computed<ClozeToken[]>(() => {
+    const v = this.learnVerses()[this.learnProgress().unlocked - 1];
+    return v ? blankEveryNth(v.text, this.clozeN()) : [];
+  });
+
+  readonly learnReady = computed(() =>
+    isReadyToGrade(this.learnProgress(), this.learnVerses().length),
+  );
+
+  /** The next chunk worth learning, or -1. */
+  readonly learnNextIndex = computed(() => nextChunkToLearn(this.chunks(), this.chunkStates()));
+
+  /** The text a mic recitation is graded against: the Learn range, or the Test card. */
+  readonly gradeReferenceText = computed(() =>
+    this.gradeTarget() === 'learn' ? this.learnRangeText() : this.cardBackText(),
   );
 
   /** First-letters scaffold for the current card's text (front hint). */
@@ -1584,6 +2013,12 @@ export class MemorizeViewComponent implements OnInit {
       next: (saved) => {
         this.chunks.set(saved.chunks);
         this.buildDeck();
+        // Land in Learn when a chunk is mid-way through its Learn run.
+        const inProgress = saved.chunks.findIndex((c) => c.learn !== undefined && !c.learn.done);
+        if (inProgress >= 0) {
+          this.selectLearnChunk(inProgress);
+          this.setViewMode('learn');
+        }
       },
       error: () => {
         // 404 (none yet) or transient: leave the empty worksheet in place.
@@ -1835,8 +2270,16 @@ export class MemorizeViewComponent implements OnInit {
   /** Switch Review/Test/Edit. Entering Review or Test (re)builds the deck from the due queue. */
   setViewMode(mode: ViewMode): void {
     this.viewMode.set(mode);
+    this.gradeTarget.set(mode === 'learn' ? 'learn' : 'test');
     if (mode === 'review' || mode === 'test') this.buildDeck();
     if (mode === 'test') this.resetTestCard();
+    if (mode === 'learn') {
+      this.resetTestCard();
+      if (this.learnChunk() === null) {
+        const idx = nextChunkToLearn(this.chunks(), this.chunkStates());
+        if (idx >= 0) this.selectLearnChunk(idx);
+      }
+    }
   }
 
   // --- session/study preferences (view-only, persisted in localStorage per scroll study) ---
@@ -1997,10 +2440,7 @@ export class MemorizeViewComponent implements OnInit {
     if (!start || this.deckComplete()) return;
     const dir = classifySwipe(e.clientX - start.x, e.clientY - start.y, DEFAULT_SWIPE_OPTIONS);
     if (dir === 'none') return; // a tap (not a swipe) is handled by (click)=flip()
-    if (dir === 'up') {
-      this.flip();
-      return;
-    }
+    if (dir === 'up') return; // swipe-up no longer flips; tap, Space or Reveal does
     if (this.flipped()) {
       const g = swipeToGrade(dir);
       if (g) this.gradeCard(g);
@@ -2017,6 +2457,101 @@ export class MemorizeViewComponent implements OnInit {
     // If focus is already on the card it handles its own keydown; this covers the rest of the page.
     if (target?.getAttribute('data-testid') === 'review-card') return;
     this.onCardKeydown(e);
+  }
+
+  // --- Learn mode ---
+
+  /** Underscores the same length as a blanked word (Fill stage). */
+  blankOf(word: string): string {
+    return '_'.repeat(Math.max(2, word.length));
+  }
+
+  /** Choose which chunk to learn; resets the per-verse view state. */
+  selectLearnChunk(index: number): void {
+    this.learnIndex.set(Number.isInteger(index) && index >= 0 ? index : -1);
+    this.learnStage.set('read');
+    this.learnRevealed.set(false);
+    this.learnFillRevealed.set(false);
+    this.resetTestCard();
+  }
+
+  setLearnStage(stage: LearnStage): void {
+    this.learnStage.set(stage);
+    this.learnFillRevealed.set(false);
+    if (stage !== 'recite') {
+      this.learnRevealed.set(false);
+      this.resetTestCard();
+    }
+  }
+
+  toggleLearnFill(): void {
+    this.learnFillRevealed.update((r) => !r);
+  }
+
+  revealLearn(): void {
+    this.learnRevealed.set(true);
+  }
+
+  /** Write new Learn progress onto the chunk and persist via the existing save path. */
+  private commitLearn(index: number, learn: MemorizationLearnProgress): void {
+    this.chunks.update((cs) => cs.map((c, i) => (i === index ? { ...c, learn } : c)));
+    this.save();
+  }
+
+  /** "Got it": the newest unlocked verse (cumulative range) is learned. Never unlocks by itself. */
+  learnGotIt(): void {
+    const i = this.learnIndex();
+    if (i < 0 || this.saving()) return;
+    this.commitLearn(i, markLearned(this.learnProgress()));
+    this.learnRevealed.set(false);
+    this.resetTestCard();
+  }
+
+  /** "Not yet": back to reading the verse; it stays unlearned. */
+  learnNotYet(): void {
+    const i = this.learnIndex();
+    if (i < 0 || this.saving()) return;
+    this.commitLearn(i, unmarkLearned(this.learnProgress()));
+    this.setLearnStage('read');
+  }
+
+  /** Explicitly unlock the next verse (allowed even if the current one is not marked learned). */
+  learnUnlockNext(): void {
+    const i = this.learnIndex();
+    if (i < 0 || this.saving()) return;
+    this.commitLearn(i, unlockNext(this.learnProgress(), this.learnVerses().length));
+    this.setLearnStage('read');
+  }
+
+  /**
+   * Grade the whole chunk once every verse is learned. Runs the existing SM-2 path (one save that
+   * carries both the schedule and the Learn progress). "Again" is a miss: the last verse goes back
+   * to unlearned and the student recites the chunk again; any pass marks the chunk done.
+   */
+  learnGrade(g: Grade): void {
+    const i = this.learnIndex();
+    if (i < 0 || this.saving() || !this.learnReady()) return;
+    const progress = this.learnProgress();
+    const learn = g === 'again' ? unmarkLearned(progress) : markDone(progress);
+    this.chunks.update((cs) => cs.map((c, idx) => (idx === i ? { ...c, learn } : c)));
+    this.activeIndex.set(i);
+    this.grade(g); // applyGrade + a single save
+    this.learnStage.set('recite');
+    this.learnRevealed.set(false);
+    this.resetTestCard();
+  }
+
+  learnNextChunk(): void {
+    const idx = this.learnNextIndex();
+    if (idx >= 0) this.selectLearnChunk(idx);
+  }
+
+  /** Start this chunk's Learn run over. The SM-2 schedule is left alone. */
+  learnRelearn(): void {
+    const i = this.learnIndex();
+    if (i < 0 || this.saving()) return;
+    this.commitLearn(i, initialLearn());
+    this.selectLearnChunk(i);
   }
 
   // --- Test mode (spoken-recitation auto-grade) ---
@@ -2055,7 +2590,8 @@ export class MemorizeViewComponent implements OnInit {
 
   /** Begin recording the recitation. On any failure, degrade to manual grading. */
   async startRecording(): Promise<void> {
-    if (!this.recordingSupported() || this.deckComplete()) return;
+    if (!this.recordingSupported()) return;
+    if (this.gradeTarget() === 'test' && this.deckComplete()) return;
     this.testError.set(false);
     this.gradeResult.set(null);
     try {
@@ -2112,12 +2648,18 @@ export class MemorizeViewComponent implements OnInit {
   /** Send the recorded clip to the grade service, then apply per drive/desk mode. */
   private gradeClip(clip: Blob): void {
     this.testPhase.set('grading');
-    const chunkText = this.cardBackText();
-    const reference = this.cardRef();
+    const learning = this.gradeTarget() === 'learn';
+    const chunkText = this.gradeReferenceText();
+    const reference = learning ? (this.learnChunk()?.verseRef ?? '') : this.cardRef();
     this.recitationGrade.gradeRecitation(clip, chunkText, reference).subscribe({
       next: (result) => {
         this.gradeResult.set(result);
         this.testPhase.set('graded');
+        if (learning) {
+          // Learn: show the result only. It never writes the SM-2 schedule.
+          this.learnRevealed.set(true);
+          return;
+        }
         // Drive mode: auto-commit the computed grade and advance — no screen touch.
         if (this.testDriveMode() === 'drive') {
           this.commitTestGrade(result.grade);
@@ -2128,6 +2670,7 @@ export class MemorizeViewComponent implements OnInit {
         this.testError.set(true);
         this.gradeResult.set(null);
         this.testPhase.set('graded');
+        if (learning) this.learnRevealed.set(true);
       },
     });
   }

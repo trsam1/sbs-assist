@@ -249,6 +249,54 @@ describe('Memorization Study CRUD Lambda', () => {
       expect(Object.keys(saved).sort()).toEqual(['end', 'start', 'state', 'verseRef']);
     });
 
+    // --- Learn mode progress (optional, additive) ---
+
+    it('round-trips valid learn progress, dropping unknown keys inside it', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(
+        makePutEvent(
+          JSON.stringify({
+            chunks: [chunk({ learn: { unlocked: 3, learned: 2, done: false, extra: 'x' } })],
+          }),
+        ),
+      );
+      expect(res.statusCode).toBe(200);
+      const saved = (putItem(1)['chunks'] as Array<Record<string, unknown>>)[0];
+      expect(saved['learn']).toEqual({ unlocked: 3, learned: 2, done: false });
+    });
+
+    it('adds no learn key when the client sent none', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      mockSend.mockResolvedValueOnce({});
+      const res = await handler(makePutEvent(JSON.stringify({ chunks: [chunk()] })));
+      expect(res.statusCode).toBe(200);
+      const saved = (putItem(1)['chunks'] as Array<Record<string, unknown>>)[0];
+      expect(saved).not.toHaveProperty('learn');
+    });
+
+    it('rejects malformed learn progress with 400', async () => {
+      const bad: unknown[] = [
+        'nope',
+        [],
+        null,
+        { unlocked: 0, learned: 0, done: false }, // unlocked must be >= 1
+        { unlocked: 2, learned: 3, done: false }, // learned > unlocked
+        { unlocked: 51, learned: 0, done: false }, // over the cap
+        { unlocked: 2.5, learned: 0, done: false },
+        { unlocked: 2, learned: -1, done: false },
+        { unlocked: 2, learned: 1, done: 'yes' },
+        { unlocked: 2, learned: 1 }, // missing done
+      ];
+      for (const learn of bad) {
+        mockSend.mockReset();
+        const res = await handler(makePutEvent(JSON.stringify({ chunks: [chunk({ learn })] })));
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).message).toMatch(/learn/i);
+        expect(mockSend).not.toHaveBeenCalled();
+      }
+    });
+
     it('accepts a full ISO timestamp for the date fields', async () => {
       mockSend.mockResolvedValueOnce({ Item: undefined });
       mockSend.mockResolvedValueOnce({});
