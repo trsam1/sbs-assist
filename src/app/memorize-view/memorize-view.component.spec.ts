@@ -822,22 +822,36 @@ describe('MemorizeViewComponent', () => {
       expect(component.flipped()).toBe(false); // not flipped — ignored
     });
 
-    it('swipe up flips; swipe left grades Again (redo-now keeps the same card)', () => {
+    it('swipe up no longer flips; swipe left grades Again (redo-now keeps the same card)', () => {
       loadWithChunks([chunk({ verseRef: '1' }), chunk({ start: 21, end: 48, verseRef: '2' })]);
       component.setViewMode('review');
       fixture.detectChanges();
 
-      // swipe up → flip
+      // swipe up → no flip (tap, Space or Reveal flips)
       component.onCardPointerDown({ clientX: 100, clientY: 300 } as PointerEvent);
       component.onCardPointerUp({ clientX: 100, clientY: 210 } as PointerEvent);
-      expect(component.flipped()).toBe(true);
+      expect(component.flipped()).toBe(false);
 
-      // swipe left → grade again; default redo-now keeps the same card (flipped back to front)
+      // reveal, then swipe left → grade again; default redo-now keeps the same card
+      component.flip();
       component.onCardPointerDown({ clientX: 200, clientY: 100 } as PointerEvent);
       component.onCardPointerUp({ clientX: 110, clientY: 100 } as PointerEvent);
       expect(saveSpy).toHaveBeenCalled();
       expect(component.deckPos()).toBe(0);
       expect(component.flipped()).toBe(false);
+    });
+
+    it('renders the review card as flowing text with no 3-D flip markup', () => {
+      loadWithChunks([chunk({ start: 0, end: SCROLL_TEXT.length, verseRef: '1-3' })]);
+      component.setViewMode('review');
+      fixture.detectChanges();
+      expect(query('.flashcard')).toBeFalsy();
+      expect(query('[data-testid="review-card-back"]')).toBeFalsy();
+      component.flip();
+      fixture.detectChanges();
+      const back = query('[data-testid="review-card-back"]')?.textContent ?? '';
+      expect(back).toContain('In the beginning.');
+      expect(back).toContain('Let there be light.');
     });
 
     it('dismisses the shortcut legend', () => {
@@ -1013,6 +1027,206 @@ describe('MemorizeViewComponent', () => {
       component.setViewMode('test');
       fixture.detectChanges();
       expect(query('[data-testid="test-no-chunks"]')).toBeTruthy();
+    });
+  });
+
+  // --- Learn mode: verse by verse, student-paced ---
+  describe('learn mode', () => {
+    const TODAY = new Date(2026, 10, 2);
+    const ALL = { start: 0, end: SCROLL_TEXT.length, verseRef: '1-3' };
+
+    function loadLearn(chunks: MemorizationChunk[]): void {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(of(makeStudy({ chunks })));
+      fixture.detectChanges();
+      component.setToday(TODAY);
+    }
+
+    function lastSavedLearn(): unknown {
+      const [, input] = saveSpy.mock.calls[saveSpy.mock.calls.length - 1];
+      return (input.chunks as MemorizationChunk[])[0].learn;
+    }
+
+    it('adds a Learn toggle and opens the first new chunk with verse 1 current, the rest locked', () => {
+      loadLearn([chunk(ALL)]);
+      expect(query('[data-testid="mode-learn"]')).toBeTruthy();
+      component.setViewMode('learn');
+      fixture.detectChanges();
+      expect(component.learnIndex()).toBe(0);
+      expect(component.learnVerses().map((v) => v.label)).toEqual(['1', '2', '3']);
+      expect(query('[data-testid="learn-verse-current"]')).toBeTruthy();
+      expect(
+        fixture.nativeElement.querySelectorAll('[data-testid="learn-verse-locked"]').length,
+      ).toBe(2);
+      expect(query('[data-testid="learn-progress"]')?.textContent).toContain(
+        '1 of 3 verses unlocked',
+      );
+    });
+
+    it('lands in Learn when a chunk is mid-way through its Learn run', () => {
+      loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
+      expect(component.viewMode()).toBe('learn');
+      expect(component.learnProgress().unlocked).toBe(2);
+    });
+
+    it('does not land in Learn for a chunk with no Learn progress', () => {
+      loadLearn([chunk(ALL)]);
+      expect(component.viewMode()).toBe('edit');
+    });
+
+    it('moves Read to Fill to Recite and hides the cumulative range until revealed', () => {
+      loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-read-text"]')?.textContent).toContain('And the earth');
+      component.setLearnStage('fill');
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-fill-text"]')).toBeTruthy();
+      component.setLearnStage('recite');
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-recite-prompt"]')?.textContent).toContain('verses 1 to 2');
+      expect(query('[data-testid="learn-revealed-text"]')).toBeFalsy();
+      component.revealLearn();
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-revealed-text"]')?.textContent).toContain(
+        'In the beginning.',
+      );
+      expect(query('[data-testid="learn-revealed-text"]')?.textContent).toContain('And the earth');
+    });
+
+    it('"Got it" marks the verse learned but never unlocks the next one', () => {
+      loadLearn([chunk(ALL)]);
+      component.setViewMode('learn');
+      component.setLearnStage('recite');
+      component.revealLearn();
+      fixture.detectChanges();
+      component.learnGotIt();
+      expect(lastSavedLearn()).toEqual({ unlocked: 1, learned: 1, done: false });
+      expect(component.learnProgress().unlocked).toBe(1);
+    });
+
+    it('unlocks the next verse only on an explicit tap, even if not marked learned', () => {
+      loadLearn([chunk(ALL)]);
+      component.setViewMode('learn');
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-unlock-hint"]')).toBeTruthy();
+      component.learnUnlockNext();
+      expect(lastSavedLearn()).toEqual({ unlocked: 2, learned: 0, done: false });
+      expect(component.learnStage()).toBe('read');
+    });
+
+    it('"Not yet" sends the student back to Read and keeps the verse unlearned', () => {
+      loadLearn([chunk({ ...ALL, learn: { unlocked: 1, learned: 1, done: false } })]);
+      component.setLearnStage('recite');
+      component.revealLearn();
+      component.learnNotYet();
+      expect(lastSavedLearn()).toEqual({ unlocked: 1, learned: 0, done: false });
+      expect(component.learnStage()).toBe('read');
+    });
+
+    it('offers the chunk grade only when every verse is unlocked and learned', () => {
+      loadLearn([chunk({ ...ALL, learn: { unlocked: 3, learned: 2, done: false } })]);
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-grade"]')).toBeFalsy();
+      component.learnGrade('good'); // refused: not ready
+      expect(saveSpy).not.toHaveBeenCalled();
+
+      component.setLearnStage('recite');
+      component.revealLearn();
+      component.learnGotIt();
+      fixture.detectChanges();
+      expect(component.learnReady()).toBe(true);
+      expect(query('[data-testid="learn-grade"]')).toBeTruthy();
+    });
+
+    it('grading the finished chunk runs SM-2 once, saves the schedule with done, and offers next', () => {
+      loadLearn([
+        chunk({ ...ALL, learn: { unlocked: 3, learned: 3, done: false } }),
+        chunk({ start: 0, end: 5, verseRef: '9' }),
+      ]);
+      fixture.detectChanges();
+      component.learnGrade('good');
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      const [, input] = saveSpy.mock.calls[0];
+      const saved = (input.chunks as MemorizationChunk[])[0];
+      expect(saved.learn).toEqual({ unlocked: 3, learned: 3, done: true });
+      expect(saved.repetitions).toBe(1);
+      expect(saved.lastReviewed).toBeTruthy();
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-done"]')).toBeTruthy();
+      expect(component.learnNextIndex()).toBe(1);
+      component.learnNextChunk();
+      expect(component.learnIndex()).toBe(1);
+    });
+
+    it('Again on the chunk grade is a miss: not done, last verse back to unlearned, back to Recite', () => {
+      loadLearn([chunk({ ...ALL, learn: { unlocked: 3, learned: 3, done: false } })]);
+      component.learnGrade('again');
+      const saved = saveSpy.mock.calls[0][1].chunks[0] as MemorizationChunk;
+      expect(saved.learn).toEqual({ unlocked: 3, learned: 2, done: false });
+      expect(saved.repetitions).toBe(0);
+      expect(component.learnStage()).toBe('recite');
+    });
+
+    it('Relearn resets Learn progress but leaves the SM-2 schedule alone', () => {
+      loadLearn([
+        chunk({
+          ...ALL,
+          intervalDays: 6,
+          repetitions: 2,
+          dueDate: '2026-11-08',
+          lastReviewed: '2026-11-02',
+          learn: { unlocked: 3, learned: 3, done: true },
+        }),
+      ]);
+      component.setViewMode('learn');
+      component.selectLearnChunk(0);
+      component.learnRelearn();
+      const saved = saveSpy.mock.calls[0][1].chunks[0] as MemorizationChunk;
+      expect(saved.learn).toEqual({ unlocked: 1, learned: 0, done: false });
+      expect(saved.intervalDays).toBe(6);
+      expect(saved.repetitions).toBe(2);
+    });
+
+    it('shows the missed-word highlight for a voice result and never touches the schedule', () => {
+      loadLearn([chunk({ ...ALL, learn: { unlocked: 1, learned: 0, done: false } })]);
+      component.setViewMode('learn');
+      component.setLearnStage('recite');
+      component.gradeResult.set({
+        grade: 'hard',
+        reason: 'dropped a word',
+        accuracyPct: 67,
+        missedWords: ['the'],
+        transcript: 'in beginning',
+      });
+      component.revealLearn();
+      fixture.detectChanges();
+      const missed = Array.from(
+        fixture.nativeElement.querySelectorAll('[data-testid="learn-revealed-text"] [data-missed]'),
+      ).map((e) => (e as HTMLElement).textContent?.trim());
+      expect(missed).toContain('the');
+      expect(query('[data-testid="learn-voice-result"]')?.textContent).toContain('67%');
+      expect(saveSpy).not.toHaveBeenCalled();
+      expect(component.chunks()[0].repetitions).toBeUndefined();
+    });
+
+    it('clamps stale progress when the chunk now has fewer verses', () => {
+      loadLearn([
+        chunk({ start: 0, end: 19, verseRef: '1', learn: { unlocked: 3, learned: 3, done: true } }),
+      ]);
+      component.setViewMode('learn');
+      component.selectLearnChunk(0);
+      expect(component.learnVerses().length).toBe(1);
+      expect(component.learnProgress()).toEqual({ unlocked: 1, learned: 1, done: true });
+    });
+
+    it('shows the empty state with no chunks', () => {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      fixture.detectChanges();
+      component.setViewMode('learn');
+      fixture.detectChanges();
+      expect(query('[data-testid="learn-no-chunks"]')).toBeTruthy();
     });
   });
 });

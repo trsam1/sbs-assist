@@ -2,6 +2,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type {
   MemorizationChunk,
+  MemorizationLearnProgress,
   MemorizationReminderPref,
   MemorizationReminderPrefRecord,
   MemorizationStudyRecord,
@@ -19,6 +20,8 @@ const CHUNKS_MAX = 2000;
 const MIN_EASE = 1.3;
 /** Max length of an ISO date / timestamp string on a schedule field. */
 const DATE_MAX = 40;
+/** Upper bound on verses in one chunk's Learn progress (matches the client's VERSES_PER_CHUNK_MAX). */
+const LEARN_VERSES_MAX = 50;
 
 /** The learned-progress ladder. Mirrors the client type. */
 const STATES: ReadonlySet<string> = new Set(['new', 'learning', 'chained', 'solid']);
@@ -128,6 +131,29 @@ function parsePutBody(body: string | null | undefined): ParseResult {
         }
       }
 
+      // --- Learn mode progress: OPTIONAL, validated only when present. Counts and flags only. ---
+      let learn: MemorizationLearnProgress | undefined;
+      if (el['learn'] !== undefined) {
+        const l = el['learn'];
+        if (typeof l !== 'object' || l === null || Array.isArray(l)) {
+          return { error: 'chunk.learn must be an object.' };
+        }
+        const lo = l as Record<string, unknown>;
+        if (
+          !isNonNegativeInt(lo['unlocked']) ||
+          !isNonNegativeInt(lo['learned']) ||
+          lo['unlocked'] < 1 ||
+          lo['unlocked'] > LEARN_VERSES_MAX ||
+          lo['learned'] > lo['unlocked'] ||
+          typeof lo['done'] !== 'boolean'
+        ) {
+          return {
+            error: `chunk.learn needs integer unlocked (1-${LEARN_VERSES_MAX}), learned (0..unlocked) and boolean done.`,
+          };
+        }
+        learn = { unlocked: lo['unlocked'], learned: lo['learned'], done: lo['done'] };
+      }
+
       const chunk: MemorizationChunk = {
         start: el['start'] as number,
         end: el['end'] as number,
@@ -140,6 +166,7 @@ function parsePutBody(body: string | null | undefined): ParseResult {
       if (el['repetitions'] !== undefined) chunk.repetitions = el['repetitions'] as number;
       if (el['dueDate'] !== undefined) chunk.dueDate = el['dueDate'] as string;
       if (el['lastReviewed'] !== undefined) chunk.lastReviewed = el['lastReviewed'] as string;
+      if (learn !== undefined) chunk.learn = learn;
       chunks.push(chunk);
     }
   }

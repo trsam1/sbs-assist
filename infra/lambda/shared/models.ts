@@ -332,6 +332,15 @@ export interface MemorizationChunk {
   repetitions?: number; // consecutive successful recalls; resets to 0 on a miss
   dueDate?: string; // ISO date next due; '' / absent = due now
   lastReviewed?: string; // ISO date of last graded review; '' / absent = never
+  // --- Learn mode progress (additive; absent = not started). Counts and flags only, no verse text. ---
+  learn?: MemorizationLearnProgress;
+}
+
+/** Per-chunk Learn mode progress: verses unlocked, verses checked "got it", chunk graded. */
+export interface MemorizationLearnProgress {
+  unlocked: number; // verses available to work on, >= 1
+  learned: number; // verses checked "got it", 0..unlocked
+  done: boolean; // chunk grade given
 }
 
 /** DynamoDB record shape for the MemorizationStudies table (one per scroll per user). */
