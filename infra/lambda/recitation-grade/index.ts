@@ -351,6 +351,12 @@ async function scoreTranscript(
     degraded = true;
   }
 
+  // No transcript text in logs, only its size, so a graded result is verifiable without PII.
+  console.log(
+    `Graded: grade=${grade} accuracyPct=${diff.accuracyPct} degraded=${degraded} ` +
+      `transcriptChars=${transcript.length} missed=${diff.missedWords.length}`,
+  );
+
   return {
     grade,
     reason,
