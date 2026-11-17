@@ -15,6 +15,7 @@ describe('StudyCrudService', () => {
     userId: 'anon-abc123',
     createdAt: '',
     updatedAt: '',
+    bookStudyIds: [],
     wordStudies: [
       {
         word: 'love',
@@ -60,6 +61,7 @@ describe('StudyCrudService', () => {
       userId: 'anon-abc123',
       createdAt: undefined,
       wordStudies: mockWorksheet.wordStudies,
+      bookStudyIds: [],
     });
 
     req.flush({ studyId: 'new-study-id' });
@@ -186,5 +188,53 @@ describe('StudyCrudService', () => {
 
     req.flush({ message: 'Study deleted.' });
     expect(completed).toBe(true);
+  });
+
+  describe('book links', () => {
+    it('maps bookStudyIds from the API, and defaults to none when absent', () => {
+      const got: StudyWorksheet[] = [];
+      service.getStudy('a').subscribe((w) => got.push(w));
+      service.getStudy('b').subscribe((w) => got.push(w));
+
+      httpTesting.expectOne(`${environment.apiUrl}/studies/a`).flush({
+        studyId: 'a',
+        userId: 'u',
+        createdAt: '',
+        updatedAt: '',
+        wordStudies: [],
+        bookStudyIds: ['b1', 'b2'],
+      });
+      httpTesting
+        .expectOne(`${environment.apiUrl}/studies/b`)
+        .flush({ studyId: 'b', userId: 'u', createdAt: '', updatedAt: '', wordStudies: [] });
+
+      expect(got[0].bookStudyIds).toEqual(['b1', 'b2']);
+      expect(got[1].bookStudyIds).toEqual([]);
+    });
+
+    it('keeps the links through a load then save (regression: Learn progress was dropped this way)', () => {
+      let loaded: StudyWorksheet | undefined;
+      service.getStudy('a').subscribe((w) => (loaded = w));
+      httpTesting.expectOne(`${environment.apiUrl}/studies/a`).flush({
+        studyId: 'a',
+        userId: 'u',
+        createdAt: 'c',
+        updatedAt: '',
+        wordStudies: [],
+        bookStudyIds: ['b1', 'b2'],
+      });
+
+      service.saveStudy(loaded as StudyWorksheet).subscribe();
+      const save = httpTesting.expectOne(`${environment.apiUrl}/studies`);
+      expect(save.request.body.bookStudyIds).toEqual(['b1', 'b2']);
+      save.flush({ studyId: 'a' });
+    });
+
+    it('sends an empty list when a study is unlinked from every book', () => {
+      service.saveStudy({ ...mockWorksheet, bookStudyIds: [] }).subscribe();
+      const save = httpTesting.expectOne(`${environment.apiUrl}/studies`);
+      expect(save.request.body.bookStudyIds).toEqual([]);
+      save.flush({ studyId: 'x' });
+    });
   });
 });

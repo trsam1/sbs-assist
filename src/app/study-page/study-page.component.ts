@@ -12,12 +12,20 @@ import { StrongsLookupService } from '../strongs-lookup.service';
 import { StudyCrudService } from '../study-crud.service';
 import { AiSummaryService } from '../ai-summary.service';
 import { EnglishDefinitionService, EnglishDictionaryResult } from '../english-definition.service';
-import { StrongsStudyResult, CrossReference, WordStudyEntry, StudyWorksheet } from '../models';
+import { BookLinksComponent } from '../book-links/book-links.component';
+import { BookStudyService } from '../book-study.service';
+import {
+  StrongsStudyResult,
+  CrossReference,
+  WordStudyEntry,
+  StudyWorksheet,
+  BookStudy,
+} from '../models';
 import { forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-study-page',
-  imports: [StudyInputComponent, StudyWorksheetComponent],
+  imports: [StudyInputComponent, StudyWorksheetComponent, BookLinksComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!word() && !loading()) {
@@ -37,6 +45,13 @@ import { forkJoin } from 'rxjs';
     }
 
     @if (word() && !loading()) {
+      @if (booksLoaded()) {
+        <app-book-links
+          [books]="books()"
+          [selected]="bookStudyIds()"
+          (selectedChange)="bookStudyIds.set($event)"
+        />
+      }
       <app-study-worksheet
         [word]="word()"
         [strongsNumber]="strongsNumber()"
@@ -73,6 +88,14 @@ export class StudyPageComponent implements OnInit {
   private readonly studyCrud = inject(StudyCrudService);
   private readonly aiSummaryService = inject(AiSummaryService);
   private readonly englishDef = inject(EnglishDefinitionService);
+  private readonly bookStudyService = inject(BookStudyService);
+
+  /** The student's books, for the "Books this study belongs to" control. */
+  readonly books = signal<BookStudy[]>([]);
+  /** False until the book list loads; stays false if it fails, which hides the control (links are kept). */
+  readonly booksLoaded = signal(false);
+  /** Every linked book id, including ones that match no loaded book (kept until the selection changes). */
+  readonly bookStudyIds = signal<string[]>([]);
 
   readonly word = signal('');
   readonly strongsNumber = signal<string | null>(null);
@@ -98,9 +121,28 @@ export class StudyPageComponent implements OnInit {
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('studyId');
+    // Started from a book's "Add word study" button: begin linked to that book.
+    const fromBook = this.route.snapshot.queryParamMap?.get('bookStudyId') ?? '';
+    if (!id && fromBook) {
+      this.bookStudyIds.set([fromBook]);
+    }
+    this.loadBooks();
     if (id) {
       this.loadStudy(id);
     }
+  }
+
+  /** Non-blocking. A failure leaves the control hidden; the study's existing links still save. */
+  private loadBooks(): void {
+    this.bookStudyService.list().subscribe({
+      next: (books) => {
+        this.books.set(books);
+        this.booksLoaded.set(true);
+      },
+      error: () => {
+        this.booksLoaded.set(false);
+      },
+    });
   }
 
   onWordSubmitted(word: string): void {
@@ -213,6 +255,7 @@ export class StudyPageComponent implements OnInit {
       createdAt: '',
       updatedAt: '',
       wordStudies: [entry],
+      bookStudyIds: this.bookStudyIds(),
     };
 
     this.studyCrud.saveStudy(worksheet).subscribe({
@@ -244,6 +287,7 @@ export class StudyPageComponent implements OnInit {
         this.englishDefinition.set(entry.englishDefinition);
         this.notes.set(entry.notes);
         this.studyId.set(worksheet.id);
+        this.bookStudyIds.set(worksheet.bookStudyIds ?? []);
         this.step1Notes.set(entry.definitionNotes ?? '');
         this.step2Notes.set(entry.strongsNotes ?? '');
         this.step3Notes.set(entry.lexiconNotes ?? '');

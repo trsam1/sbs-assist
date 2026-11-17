@@ -72,6 +72,8 @@ export interface WordStudyRecord {
   createdAt: string;
   updatedAt: string;
   wordStudies: WordStudyEntry[];
+  /** Books this word study is linked to (a key word can matter in several). Absent = none. */
+  bookStudyIds?: string[];
   GSI1PK: string;
   GSI1SK: string;
 }

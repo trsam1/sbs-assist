@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { StudyPageComponent } from './study-page.component';
 import { StrongsStudyResult, CrossReference } from '../models';
 import { environment } from '../environment';
+import { BookStudyService } from '../book-study.service';
+import { Observable, of, throwError } from 'rxjs';
 
 describe('StudyPageComponent', () => {
   function setup(paramMap: Record<string, string> = {}) {
@@ -211,6 +213,167 @@ describe('StudyPageComponent', () => {
 
       expect(component.loading()).toBe(false);
       expect(component.error()).toContain('no word study entries');
+    });
+  });
+
+  describe('book links', () => {
+    const books = [
+      {
+        id: 'b1',
+        userId: 'u',
+        book: 'Romans',
+        title: '',
+        notes: '',
+        createdAt: '',
+        updatedAt: '',
+        referents: [],
+      },
+      {
+        id: 'b2',
+        userId: 'u',
+        book: 'Ephesians',
+        title: '',
+        notes: '',
+        createdAt: '',
+        updatedAt: '',
+        referents: [],
+      },
+    ];
+    const entry = {
+      word: 'grace',
+      strongsNumber: '',
+      englishDefinition: null,
+      strongsDefinition: '',
+      originalWord: '',
+      transliteration: '',
+      lexiconEntry: '',
+      crossReferences: [],
+      aiSummary: '',
+      notes: '',
+      definitionNotes: '',
+      strongsNotes: '',
+      lexiconNotes: '',
+    };
+
+    function setupLinks(opts: {
+      params?: Record<string, string>;
+      query?: Record<string, string>;
+      list: () => Observable<typeof books>;
+    }) {
+      TestBed.configureTestingModule({
+        imports: [StudyPageComponent],
+        providers: [
+          provideHttpClient(),
+          provideHttpClientTesting(),
+          provideRouter([]),
+          {
+            provide: ActivatedRoute,
+            useValue: {
+              snapshot: {
+                paramMap: { get: (k: string) => opts.params?.[k] ?? null },
+                queryParamMap: { get: (k: string) => opts.query?.[k] ?? null },
+              },
+            },
+          },
+          { provide: BookStudyService, useValue: { list: opts.list } },
+        ],
+      });
+      const fixture = TestBed.createComponent(StudyPageComponent);
+      const httpTesting = TestBed.inject(HttpTestingController);
+      return { fixture, component: fixture.componentInstance, httpTesting };
+    }
+
+    it('starts linked to the book it was opened from', () => {
+      const { fixture, component } = setupLinks({
+        query: { bookStudyId: 'b2' },
+        list: () => of(books),
+      });
+      fixture.detectChanges();
+      expect(component.bookStudyIds()).toEqual(['b2']);
+    });
+
+    it('shows the books control once a word is entered, with the opened-from book checked', () => {
+      const { fixture, component } = setupLinks({
+        query: { bookStudyId: 'b2' },
+        list: () => of(books),
+      });
+      fixture.detectChanges();
+      component.word.set('grace');
+      fixture.detectChanges();
+      const box = (id: string) =>
+        fixture.nativeElement.querySelector(`[data-testid="book-link-${id}"]`) as HTMLInputElement;
+      expect(box('b2').checked).toBe(true);
+      expect(box('b1').checked).toBe(false);
+    });
+
+    it('loads the saved links, and saves several books at once', () => {
+      const { fixture, component, httpTesting } = setupLinks({
+        params: { studyId: 's1' },
+        list: () => of(books),
+      });
+      fixture.detectChanges();
+      httpTesting.expectOne(`${environment.apiUrl}/studies/s1`).flush({
+        studyId: 's1',
+        userId: 'u',
+        createdAt: 'c',
+        updatedAt: '',
+        wordStudies: [entry],
+        bookStudyIds: ['b1'],
+      });
+      expect(component.bookStudyIds()).toEqual(['b1']);
+
+      component.bookStudyIds.set(['b1', 'b2']);
+      component.onSaveStudy();
+      const save = httpTesting.expectOne(`${environment.apiUrl}/studies`);
+      expect(save.request.body.bookStudyIds).toEqual(['b1', 'b2']);
+      save.flush({ studyId: 's1' });
+    });
+
+    it('hides the control but still saves the existing links when the book list fails', () => {
+      const { fixture, component, httpTesting } = setupLinks({
+        params: { studyId: 's1' },
+        list: () => throwError(() => ({ status: 500 })),
+      });
+      fixture.detectChanges();
+      httpTesting.expectOne(`${environment.apiUrl}/studies/s1`).flush({
+        studyId: 's1',
+        userId: 'u',
+        createdAt: 'c',
+        updatedAt: '',
+        wordStudies: [entry],
+        bookStudyIds: ['b1', 'b2'],
+      });
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('[data-testid="book-links"]')).toBeNull();
+
+      component.onSaveStudy();
+      const save = httpTesting.expectOne(`${environment.apiUrl}/studies`);
+      expect(save.request.body.bookStudyIds).toEqual(['b1', 'b2']);
+      save.flush({ studyId: 's1' });
+    });
+
+    it('keeps an id for a deleted book until the selection changes, then drops it', () => {
+      const { fixture, component, httpTesting } = setupLinks({
+        params: { studyId: 's1' },
+        list: () => of(books),
+      });
+      fixture.detectChanges();
+      httpTesting.expectOne(`${environment.apiUrl}/studies/s1`).flush({
+        studyId: 's1',
+        userId: 'u',
+        createdAt: 'c',
+        updatedAt: '',
+        wordStudies: [entry],
+        bookStudyIds: ['b1', 'deleted'],
+      });
+      fixture.detectChanges();
+      expect(component.bookStudyIds()).toEqual(['b1', 'deleted']);
+
+      (
+        fixture.nativeElement.querySelector('[data-testid="book-link-b2"]') as HTMLInputElement
+      ).click();
+      fixture.detectChanges();
+      expect(component.bookStudyIds()).toEqual(['b1', 'b2']);
     });
   });
 });

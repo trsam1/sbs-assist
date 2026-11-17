@@ -1,8 +1,17 @@
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  OnInit,
+  signal,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
+import { BookStudyService } from '../book-study.service';
 import { StudyCrudService } from '../study-crud.service';
-import { StudyWorksheet } from '../models';
+import { BookStudy, StudyWorksheet } from '../models';
+import { BookFilter, bookNames, matchesBookFilter } from '../study-books';
 
 export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 
@@ -50,21 +59,42 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
               <p>No saved studies yet. Start a new word study to see it here.</p>
             </div>
           } @else {
+            @if (books().length > 0) {
+              <div class="field is-flex is-align-items-center mb-3">
+                <label class="label is-small mb-0 mr-2" for="book-filter">Book</label>
+                <div class="select is-small">
+                  <select
+                    id="book-filter"
+                    [value]="bookFilter()"
+                    (change)="bookFilter.set($any($event.target).value)"
+                    data-testid="book-filter"
+                  >
+                    <option value="all">All</option>
+                    <option value="none">No book</option>
+                    @for (b of books(); track b.id) {
+                      <option [value]="b.id">{{ b.book }}</option>
+                    }
+                  </select>
+                </div>
+              </div>
+            }
             <div class="table-container">
               <table class="table is-fullwidth is-hoverable" aria-label="Saved studies list">
                 <thead>
                   <tr>
                     <th scope="col">Word</th>
                     <th scope="col">Strong's #</th>
+                    <th scope="col">Books</th>
                     <th scope="col">Last Updated</th>
                     <th scope="col"><span class="is-sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (study of studies(); track study.id) {
+                  @for (study of visibleStudies(); track study.id) {
                     <tr data-testid="study-row">
                       <td data-testid="study-word">{{ firstWord(study) }}</td>
                       <td data-testid="study-strongs">{{ firstStrongsNumber(study) }}</td>
+                      <td data-testid="study-books">{{ booksFor(study) }}</td>
                       <td data-testid="study-date">{{ study.updatedAt | date: 'medium' }}</td>
                       <td>
                         <div class="buttons are-small">
@@ -92,7 +122,7 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
               </table>
             </div>
             <p class="is-size-7 has-text-grey" data-testid="study-count">
-              {{ studies().length }} study(ies) found
+              {{ visibleStudies().length }} study(ies) found
             </p>
           }
         }
@@ -160,10 +190,26 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 })
 export class StudyListComponent implements OnInit {
   private readonly studyCrud = inject(StudyCrudService);
+  private readonly bookStudyService = inject(BookStudyService);
   private readonly router = inject(Router);
 
   readonly state = signal<ListState>('idle');
   readonly studies = signal<StudyWorksheet[]>([]);
+
+  /** The student's books, for the Books column and filter. Failure leaves them empty (column shows —). */
+  readonly books = signal<BookStudy[]>([]);
+  readonly bookFilter = signal<BookFilter>('all');
+
+  /** Studies passing the book filter. A study linked to several books passes for each of them. */
+  readonly visibleStudies = computed(() =>
+    this.studies().filter((s) =>
+      matchesBookFilter(s.bookStudyIds ?? [], this.books(), this.bookFilter()),
+    ),
+  );
+
+  booksFor(study: StudyWorksheet): string {
+    return bookNames(study.bookStudyIds ?? [], this.books());
+  }
 
   /** The study currently pending deletion confirmation. */
   readonly studyToDelete = signal<StudyWorksheet | null>(null);
@@ -176,6 +222,10 @@ export class StudyListComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadStudies();
+    this.bookStudyService.list().subscribe({
+      next: (books) => this.books.set(books),
+      error: () => this.books.set([]),
+    });
   }
 
   loadStudies(): void {

@@ -3,7 +3,9 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideHttpClient } from '@angular/common/http';
 import { provideRouter, Router, ActivatedRoute, convertToParamMap } from '@angular/router';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { StudyCrudService } from '../study-crud.service';
+import { StudyWorksheet } from '../models';
 import { BookStudyDetailComponent } from './book-study-detail.component';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { StepStatusService } from '../step-list/step-status.service';
@@ -11,6 +13,8 @@ import { environment } from '../environment';
 
 /** Scrolls the mocked ScrollStudyService.listScrollStudies() returns; override per test. */
 let mockScrolls: ScrollStudy[] = [];
+/** Result of the mocked StudyCrudService.listStudies(); an Observable so a test can make it fail. */
+let mockStudies: () => Observable<StudyWorksheet[]> = () => of([]);
 
 function makeScroll(overrides: Partial<ScrollStudy> = {}): ScrollStudy {
   return {
@@ -40,6 +44,7 @@ function configure(bookStudyId: string) {
       provideHttpClientTesting(),
       provideRouter([]),
       { provide: ScrollStudyService, useValue: mockScrollService },
+      { provide: StudyCrudService, useValue: { listStudies: () => mockStudies() } },
       {
         provide: StepStatusService,
         useValue: {
@@ -74,6 +79,7 @@ describe('BookStudyDetailComponent', () => {
 
   beforeEach(() => {
     mockScrolls = [];
+    mockStudies = () => of([]);
     TestBed.resetTestingModule();
   });
 
@@ -454,6 +460,50 @@ describe('BookStudyDetailComponent', () => {
     expect(query('[data-testid="no-scroll"]')).not.toBeNull();
     expect(query('[data-testid="step-row-structure"]')).not.toBeNull();
     expect(query('[data-testid="structure-link"]')).toBeNull();
+  });
+
+  it('lists the word studies linked to this book, including ones linked to other books too', () => {
+    const study = (id: string, word: string, ids: string[]): StudyWorksheet =>
+      ({
+        id,
+        userId: 'u',
+        createdAt: '',
+        updatedAt: '',
+        bookStudyIds: ids,
+        wordStudies: [{ word, strongsNumber: 'G26' }],
+      }) as unknown as StudyWorksheet;
+    mockStudies = () =>
+      of([
+        study('w1', 'grace', ['b1', 'b2']),
+        study('w2', 'faith', ['b2']),
+        study('w3', 'love', []),
+      ]);
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="word-study-count"]')?.textContent).toContain('1 linked');
+    const link = query('[data-testid="word-study-link"]') as HTMLAnchorElement;
+    expect(link.textContent).toContain('grace');
+    expect(link.getAttribute('href')).toBe('/study/w1');
+  });
+
+  it('offers an Add word study button that carries the book id', () => {
+    createWith('b1');
+    flushBook('b1');
+
+    const add = query('[data-testid="add-word-study"]') as HTMLAnchorElement;
+    expect(add.getAttribute('href')).toBe('/study/new?bookStudyId=b1');
+  });
+
+  it('shows no count and no error when the word study list fails to load', () => {
+    mockStudies = () => throwError(() => ({ status: 500 }));
+    createWith('b1');
+    flushBook('b1');
+
+    expect(query('[data-testid="word-study-count"]')).toBeNull();
+    expect(query('[data-testid="word-study-list"]')).toBeNull();
+    expect(query('[data-testid="error"]')).toBeNull();
+    expect(query('[data-testid="add-word-study"]')).not.toBeNull();
   });
 
   it('gates steps 6–9 while the linked scroll is not ready', () => {

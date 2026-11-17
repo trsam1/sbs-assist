@@ -5,7 +5,8 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { BookStudyService } from '../book-study.service';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { BookStudy, Referent } from '../models';
-import { StepListComponent } from '../step-list/step-list.component';
+import { StepListComponent, WordStudyLink } from '../step-list/step-list.component';
+import { StudyCrudService } from '../study-crud.service';
 import { StepStatus, StepStatusService } from '../step-list/step-status.service';
 
 type DetailState = 'loading' | 'loaded' | 'notfound' | 'error';
@@ -96,6 +97,8 @@ const REFERENT_LONG_MAX = 1000;
                   [scrollReady]="scrollReady()"
                   [statuses]="stepStatuses()"
                   [memorizeDue]="memorizeDue()"
+                  [bookStudyId]="bs.id"
+                  [wordStudies]="wordStudies()"
                 />
                 @if (scrollReady()) {
                   <button
@@ -121,7 +124,12 @@ const REFERENT_LONG_MAX = 1000;
                   Upload the scroll (Step 4)
                 </button>
               </div>
-              <app-step-list scrollStudyId="" [scrollReady]="false" />
+              <app-step-list
+                scrollStudyId=""
+                [scrollReady]="false"
+                [bookStudyId]="bs.id"
+                [wordStudies]="wordStudies()"
+              />
             }
           </section>
 
@@ -420,6 +428,7 @@ export class BookStudyDetailComponent implements OnInit {
   private readonly bookStudyService = inject(BookStudyService);
   private readonly scrollStudyService = inject(ScrollStudyService);
   private readonly stepStatusService = inject(StepStatusService);
+  private readonly studyCrud = inject(StudyCrudService);
 
   readonly state = signal<DetailState>('loading');
   readonly bookStudy = signal<BookStudy | null>(null);
@@ -430,6 +439,8 @@ export class BookStudyDetailComponent implements OnInit {
   readonly stepStatuses = signal<Record<string, StepStatus>>({});
   /** Chunks due today for Memorize, or null when there is no memorization study. */
   readonly memorizeDue = signal<number | null>(null);
+  /** Word studies linked to this book (Step 5), or null while unknown or if the call failed. */
+  readonly wordStudies = signal<WordStudyLink[] | null>(null);
   /** Whether the Referents editor (Step 6) is expanded in the steps section. */
   readonly referentsOpen = signal(false);
 
@@ -470,6 +481,7 @@ export class BookStudyDetailComponent implements OnInit {
         this.referents.set(bookStudy.referents ?? []);
         this.state.set('loaded');
         this.resolveLinkedScroll();
+        this.loadWordStudies();
       },
       error: (err: { status?: number }) => {
         this.state.set(err?.status === 404 ? 'notfound' : 'error');
@@ -491,6 +503,26 @@ export class BookStudyDetailComponent implements OnInit {
       },
       error: () => {
         this.linkedScroll.set(null);
+      },
+    });
+  }
+
+  /** Non-blocking: the row shows no count until this arrives, and stays quiet if it fails. */
+  private loadWordStudies(): void {
+    this.studyCrud.listStudies().subscribe({
+      next: (studies) => {
+        this.wordStudies.set(
+          studies
+            .filter((s) => (s.bookStudyIds ?? []).includes(this.bookStudyId))
+            .map((s) => ({
+              id: s.id,
+              word: s.wordStudies[0]?.word ?? '(untitled)',
+              strongsNumber: s.wordStudies[0]?.strongsNumber ?? '',
+            })),
+        );
+      },
+      error: () => {
+        this.wordStudies.set(null);
       },
     });
   }
