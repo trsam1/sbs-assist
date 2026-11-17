@@ -73,6 +73,43 @@ describe('MemorizationStudyService', () => {
     expect(result?.chunks.length).toBe(1);
   });
 
+  it('save and get keep Learn progress on each chunk', () => {
+    const learn = { unlocked: 2, learned: 1, done: false };
+    const input = {
+      chunks: [{ start: 0, end: 20, verseRef: '2:7', state: 'learning' as const, learn }],
+    };
+    const record = {
+      scrollStudyId: 's1',
+      userId: 'u1',
+      chunks: input.chunks,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+
+    let saved: MemorizationStudy | undefined;
+    service.save('s1', input).subscribe((s) => (saved = s));
+    httpTesting.expectOne(`${environment.apiUrl}/scroll-studies/s1/memorize`).flush(record);
+    expect(saved?.chunks[0].learn).toEqual(learn);
+
+    let loaded: MemorizationStudy | undefined;
+    service.get('s1').subscribe((s) => (loaded = s));
+    httpTesting.expectOne(`${environment.apiUrl}/scroll-studies/s1/memorize`).flush(record);
+    expect(loaded?.chunks[0].learn).toEqual(learn);
+  });
+
+  it('leaves learn absent on a chunk that has none', () => {
+    let loaded: MemorizationStudy | undefined;
+    service.get('s1').subscribe((s) => (loaded = s));
+    httpTesting.expectOne(`${environment.apiUrl}/scroll-studies/s1/memorize`).flush({
+      scrollStudyId: 's1',
+      userId: 'u1',
+      chunks: [{ start: 0, end: 10, verseRef: '1:1', state: 'new' }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    expect('learn' in (loaded?.chunks[0] ?? {})).toBe(false);
+  });
+
   it('getReminderPref GETs the per-user reminder prefs route', () => {
     let result: { reminderOptIn: boolean; reminderHour?: number } | undefined;
     service.getReminderPref().subscribe((p) => (result = p));
