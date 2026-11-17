@@ -31,6 +31,8 @@ function toMemorizationStudy(record: MemorizationStudyRecord): MemorizationStudy
       ...(c.repetitions !== undefined ? { repetitions: c.repetitions } : {}),
       ...(c.dueDate !== undefined ? { dueDate: c.dueDate } : {}),
       ...(c.lastReviewed !== undefined ? { lastReviewed: c.lastReviewed } : {}),
+      // Learn mode progress. Dropping it here would undo every unlock / "Got it" on save.
+      ...(c.learn !== undefined ? { learn: c.learn } : {}),
     })),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
