@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { ToolShellComponent } from '../tool-shell/tool-shell.component';
 import { ScrollToolContext } from '../tool-shell/scroll-tool-context';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { StructureStudyService } from '../structure-study.service';
 import { StructureElement, StructureMarker, StructureSection, SecondaryGenre } from '../models';
@@ -29,7 +29,7 @@ const FREQUENCY_PAGE = 25;
 
 @Component({
   selector: 'app-structure-view',
-  imports: [RouterLink, FormsModule, ToolShellComponent],
+  imports: [FormsModule, ToolShellComponent],
   providers: [ScrollToolContext],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `

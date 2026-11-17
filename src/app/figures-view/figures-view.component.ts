@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { ToolShellComponent } from '../tool-shell/tool-shell.component';
 import { ScrollToolContext } from '../tool-shell/scroll-tool-context';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { FiguresStudyService } from '../figures-study.service';
 import { FiguresAssistService } from '../figures-assist.service';
@@ -25,7 +25,7 @@ function blankEntry(): FigureEntry {
 
 @Component({
   selector: 'app-figures-view',
-  imports: [RouterLink, FormsModule, ToolShellComponent],
+  imports: [FormsModule, ToolShellComponent],
   providers: [ScrollToolContext],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
