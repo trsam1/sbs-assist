@@ -1,5 +1,6 @@
+import { BlbTaggerService } from '../blb-tagger/blb-tagger.service';
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { StudyWorksheetComponent } from './study-worksheet.component';
 import { StrongsStudyResult, CrossReference } from '../models';
 import { Component, signal } from '@angular/core';
@@ -50,6 +51,8 @@ describe('StudyWorksheetComponent', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [TestHostComponent, StudyWorksheetComponent],
+      // Never load the third-party Blue Letter Bible script in tests.
+      providers: [{ provide: BlbTaggerService, useValue: { tag: vi.fn(async () => undefined) } }],
     });
     fixture = TestBed.createComponent(TestHostComponent);
     host = fixture.componentInstance;

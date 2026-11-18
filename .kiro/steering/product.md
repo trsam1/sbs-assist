@@ -93,6 +93,7 @@ Use these terms with their study-specific meanings:
 ## Guiding constraints
 
 - **Student Provided Bible text.** The app can use Bible text as long as the student provided it. For example, either by copy and paste, or the full scroll text upload of a book.
+  - **Exception, verse hover (#4):** on Step 5 cross-references only, the Blue Letter Bible ScriptTagger (third-party script, loaded lazily) shows verse text on hover. That text comes from Blue Letter Bible's servers; the app never stores, serves or exports it. Do not extend this to other pages without the maintainer's say-so.
 - **Student-driven observation.** Tools guide and capture the student's own work; they don't replace it.
 - **One step, one focused tool.** Each tool supports a single step of the method with a guided, savable worksheet.
 
