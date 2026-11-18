@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeLearn } from './memorize-learn.service';
+import { MemorizeTest } from './memorize-test.service';
 import { MemorizeCoachControlsComponent } from './memorize-coach-controls.component';
 import { MEMORIZE_STYLES } from './memorize-styles';
 
@@ -95,7 +97,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                         class="button"
                         [class.is-link]="store.learnStage() === 'read'"
                         [attr.aria-pressed]="store.learnStage() === 'read'"
-                        (click)="store.setLearnStage('read')"
+                        (click)="learn.setLearnStage('read')"
                         data-testid="learn-stage-read"
                       >
                         Read
@@ -105,7 +107,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                         class="button"
                         [class.is-link]="store.learnStage() === 'fill'"
                         [attr.aria-pressed]="store.learnStage() === 'fill'"
-                        (click)="store.setLearnStage('fill')"
+                        (click)="learn.setLearnStage('fill')"
                         data-testid="learn-stage-fill"
                       >
                         Fill
@@ -115,7 +117,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                         class="button"
                         [class.is-link]="store.learnStage() === 'recite'"
                         [attr.aria-pressed]="store.learnStage() === 'recite'"
-                        (click)="store.setLearnStage('recite')"
+                        (click)="learn.setLearnStage('recite')"
                         data-testid="learn-stage-recite"
                       >
                         Recite
@@ -130,7 +132,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                         <button
                           type="button"
                           class="button is-link"
-                          (click)="store.setLearnStage('fill')"
+                          (click)="learn.setLearnStage('fill')"
                           data-testid="learn-next-stage"
                         >
                           Next: Fill
@@ -158,24 +160,24 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                             @if (t.blank && !store.learnFillRevealed()) {
                               <input
                                 class="input is-small fill-input"
-                                [class.is-success]="store.learnFillResult()[$index] === true"
-                                [class.is-danger]="store.learnFillResult()[$index] === false"
+                                [class.is-success]="learn.learnFillResult()[$index] === true"
+                                [class.is-danger]="learn.learnFillResult()[$index] === false"
                                 type="text"
                                 autocomplete="off"
                                 autocapitalize="off"
                                 autocorrect="off"
                                 spellcheck="false"
-                                [value]="store.learnFillTypedAt($index)"
-                                (input)="store.setLearnFillTyped($index, $any($event.target).value)"
-                                (keydown.enter)="store.checkLearnFill()"
+                                [value]="learn.learnFillTypedAt($index)"
+                                (input)="learn.setLearnFillTyped($index, $any($event.target).value)"
+                                (keydown.enter)="learn.checkLearnFill()"
                                 [style.width.ch]="t.text.length + 3"
                                 [attr.aria-label]="
                                   'Blank ' +
-                                  store.learnFillBlankNumbers()[$index] +
+                                  learn.learnFillBlankNumbers()[$index] +
                                   ' of ' +
-                                  store.learnFillScore().total
+                                  learn.learnFillScore().total
                                 "
-                                [attr.aria-invalid]="store.learnFillResult()[$index] === false"
+                                [attr.aria-invalid]="learn.learnFillResult()[$index] === false"
                                 data-testid="learn-fill-input"
                               />
                             } @else if (t.blank) {
@@ -185,11 +187,11 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                             }
                           }
                         </p>
-                        @if (store.learnFillScore().checked) {
+                        @if (learn.learnFillScore().checked) {
                           <p class="mb-3" aria-live="polite" data-testid="learn-fill-score">
-                            {{ store.learnFillScore().correct }} of
-                            {{ store.learnFillScore().total }} correct
-                            @if (store.learnFillScore().correct < store.learnFillScore().total) {
+                            {{ learn.learnFillScore().correct }} of
+                            {{ learn.learnFillScore().total }} correct
+                            @if (learn.learnFillScore().correct < learn.learnFillScore().total) {
                               <span class="has-text-grey">
                                 — fix the red ones, or show the answers.</span
                               >
@@ -201,7 +203,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                             type="button"
                             class="button is-link is-light"
                             [disabled]="store.learnFillRevealed()"
-                            (click)="store.checkLearnFill()"
+                            (click)="learn.checkLearnFill()"
                             data-testid="learn-fill-check"
                           >
                             Check my answers
@@ -209,7 +211,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                           <button
                             type="button"
                             class="button"
-                            (click)="store.toggleLearnFill()"
+                            (click)="learn.toggleLearnFill()"
                             data-testid="learn-fill-reveal"
                           >
                             {{ store.learnFillRevealed() ? 'Hide answers' : 'Show answers' }}
@@ -217,7 +219,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                           <button
                             type="button"
                             class="button is-link"
-                            (click)="store.setLearnStage('recite')"
+                            (click)="learn.setLearnStage('recite')"
                             data-testid="learn-next-stage"
                           >
                             Next: Recite
@@ -236,12 +238,12 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                             from memory.
                           </p>
                           <div class="buttons">
-                            @if (store.recordingSupported()) {
+                            @if (test.recordingSupported()) {
                               @if (store.testPhase() === 'recording') {
                                 <button
                                   type="button"
                                   class="button is-danger"
-                                  (click)="store.stopRecording()"
+                                  (click)="test.stopRecording()"
                                   data-testid="learn-stop"
                                 >
                                   ■ Done reciting
@@ -254,7 +256,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                                 <button
                                   type="button"
                                   class="button is-link is-light"
-                                  (click)="store.startRecording()"
+                                  (click)="test.startRecording()"
                                   data-testid="learn-record"
                                 >
                                   🎙 Check by voice
@@ -267,7 +269,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                               [disabled]="
                                 store.testPhase() === 'recording' || store.testPhase() === 'grading'
                               "
-                              (click)="store.revealLearn()"
+                              (click)="learn.revealLearn()"
                               data-testid="learn-reveal"
                             >
                               Reveal
@@ -321,7 +323,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                               class="is-size-7 has-text-grey mb-3"
                               data-testid="learn-voice-result"
                             >
-                              Voice check: {{ store.gradeLabel(r.grade) }}, {{ r.accuracyPct }}%
+                              Voice check: {{ test.gradeLabel(r.grade) }}, {{ r.accuracyPct }}%
                               match. This doesn't change your review schedule.
                             </p>
                           }
@@ -330,7 +332,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                               type="button"
                               class="button is-success"
                               [disabled]="store.saving()"
-                              (click)="store.learnGotIt()"
+                              (click)="learn.learnGotIt()"
                               data-testid="learn-got-it"
                             >
                               Got it
@@ -339,7 +341,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                               type="button"
                               class="button"
                               [disabled]="store.saving()"
-                              (click)="store.learnNotYet()"
+                              (click)="learn.learnNotYet()"
                               data-testid="learn-not-yet"
                             >
                               Not yet
@@ -361,7 +363,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                     <button
                       type="button"
                       class="button is-link"
-                      (click)="store.learnNextChunk()"
+                      (click)="learn.learnNextChunk()"
                       data-testid="learn-next-chunk"
                     >
                       Next chunk
@@ -371,7 +373,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                     type="button"
                     class="button is-light"
                     [disabled]="store.saving()"
-                    (click)="store.learnRelearn()"
+                    (click)="learn.learnRelearn()"
                     data-testid="learn-relearn"
                   >
                     Relearn this chunk
@@ -386,7 +388,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                     type="button"
                     class="button is-danger is-light grade-btn"
                     [disabled]="store.saving()"
-                    (click)="store.learnGrade('again')"
+                    (click)="learn.learnGrade('again')"
                     data-testid="learn-grade-again"
                   >
                     Again
@@ -395,7 +397,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                     type="button"
                     class="button grade-btn"
                     [disabled]="store.saving()"
-                    (click)="store.learnGrade('hard')"
+                    (click)="learn.learnGrade('hard')"
                     data-testid="learn-grade-hard"
                   >
                     Hard
@@ -404,7 +406,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                     type="button"
                     class="button grade-btn"
                     [disabled]="store.saving()"
-                    (click)="store.learnGrade('good')"
+                    (click)="learn.learnGrade('good')"
                     data-testid="learn-grade-good"
                   >
                     Good
@@ -413,7 +415,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                     type="button"
                     class="button grade-btn"
                     [disabled]="store.saving()"
-                    (click)="store.learnGrade('easy')"
+                    (click)="learn.learnGrade('easy')"
                     data-testid="learn-grade-easy"
                   >
                     Easy
@@ -426,7 +428,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                   type="button"
                   class="button is-link is-fullwidth"
                   [disabled]="store.saving()"
-                  (click)="store.learnUnlockNext()"
+                  (click)="learn.learnUnlockNext()"
                   data-testid="learn-unlock-next"
                 >
                   Unlock next verse
@@ -454,4 +456,6 @@ import { MEMORIZE_STYLES } from './memorize-styles';
 })
 export class MemorizeLearnComponent {
   readonly store = inject(MemorizeStore);
+  readonly learn = inject(MemorizeLearn);
+  readonly test = inject(MemorizeTest);
 }

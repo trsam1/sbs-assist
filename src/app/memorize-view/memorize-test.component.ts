@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeTest } from './memorize-test.service';
 import { MemorizeCoachControlsComponent } from './memorize-coach-controls.component';
 import { MEMORIZE_STYLES } from './memorize-styles';
 
@@ -79,7 +80,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
             {{ store.cardRef() || 'Chunk ' + store.cardChunkNumber() }}
           </p>
 
-          @if (!store.recordingSupported()) {
+          @if (!test.recordingSupported()) {
             <!-- No MediaRecorder / permission: fall back to manual grading. -->
             <div class="notification is-warning is-light" data-testid="test-no-mic">
               Voice grading isn't available in this browser. Recite from memory, reveal the text,
@@ -95,7 +96,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
             <button
               type="button"
               class="button is-link is-large"
-              (click)="store.startRecording()"
+              (click)="test.startRecording()"
               data-testid="test-record"
               style="min-height: 56px"
             >
@@ -106,7 +107,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
             <button
               type="button"
               class="button is-danger is-large"
-              (click)="store.stopRecording()"
+              (click)="test.stopRecording()"
               data-testid="test-stop"
               style="min-height: 56px"
             >
@@ -164,7 +165,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                   "
                   data-testid="test-grade-value"
                 >
-                  {{ store.gradeLabel(store.gradeResult()?.grade) }}
+                  {{ test.gradeLabel(store.gradeResult()?.grade) }}
                 </span>
                 <span class="is-size-6 has-text-grey ml-2" data-testid="test-accuracy">
                   {{ store.gradeResult()?.accuracyPct }}% match
@@ -193,7 +194,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                   type="button"
                   class="button is-danger is-light grade-btn"
                   [disabled]="store.saving()"
-                  (click)="store.commitTestGrade('again')"
+                  (click)="test.commitTestGrade('again')"
                   data-testid="test-grade-again"
                 >
                   Again
@@ -202,7 +203,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                   type="button"
                   class="button grade-btn"
                   [disabled]="store.saving()"
-                  (click)="store.commitTestGrade('hard')"
+                  (click)="test.commitTestGrade('hard')"
                   data-testid="test-grade-hard"
                 >
                   Hard
@@ -211,7 +212,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                   type="button"
                   class="button grade-btn"
                   [disabled]="store.saving()"
-                  (click)="store.commitTestGrade('good')"
+                  (click)="test.commitTestGrade('good')"
                   data-testid="test-grade-good"
                 >
                   Good
@@ -220,7 +221,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                   type="button"
                   class="button is-success is-light grade-btn"
                   [disabled]="store.saving()"
-                  (click)="store.commitTestGrade('easy')"
+                  (click)="test.commitTestGrade('easy')"
                   data-testid="test-grade-easy"
                 >
                   Easy
@@ -245,14 +246,14 @@ import { MEMORIZE_STYLES } from './memorize-styles';
 
           <!-- Manual grade buttons, always available as the escape hatch. -->
           @if (
-            !store.recordingSupported() ||
+            !test.recordingSupported() ||
             store.testPhase() === 'idle' ||
             store.testError() ||
             (store.testPhase() === 'graded' && store.testDriveMode() === 'desk')
           ) {
             <!-- (rendered above for the graded/desk case; this covers the no-mic path) -->
           }
-          @if (!store.recordingSupported()) {
+          @if (!test.recordingSupported()) {
             <div
               class="grade-row mt-3"
               role="group"
@@ -263,7 +264,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                 type="button"
                 class="button is-danger is-light grade-btn"
                 [disabled]="store.saving()"
-                (click)="store.commitTestGrade('again')"
+                (click)="test.commitTestGrade('again')"
               >
                 Again
               </button>
@@ -271,7 +272,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                 type="button"
                 class="button grade-btn"
                 [disabled]="store.saving()"
-                (click)="store.commitTestGrade('hard')"
+                (click)="test.commitTestGrade('hard')"
               >
                 Hard
               </button>
@@ -279,7 +280,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                 type="button"
                 class="button grade-btn"
                 [disabled]="store.saving()"
-                (click)="store.commitTestGrade('good')"
+                (click)="test.commitTestGrade('good')"
               >
                 Good
               </button>
@@ -287,7 +288,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                 type="button"
                 class="button is-success is-light grade-btn"
                 [disabled]="store.saving()"
-                (click)="store.commitTestGrade('easy')"
+                (click)="test.commitTestGrade('easy')"
               >
                 Easy
               </button>
@@ -301,4 +302,5 @@ import { MEMORIZE_STYLES } from './memorize-styles';
 })
 export class MemorizeTestComponent {
   readonly store = inject(MemorizeStore);
+  readonly test = inject(MemorizeTest);
 }

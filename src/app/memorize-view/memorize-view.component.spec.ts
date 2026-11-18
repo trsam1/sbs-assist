@@ -4,6 +4,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { MemorizeViewComponent } from './memorize-view.component';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeLearn } from './memorize-learn.service';
+import { MemorizeTest } from './memorize-test.service';
 import { SILENCE_WATCHER } from './coach-ports';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
@@ -73,6 +75,8 @@ describe('MemorizeViewComponent', () => {
   let fixture: ComponentFixture<MemorizeViewComponent>;
   let component: MemorizeViewComponent;
   let store: MemorizeStore;
+  let learn: MemorizeLearn;
+  let testMode: MemorizeTest;
   let getScrollSpy: ReturnType<typeof vi.fn>;
   let getStudySpy: ReturnType<typeof vi.fn>;
   let saveSpy: ReturnType<typeof vi.fn>;
@@ -132,6 +136,8 @@ describe('MemorizeViewComponent', () => {
     fixture = TestBed.createComponent(MemorizeViewComponent);
     component = fixture.componentInstance;
     store = component.store;
+    learn = fixture.debugElement.injector.get(MemorizeLearn);
+    testMode = fixture.debugElement.injector.get(MemorizeTest);
   }
 
   // Seed three chunks (one verse each) for drill/edit tests.
@@ -929,7 +935,7 @@ describe('MemorizeViewComponent', () => {
       );
       // Stub recording support BEFORE the first render so the graded branch (not the no-mic
       // fallback) renders; jsdom has no MediaRecorder.
-      vi.spyOn(store, 'recordingSupported').mockReturnValue(true);
+      vi.spyOn(testMode, 'recordingSupported').mockReturnValue(true);
       fixture.detectChanges();
       store.setToday(TODAY);
       store.setViewMode('test');
@@ -946,7 +952,7 @@ describe('MemorizeViewComponent', () => {
       expect(query('[data-testid="test-result"]')).toBeTruthy();
       expect(query('[data-testid="test-grade-row"]')).toBeTruthy();
 
-      store.commitTestGrade('good');
+      testMode.commitTestGrade('good');
       expect(saveSpy).toHaveBeenCalledTimes(1); // existing SM-2 save path
       expect(store.testPhase()).toBe('idle'); // advanced + reset for the next card
     });
@@ -957,7 +963,7 @@ describe('MemorizeViewComponent', () => {
       getStudySpy.mockReturnValue(
         of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })),
       );
-      vi.spyOn(store, 'recordingSupported').mockReturnValue(true);
+      vi.spyOn(testMode, 'recordingSupported').mockReturnValue(true);
       fixture.detectChanges();
       store.setToday(TODAY);
       store.setViewMode('test');
@@ -1006,7 +1012,7 @@ describe('MemorizeViewComponent', () => {
       enterTestWithDueChunk();
       store.setTestDriveMode('drive');
       // Drive-mode auto-commit happens inside the grade subscription; simulate it directly.
-      store.commitTestGrade('good');
+      testMode.commitTestGrade('good');
       expect(saveSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -1014,7 +1020,7 @@ describe('MemorizeViewComponent', () => {
       enterTestWithDueChunk();
       const before = store.deck().length;
       const pos = store.deckPos();
-      store.commitTestGrade('again');
+      testMode.commitTestGrade('again');
       expect(store.deck().length).toBe(before); // NOT requeued
       expect(store.deckPos()).toBe(pos); // same card
       expect(store.testPhase()).toBe('idle'); // reset to record again
@@ -1024,13 +1030,13 @@ describe('MemorizeViewComponent', () => {
       enterTestWithDueChunk();
       store.setAgainMode('later');
       const before = store.deck().length;
-      store.commitTestGrade('again');
+      testMode.commitTestGrade('again');
       expect(store.deck().length).toBe(before + 1); // re-queued
     });
 
     it('falls back to manual grade buttons when recording is unavailable', () => {
       enterTestWithDueChunk();
-      vi.spyOn(store, 'recordingSupported').mockReturnValue(false);
+      vi.spyOn(testMode, 'recordingSupported').mockReturnValue(false);
       fixture.detectChanges();
       expect(query('[data-testid="test-no-mic"]')).toBeTruthy();
       expect(query('[data-testid="test-manual-grade-row"]')).toBeTruthy();
@@ -1095,7 +1101,7 @@ describe('MemorizeViewComponent', () => {
       function enterFill(): void {
         loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
         store.setClozeN(2); // verse 2: "And [the] earth [was] formless."
-        store.setLearnStage('fill');
+        learn.setLearnStage('fill');
         fixture.detectChanges();
       }
 
@@ -1152,7 +1158,7 @@ describe('MemorizeViewComponent', () => {
       it("clears a blank's mark as soon as it is edited", () => {
         enterFill();
         type(0, 'nope');
-        store.checkLearnFill();
+        learn.checkLearnFill();
         fixture.detectChanges();
         expect(inputs()[0].classList.contains('is-danger')).toBe(true);
         type(0, 'th');
@@ -1163,8 +1169,8 @@ describe('MemorizeViewComponent', () => {
       it('keeps what was typed when the student moves to another stage and back', () => {
         enterFill();
         type(0, 'the');
-        store.setLearnStage('read');
-        store.setLearnStage('fill');
+        learn.setLearnStage('read');
+        learn.setLearnStage('fill');
         fixture.detectChanges();
         expect(inputs()[0].value).toBe('the');
       });
@@ -1172,17 +1178,17 @@ describe('MemorizeViewComponent', () => {
       it('starts clean when the blank size changes or a new verse is unlocked', () => {
         enterFill();
         type(0, 'the');
-        store.checkLearnFill();
+        learn.checkLearnFill();
         store.setClozeN(3);
         fixture.detectChanges();
-        expect(store.learnFillScore().checked).toBe(false);
+        expect(learn.learnFillScore().checked).toBe(false);
         expect(inputs().every((i) => i.value === '')).toBe(true);
 
         store.setClozeN(2);
         type(0, 'the');
-        store.learnUnlockNext();
+        learn.learnUnlockNext();
         fixture.detectChanges();
-        expect(store.learnFillTyped()).toEqual({});
+        expect(learn.learnFillTyped()).toEqual({});
       });
 
       it('Show answers replaces the boxes with the words, and nothing is graded or saved', () => {
@@ -1199,16 +1205,16 @@ describe('MemorizeViewComponent', () => {
 
       it('counts empty blanks as wrong when checked', () => {
         enterFill();
-        store.checkLearnFill();
+        learn.checkLearnFill();
         fixture.detectChanges();
-        expect(store.learnFillScore()).toEqual({ total: 2, correct: 0, checked: true });
+        expect(learn.learnFillScore()).toEqual({ total: 2, correct: 0, checked: true });
       });
 
       it('typing never changes Learn progress', () => {
         enterFill();
         const before = store.learnProgress();
         type(0, 'the');
-        store.checkLearnFill();
+        learn.checkLearnFill();
         expect(store.learnProgress()).toEqual(before);
       });
     });
@@ -1217,14 +1223,14 @@ describe('MemorizeViewComponent', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
       fixture.detectChanges();
       expect(query('[data-testid="learn-read-text"]')?.textContent).toContain('And the earth');
-      store.setLearnStage('fill');
+      learn.setLearnStage('fill');
       fixture.detectChanges();
       expect(query('[data-testid="learn-fill-text"]')).toBeTruthy();
-      store.setLearnStage('recite');
+      learn.setLearnStage('recite');
       fixture.detectChanges();
       expect(query('[data-testid="learn-recite-prompt"]')?.textContent).toContain('verses 1 to 2');
       expect(query('[data-testid="learn-revealed-text"]')).toBeFalsy();
-      store.revealLearn();
+      learn.revealLearn();
       fixture.detectChanges();
       expect(query('[data-testid="learn-revealed-text"]')?.textContent).toContain(
         'In the beginning.',
@@ -1235,10 +1241,10 @@ describe('MemorizeViewComponent', () => {
     it('"Got it" marks the verse learned but never unlocks the next one', () => {
       loadLearn([chunk(ALL)]);
       store.setViewMode('learn');
-      store.setLearnStage('recite');
-      store.revealLearn();
+      learn.setLearnStage('recite');
+      learn.revealLearn();
       fixture.detectChanges();
-      store.learnGotIt();
+      learn.learnGotIt();
       expect(lastSavedLearn()).toEqual({ unlocked: 1, learned: 1, done: false });
       expect(store.learnProgress().unlocked).toBe(1);
     });
@@ -1248,16 +1254,16 @@ describe('MemorizeViewComponent', () => {
       store.setViewMode('learn');
       fixture.detectChanges();
       expect(query('[data-testid="learn-unlock-hint"]')).toBeTruthy();
-      store.learnUnlockNext();
+      learn.learnUnlockNext();
       expect(lastSavedLearn()).toEqual({ unlocked: 2, learned: 0, done: false });
       expect(store.learnStage()).toBe('read');
     });
 
     it('"Not yet" sends the student back to Read and keeps the verse unlearned', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 1, learned: 1, done: false } })]);
-      store.setLearnStage('recite');
-      store.revealLearn();
-      store.learnNotYet();
+      learn.setLearnStage('recite');
+      learn.revealLearn();
+      learn.learnNotYet();
       expect(lastSavedLearn()).toEqual({ unlocked: 1, learned: 0, done: false });
       expect(store.learnStage()).toBe('read');
     });
@@ -1266,12 +1272,12 @@ describe('MemorizeViewComponent', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 3, learned: 2, done: false } })]);
       fixture.detectChanges();
       expect(query('[data-testid="learn-grade"]')).toBeFalsy();
-      store.learnGrade('good'); // refused: not ready
+      learn.learnGrade('good'); // refused: not ready
       expect(saveSpy).not.toHaveBeenCalled();
 
-      store.setLearnStage('recite');
-      store.revealLearn();
-      store.learnGotIt();
+      learn.setLearnStage('recite');
+      learn.revealLearn();
+      learn.learnGotIt();
       fixture.detectChanges();
       expect(store.learnReady()).toBe(true);
       expect(query('[data-testid="learn-grade"]')).toBeTruthy();
@@ -1283,7 +1289,7 @@ describe('MemorizeViewComponent', () => {
         chunk({ start: 0, end: 5, verseRef: '9' }),
       ]);
       fixture.detectChanges();
-      store.learnGrade('good');
+      learn.learnGrade('good');
       expect(saveSpy).toHaveBeenCalledTimes(1);
       const [, input] = saveSpy.mock.calls[0];
       const saved = (input.chunks as MemorizationChunk[])[0];
@@ -1293,13 +1299,13 @@ describe('MemorizeViewComponent', () => {
       fixture.detectChanges();
       expect(query('[data-testid="learn-done"]')).toBeTruthy();
       expect(store.learnNextIndex()).toBe(1);
-      store.learnNextChunk();
+      learn.learnNextChunk();
       expect(store.learnIndex()).toBe(1);
     });
 
     it('Again on the chunk grade is a miss: not done, last verse back to unlearned, back to Recite', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 3, learned: 3, done: false } })]);
-      store.learnGrade('again');
+      learn.learnGrade('again');
       const saved = saveSpy.mock.calls[0][1].chunks[0] as MemorizationChunk;
       expect(saved.learn).toEqual({ unlocked: 3, learned: 2, done: false });
       expect(saved.repetitions).toBe(0);
@@ -1319,7 +1325,7 @@ describe('MemorizeViewComponent', () => {
       ]);
       store.setViewMode('learn');
       store.selectLearnChunk(0);
-      store.learnRelearn();
+      learn.learnRelearn();
       const saved = saveSpy.mock.calls[0][1].chunks[0] as MemorizationChunk;
       expect(saved.learn).toEqual({ unlocked: 1, learned: 0, done: false });
       expect(saved.intervalDays).toBe(6);
@@ -1329,7 +1335,7 @@ describe('MemorizeViewComponent', () => {
     it('shows the missed-word highlight for a voice result and never touches the schedule', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 1, learned: 0, done: false } })]);
       store.setViewMode('learn');
-      store.setLearnStage('recite');
+      learn.setLearnStage('recite');
       store.gradeResult.set({
         grade: 'hard',
         reason: 'dropped a word',
@@ -1337,7 +1343,7 @@ describe('MemorizeViewComponent', () => {
         missedWords: ['the'],
         transcript: 'in beginning',
       });
-      store.revealLearn();
+      learn.revealLearn();
       fixture.detectChanges();
       const missed = Array.from(
         fixture.nativeElement.querySelectorAll('[data-testid="learn-revealed-text"] [data-missed]'),
@@ -1435,7 +1441,7 @@ describe('MemorizeViewComponent', () => {
       enterCoachedTest();
       store.setTestDriveMode('drive');
       const deckBefore = store.deckPos();
-      const outcome = store.recordAndGrade({ silenceMs: 2500 });
+      const outcome = testMode.recordAndGrade({ silenceMs: 2500 });
       await flushPromises();
       expect(store.testPhase()).toBe('recording');
       expect(silenceHandlers.length).toBe(1);
@@ -1451,7 +1457,7 @@ describe('MemorizeViewComponent', () => {
 
     it('gives up without grading when the student never starts speaking', async () => {
       enterCoachedTest();
-      const outcome = store.recordAndGrade({});
+      const outcome = testMode.recordAndGrade({});
       await flushPromises();
       silenceHandlers[0]('no-speech');
       expect(await outcome).toEqual({ kind: 'silent' });
@@ -1463,21 +1469,21 @@ describe('MemorizeViewComponent', () => {
     it('reports an unavailable microphone when permission is denied', async () => {
       enterCoachedTest();
       getUserMedia.mockReturnValueOnce(Promise.reject(new Error('denied')));
-      const outcome = store.recordAndGrade({});
+      const outcome = testMode.recordAndGrade({});
       expect(await outcome).toEqual({ kind: 'unavailable' });
       expect(store.testError()).toBe(true);
     });
 
     it('reports unavailable when the browser cannot record', async () => {
       enterCoachedTest();
-      vi.spyOn(store, 'recordingSupported').mockReturnValue(false);
-      expect(await store.recordAndGrade({})).toEqual({ kind: 'unavailable' });
+      vi.spyOn(testMode, 'recordingSupported').mockReturnValue(false);
+      expect(await testMode.recordAndGrade({})).toEqual({ kind: 'unavailable' });
     });
 
     it('reports failed, and leaves the card for manual grading, when the grade service errors', async () => {
       enterCoachedTest();
       gradeRecitationSpy.mockReturnValueOnce(throwError(() => new Error('down')));
-      const outcome = store.recordAndGrade({});
+      const outcome = testMode.recordAndGrade({});
       await flushPromises();
       silenceHandlers[0]('silence');
       expect(await outcome).toEqual({ kind: 'failed' });
@@ -1487,8 +1493,8 @@ describe('MemorizeViewComponent', () => {
 
     it('releases the microphone if the session is cancelled while it is still opening', async () => {
       enterCoachedTest();
-      void store.recordAndGrade({});
-      store.cancelCoachedRecording(); // before getUserMedia has resolved
+      void testMode.recordAndGrade({});
+      testMode.cancelCoachedRecording(); // before getUserMedia has resolved
       await flushPromises();
       expect(FakeRecorder.last).toBeNull(); // never started a recorder
       expect(tracksStopped).toBe(1);
@@ -1496,9 +1502,9 @@ describe('MemorizeViewComponent', () => {
 
     it('cancelling a live coached recording throws the clip away without grading', async () => {
       enterCoachedTest();
-      void store.recordAndGrade({});
+      void testMode.recordAndGrade({});
       await flushPromises();
-      store.cancelCoachedRecording();
+      testMode.cancelCoachedRecording();
       await flushPromises();
       expect(gradeRecitationSpy).not.toHaveBeenCalled();
       expect(store.testPhase()).toBe('idle');
@@ -1507,24 +1513,24 @@ describe('MemorizeViewComponent', () => {
 
     it('does nothing when no coached recording is in progress', () => {
       enterCoachedTest();
-      store.cancelCoachedRecording();
+      testMode.cancelCoachedRecording();
       expect(store.testPhase()).toBe('idle');
     });
 
     it('skipCurrentCard moves on without grading', () => {
       enterCoachedTest();
       const pos = store.deckPos();
-      store.skipCurrentCard();
+      testMode.skipCurrentCard();
       expect(store.deckPos()).toBe(pos + 1);
       expect(saveSpy).not.toHaveBeenCalled();
     });
 
     it('leaves the ordinary Record button alone: no waiter, no silence watching', async () => {
       enterCoachedTest();
-      await store.startRecording();
+      await testMode.startRecording();
       expect(store.testPhase()).toBe('recording');
       expect(silenceHandlers.length).toBe(0);
-      store.stopRecording();
+      testMode.stopRecording();
       await flushPromises();
       expect(gradeRecitationSpy).toHaveBeenCalledTimes(1);
     });
