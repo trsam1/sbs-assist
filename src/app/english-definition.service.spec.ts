@@ -2,7 +2,11 @@ import { TestBed } from '@angular/core/testing';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EnglishDefinitionService, EnglishDictionaryResult } from './english-definition.service';
+import {
+  EnglishDefinitionService,
+  EnglishDictionaryResult,
+  EnglishLookup,
+} from './english-definition.service';
 
 const API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
 const EMPTY: EnglishDictionaryResult = { word: '', meanings: [] };
@@ -139,10 +143,10 @@ describe('EnglishDefinitionService', () => {
     expect(result()).toEqual(EMPTY);
   });
 
-  it('returns the word with no meanings when the API entry has empty meanings', () => {
+  it('returns the empty result when the API entry has no meanings (nothing to show)', () => {
     const result = fetch('test');
     httpTesting.expectOne(`${API}/test`).flush([{ word: 'test', meanings: [] }]);
-    expect(result()).toEqual({ word: 'test', phonetic: undefined, meanings: [] });
+    expect(result()).toEqual(EMPTY);
   });
 
   it('URL-encodes the word', () => {
@@ -163,5 +167,62 @@ describe('EnglishDefinitionService', () => {
       },
     ]);
     expect(result()?.meanings[0].definitions[0].definition).toBe('a feeling of affection');
+  });
+
+  describe('lookupEnglishDefinition: tells "no entry" apart from "could not reach it"', () => {
+    function lookup(word: string): () => EnglishLookup | undefined {
+      let out: EnglishLookup | undefined;
+      service.lookupEnglishDefinition(word).subscribe((r) => (out = r));
+      return () => out;
+    }
+
+    it('is found with the structured result', () => {
+      const out = lookup('love');
+      httpTesting.expectOne(`${API}/love`).flush([
+        {
+          word: 'love',
+          meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'affection' }] }],
+        },
+      ]);
+      expect(out()).toMatchObject({ status: 'found', result: { word: 'love' } });
+    });
+
+    it('is not-found on a 404 (the word has no entry)', () => {
+      const out = lookup('xyznotaword');
+      httpTesting
+        .expectOne(`${API}/xyznotaword`)
+        .flush('x', { status: 404, statusText: 'Not Found' });
+      expect(out()).toEqual({ status: 'not-found' });
+    });
+
+    it('is not-found for an empty array, an entry with no meanings, and blank input', () => {
+      const a = lookup('test');
+      httpTesting.expectOne(`${API}/test`).flush([]);
+      expect(a()).toEqual({ status: 'not-found' });
+
+      const b = lookup('hollow');
+      httpTesting.expectOne(`${API}/hollow`).flush([{ word: 'hollow', meanings: [] }]);
+      expect(b()).toEqual({ status: 'not-found' });
+
+      const c = lookup('   ');
+      httpTesting.expectNone(`${API}/`);
+      expect(c()).toEqual({ status: 'not-found' });
+    });
+
+    it('is an error on a server error, a rate limit, or no network, so a retry can be offered', () => {
+      const a = lookup('love');
+      httpTesting.expectOne(`${API}/love`).flush('x', { status: 500, statusText: 'Server Error' });
+      expect(a()).toEqual({ status: 'error' });
+
+      const b = lookup('faith');
+      httpTesting
+        .expectOne(`${API}/faith`)
+        .flush('x', { status: 429, statusText: 'Too Many Requests' });
+      expect(b()).toEqual({ status: 'error' });
+
+      const c = lookup('hope');
+      httpTesting.expectOne(`${API}/hope`).error(new ProgressEvent('error'));
+      expect(c()).toEqual({ status: 'error' });
+    });
   });
 });

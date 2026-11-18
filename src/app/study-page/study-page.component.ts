@@ -59,6 +59,8 @@ import { forkJoin } from 'rxjs';
         [crossReferences]="crossReferences()"
         [englishDefinition]="englishDefinition()"
         [englishDefLoading]="englishDefLoading()"
+        [englishDefStatus]="englishDefStatus()"
+        (retryEnglishDefinition)="retryEnglishDefinition()"
         [strongsLoading]="strongsLoading()"
         [strongsError]="strongsError()"
         [notes]="notes()"
@@ -103,6 +105,7 @@ export class StudyPageComponent implements OnInit {
   readonly crossReferences = signal<CrossReference[] | null>(null);
   readonly englishDefinition = signal<EnglishDictionaryResult | null>(null);
   readonly englishDefLoading = signal(false);
+  readonly englishDefStatus = signal<'idle' | 'found' | 'not-found' | 'error'>('idle');
   readonly strongsLoading = signal(false);
   readonly strongsError = signal<string | null>(null);
   readonly loading = signal(false);
@@ -147,17 +150,21 @@ export class StudyPageComponent implements OnInit {
 
   onWordSubmitted(word: string): void {
     this.word.set(word);
-    this.englishDefLoading.set(true);
+    this.lookUpEnglish(word);
+  }
 
-    this.englishDef.fetchEnglishDefinition(word).subscribe({
-      next: (result) => {
-        this.englishDefinition.set(result);
-        this.englishDefLoading.set(false);
-      },
-      error: () => {
-        this.englishDefinition.set(null);
-        this.englishDefLoading.set(false);
-      },
+  /** Try the dictionary again for the word on the page (after a failure, or for an old saved study). */
+  retryEnglishDefinition(): void {
+    const word = this.word();
+    if (word) this.lookUpEnglish(word);
+  }
+
+  private lookUpEnglish(word: string): void {
+    this.englishDefLoading.set(true);
+    this.englishDef.lookupEnglishDefinition(word).subscribe((lookup) => {
+      this.englishDefStatus.set(lookup.status);
+      this.englishDefinition.set(lookup.status === 'found' ? lookup.result : null);
+      this.englishDefLoading.set(false);
     });
   }
 

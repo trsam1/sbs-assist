@@ -81,6 +81,88 @@ describe('StudyPageComponent', () => {
       expect(worksheet).not.toBeNull();
     });
 
+    describe('dictionary lookup failures (issue #1)', () => {
+      const DICT = 'https://api.dictionaryapi.dev/api/v2/entries/en/love';
+      const q = (id: string) =>
+        fixture.nativeElement.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+
+      it('says so and offers a retry when the dictionary cannot be reached, never failing silently', () => {
+        component.onWordSubmitted('love');
+        httpTesting.expectOne(DICT).flush('x', { status: 503, statusText: 'Unavailable' });
+        fixture.detectChanges();
+
+        expect(component.englishDefStatus()).toBe('error');
+        expect(q('english-def-error')?.textContent).toContain("Couldn't reach the dictionary");
+        expect(q('english-def-retry')).not.toBeNull();
+        expect(q('english-definition')).toBeNull();
+      });
+
+      it('Try again looks the word up again and shows the definition when it works', () => {
+        component.onWordSubmitted('love');
+        httpTesting.expectOne(DICT).error(new ProgressEvent('error'));
+        fixture.detectChanges();
+
+        q('english-def-retry')?.click();
+        httpTesting.expectOne(DICT).flush([
+          {
+            word: 'love',
+            meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+          },
+        ]);
+        fixture.detectChanges();
+
+        expect(component.englishDefStatus()).toBe('found');
+        expect(q('english-def-error')).toBeNull();
+        expect(q('english-definition')?.textContent).toContain('deep affection');
+      });
+
+      it('shows the loading state while retrying', () => {
+        component.onWordSubmitted('love');
+        httpTesting.expectOne(DICT).error(new ProgressEvent('error'));
+        fixture.detectChanges();
+        q('english-def-retry')?.click();
+        fixture.detectChanges();
+        expect(component.englishDefLoading()).toBe(true);
+        expect(q('english-def-error')).toBeNull();
+        httpTesting.expectOne(DICT).error(new ProgressEvent('error'));
+      });
+
+      it('says the word has no entry on a 404, without a retry that cannot help', () => {
+        component.onWordSubmitted('love');
+        httpTesting.expectOne(DICT).flush('x', { status: 404, statusText: 'Not Found' });
+        fixture.detectChanges();
+
+        expect(component.englishDefStatus()).toBe('not-found');
+        expect(q('english-def-not-found')?.textContent).toContain('no entry for "love"');
+        expect(q('english-def-retry')).toBeNull();
+        expect(q('english-def-error')).toBeNull();
+      });
+
+      it('offers "Look it up" for a saved study that has no definition, and fills it in', () => {
+        component.word.set('love'); // as when an older study was saved after a failed lookup
+        fixture.detectChanges();
+        expect(q('english-def-unavailable')?.textContent).toContain('Definition not available.');
+
+        q('english-def-retry')?.click();
+        httpTesting.expectOne(DICT).flush([
+          {
+            word: 'love',
+            meanings: [{ partOfSpeech: 'noun', definitions: [{ definition: 'deep affection' }] }],
+          },
+        ]);
+        fixture.detectChanges();
+        expect(q('english-definition')?.textContent).toContain('deep affection');
+        expect(q('english-def-unavailable')).toBeNull();
+      });
+
+      it("keeps the student working: notes and the Strong's step are still there after a failure", () => {
+        component.onWordSubmitted('love');
+        httpTesting.expectOne(DICT).flush('x', { status: 500, statusText: 'Server Error' });
+        fixture.detectChanges();
+        expect(q('step1-notes')).not.toBeNull();
+      });
+    });
+
     it("should fetch Strong's data when Strong's number is submitted", () => {
       component.onWordSubmitted('love');
       httpTesting.expectOne('https://api.dictionaryapi.dev/api/v2/entries/en/love').flush([
