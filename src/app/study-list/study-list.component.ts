@@ -12,6 +12,19 @@ import { BookStudyService } from '../book-study.service';
 import { StudyCrudService } from '../study-crud.service';
 import { BookStudy, StudyWorksheet } from '../models';
 import { BookFilter, bookNames, matchesBookFilter } from '../study-books';
+import {
+  DEFAULT_SORT,
+  LANGUAGE_LABELS,
+  LanguageFilter,
+  SortKey,
+  SortState,
+  groupByWord,
+  languageOf,
+  matchesLanguage,
+  nextSort,
+  plainRows,
+  sortStudies,
+} from './study-list-sort';
 
 export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
 
@@ -59,64 +72,116 @@ export type ListState = 'idle' | 'loading' | 'loaded' | 'error';
               <p>No saved studies yet. Start a new word study to see it here.</p>
             </div>
           } @else {
-            @if (books().length > 0) {
-              <div class="field is-flex is-align-items-center mb-3">
-                <label class="label is-small mb-0 mr-2" for="book-filter">Book</label>
+            <div
+              class="is-flex is-flex-wrap-wrap is-align-items-center mb-3"
+              data-testid="list-controls"
+            >
+              <div class="field is-flex is-align-items-center mb-0 mr-4">
+                <label class="label is-small mb-0 mr-2" for="language-filter">Language</label>
                 <div class="select is-small">
                   <select
-                    id="book-filter"
-                    [value]="bookFilter()"
-                    (change)="bookFilter.set($any($event.target).value)"
-                    data-testid="book-filter"
+                    id="language-filter"
+                    [value]="languageFilter()"
+                    (change)="languageFilter.set($any($event.target).value)"
+                    data-testid="language-filter"
                   >
                     <option value="all">All</option>
-                    <option value="none">No book</option>
-                    @for (b of books(); track b.id) {
-                      <option [value]="b.id">{{ b.book }}</option>
-                    }
+                    <option value="greek">Greek</option>
+                    <option value="hebrew">Hebrew</option>
+                    <option value="none">No Strong's number</option>
                   </select>
                 </div>
               </div>
-            }
+              @if (books().length > 0) {
+                <div class="field is-flex is-align-items-center mb-0 mr-4">
+                  <label class="label is-small mb-0 mr-2" for="book-filter">Book</label>
+                  <div class="select is-small">
+                    <select
+                      id="book-filter"
+                      [value]="bookFilter()"
+                      (change)="bookFilter.set($any($event.target).value)"
+                      data-testid="book-filter"
+                    >
+                      <option value="all">All</option>
+                      <option value="none">No book</option>
+                      @for (b of books(); track b.id) {
+                        <option [value]="b.id">{{ b.book }}</option>
+                      }
+                    </select>
+                  </div>
+                </div>
+              }
+              <label class="checkbox is-size-7">
+                <input
+                  type="checkbox"
+                  [checked]="groupWords()"
+                  (change)="groupWords.set($any($event.target).checked)"
+                  data-testid="group-by-word"
+                />
+                Group studies of the same English word
+              </label>
+            </div>
             <div class="table-container">
               <table class="table is-fullwidth is-hoverable" aria-label="Saved studies list">
                 <thead>
                   <tr>
-                    <th scope="col">Word</th>
-                    <th scope="col">Strong's #</th>
-                    <th scope="col">Books</th>
-                    <th scope="col">Last Updated</th>
+                    @for (col of columns; track col.key) {
+                      <th scope="col" [attr.aria-sort]="ariaSort(col.key)">
+                        <button
+                          type="button"
+                          class="button is-ghost p-0 has-text-weight-bold"
+                          (click)="setSort(col.key)"
+                          [attr.data-testid]="'sort-' + col.key"
+                        >
+                          {{ col.label }}<span aria-hidden="true">{{ sortArrow(col.key) }}</span>
+                        </button>
+                      </th>
+                    }
                     <th scope="col"><span class="is-sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (study of visibleStudies(); track study.id) {
-                    <tr data-testid="study-row">
-                      <td data-testid="study-word">{{ firstWord(study) }}</td>
-                      <td data-testid="study-strongs">{{ firstStrongsNumber(study) }}</td>
-                      <td data-testid="study-books">{{ booksFor(study) }}</td>
-                      <td data-testid="study-date">{{ study.updatedAt | date: 'medium' }}</td>
-                      <td>
-                        <div class="buttons are-small">
-                          <button
-                            class="button is-link is-outlined"
-                            (click)="openStudy(study)"
-                            [attr.aria-label]="'Open study for ' + firstWord(study)"
-                            data-testid="open-study-button"
-                          >
-                            Open
-                          </button>
-                          <button
-                            class="button is-danger is-outlined"
-                            (click)="confirmDelete(study)"
-                            [attr.aria-label]="'Delete study for ' + firstWord(study)"
-                            data-testid="delete-study-button"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                  @for (row of rows(); track $index) {
+                    @if (row.kind === 'group') {
+                      <tr class="has-background-light" data-testid="group-row">
+                        <th scope="colgroup" colspan="6">
+                          {{ row.word }}
+                          <span class="has-text-grey has-text-weight-normal">
+                            — {{ row.count }} studies{{
+                              row.strongs.length ? ': ' + row.strongs.join(', ') : ''
+                            }}
+                          </span>
+                        </th>
+                      </tr>
+                    } @else {
+                      <tr data-testid="study-row">
+                        <td data-testid="study-word">{{ firstWord(row.study) }}</td>
+                        <td data-testid="study-strongs">{{ firstStrongsNumber(row.study) }}</td>
+                        <td data-testid="study-language">{{ languageLabel(row.study) }}</td>
+                        <td data-testid="study-books">{{ booksFor(row.study) }}</td>
+                        <td data-testid="study-date">{{ row.study.updatedAt | date: 'medium' }}</td>
+                        <td>
+                          <div class="buttons are-small">
+                            <button
+                              class="button is-link is-outlined"
+                              (click)="openStudy(row.study)"
+                              [attr.aria-label]="'Open study for ' + firstWord(row.study)"
+                              data-testid="open-study-button"
+                            >
+                              Open
+                            </button>
+                            <button
+                              class="button is-danger is-outlined"
+                              (click)="confirmDelete(row.study)"
+                              [attr.aria-label]="'Delete study for ' + firstWord(row.study)"
+                              data-testid="delete-study-button"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    }
                   }
                 </tbody>
               </table>
@@ -200,12 +265,56 @@ export class StudyListComponent implements OnInit {
   readonly books = signal<BookStudy[]>([]);
   readonly bookFilter = signal<BookFilter>('all');
 
-  /** Studies passing the book filter. A study linked to several books passes for each of them. */
+  readonly languageFilter = signal<LanguageFilter>('all');
+  readonly sort = signal<SortState>(DEFAULT_SORT);
+  /** When on, studies of the same English word sit together under a heading. */
+  readonly groupWords = signal(false);
+
+  /** Table columns, in order. */
+  readonly columns: readonly { key: SortKey; label: string }[] = [
+    { key: 'word', label: 'Word' },
+    { key: 'strongs', label: "Strong's #" },
+    { key: 'language', label: 'Language' },
+    { key: 'books', label: 'Books' },
+    { key: 'updated', label: 'Last Updated' },
+  ];
+
+  /** Studies passing the book and language filters, in the chosen order. */
   readonly visibleStudies = computed(() =>
-    this.studies().filter((s) =>
-      matchesBookFilter(s.bookStudyIds ?? [], this.books(), this.bookFilter()),
+    sortStudies(
+      this.studies().filter(
+        (s) =>
+          matchesBookFilter(s.bookStudyIds ?? [], this.books(), this.bookFilter()) &&
+          matchesLanguage(s, this.languageFilter()),
+      ),
+      this.sort(),
+      (s) => bookNames(s.bookStudyIds ?? [], this.books()).replace(/^—$/, ''),
     ),
   );
+
+  /** What the table shows: the studies, optionally grouped under a heading per shared English word. */
+  readonly rows = computed(() =>
+    this.groupWords() ? groupByWord(this.visibleStudies()) : plainRows(this.visibleStudies()),
+  );
+
+  setSort(key: SortKey): void {
+    this.sort.set(nextSort(this.sort(), key));
+  }
+
+  /** The `aria-sort` value for a column header. */
+  ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
+    const s = this.sort();
+    return s.key === key ? (s.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  }
+
+  sortArrow(key: SortKey): string {
+    const s = this.sort();
+    return s.key === key ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  }
+
+  languageLabel(study: StudyWorksheet): string {
+    return LANGUAGE_LABELS[languageOf(study.wordStudies[0]?.strongsNumber)];
+  }
 
   booksFor(study: StudyWorksheet): string {
     return bookNames(study.bookStudyIds ?? [], this.books());
