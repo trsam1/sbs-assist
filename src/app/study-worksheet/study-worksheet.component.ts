@@ -135,8 +135,44 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                           >Free Dictionary API</a
                         >
                       </p>
+                    } @else if (englishDefStatus() === 'error') {
+                      <div
+                        class="notification is-warning is-light"
+                        role="alert"
+                        data-testid="english-def-error"
+                      >
+                        <p>
+                          Couldn't reach the dictionary just now, so there is no definition yet.
+                          Your notes and the rest of the study are not affected.
+                        </p>
+                        <button
+                          type="button"
+                          class="button is-small is-warning mt-2"
+                          (click)="retryEnglishDefinition.emit()"
+                          data-testid="english-def-retry"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    } @else if (englishDefStatus() === 'not-found') {
+                      <p class="has-text-grey" data-testid="english-def-not-found">
+                        The dictionary has no entry for "{{ word() }}". You can still add your own
+                        notes below.
+                      </p>
                     } @else {
-                      <p class="has-text-grey">Definition not available.</p>
+                      <p class="has-text-grey" data-testid="english-def-unavailable">
+                        Definition not available.
+                        @if (word()) {
+                          <button
+                            type="button"
+                            class="button is-small is-light ml-2"
+                            (click)="retryEnglishDefinition.emit()"
+                            data-testid="english-def-retry"
+                          >
+                            Look it up
+                          </button>
+                        }
+                      </p>
                     }
                     <div class="field mt-3">
                       <label class="label is-small" for="step1-notes">Your notes</label>
@@ -643,6 +679,8 @@ export class StudyWorksheetComponent {
   readonly crossReferences = input<CrossReference[] | null>(null);
   readonly englishDefinition = input<EnglishDictionaryResult | null>(null);
   readonly englishDefLoading = input<boolean>(false);
+  /** How the dictionary lookup ended, so a failure can offer a retry. */
+  readonly englishDefStatus = input<'idle' | 'found' | 'not-found' | 'error'>('idle');
   readonly strongsLoading = input<boolean>(false);
   readonly strongsError = input<string | null>(null);
   readonly notes = input<string | null>(null);
@@ -658,6 +696,7 @@ export class StudyWorksheetComponent {
   readonly crossReferenceNoteChange = output<CrossReferenceNoteChange>();
   readonly notesChange = output<string>();
   readonly generateAiSummary = output<void>();
+  readonly retryEnglishDefinition = output<void>();
   readonly saveStudy = output<void>();
   readonly strongsNumberSubmitted = output<StrongsNumberSubmitted>();
   readonly step1NotesChanged = output<string>();

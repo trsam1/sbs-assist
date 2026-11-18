@@ -41,27 +41,39 @@ const EMPTY_RESULT: EnglishDictionaryResult = {
   meanings: [],
 };
 
+/**
+ * The outcome of a dictionary lookup. "Not found" (the word has no entry) is different from "error" (the
+ * dictionary could not be reached or failed), because only the second is worth retrying.
+ */
+export type EnglishLookup =
+  | { status: 'found'; result: EnglishDictionaryResult }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
 @Injectable({ providedIn: 'root' })
 export class EnglishDefinitionService {
   private readonly http = inject(HttpClient);
   private readonly apiUrl = 'https://api.dictionaryapi.dev/api/v2/entries/en';
 
   /**
-   * Fetch the full English dictionary data for a word.
-   * Never throws — returns an empty result on failure.
+   * Look a word up and say what happened: found, no entry, or a failure worth retrying. Never throws.
+   * A 404 from the dictionary means no entry; a network failure, timeout, rate limit or server error is an
+   * error.
    */
-  fetchEnglishDefinition(word: string): Observable<EnglishDictionaryResult> {
+  lookupEnglishDefinition(word: string): Observable<EnglishLookup> {
     const trimmed = word.trim();
     if (!trimmed) {
-      return of(EMPTY_RESULT);
+      return of<EnglishLookup>({ status: 'not-found' });
     }
 
     return this.http
       .get<DictionaryApiEntry[]>(`${this.apiUrl}/${encodeURIComponent(trimmed)}`)
       .pipe(
-        map((entries) => {
+        map((entries): EnglishLookup => {
           const entry = entries?.[0];
-          if (!entry) return EMPTY_RESULT;
+          if (!entry || !Array.isArray(entry.meanings) || entry.meanings.length === 0) {
+            return { status: 'not-found' };
+          }
 
           const phonetic =
             entry.phonetic || entry.phonetics?.find((p) => p.text)?.text || undefined;
@@ -74,9 +86,22 @@ export class EnglishDefinitionService {
             })),
           }));
 
-          return { word: entry.word, phonetic, meanings };
+          return { status: 'found', result: { word: entry.word, phonetic, meanings } };
         }),
-        catchError(() => of(EMPTY_RESULT)),
+        catchError((err: { status?: number }) =>
+          of<EnglishLookup>({ status: err?.status === 404 ? 'not-found' : 'error' }),
+        ),
       );
+  }
+
+  /**
+   * Fetch the full English dictionary data for a word.
+   * Never throws: returns an empty result when there is no entry or the lookup failed. Callers that need
+   * to tell those apart (to offer a retry) use `lookupEnglishDefinition`.
+   */
+  fetchEnglishDefinition(word: string): Observable<EnglishDictionaryResult> {
+    return this.lookupEnglishDefinition(word).pipe(
+      map((lookup) => (lookup.status === 'found' ? lookup.result : EMPTY_RESULT)),
+    );
   }
 }
