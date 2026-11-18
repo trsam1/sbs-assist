@@ -41,6 +41,8 @@ import {
   LearnedState,
   Grade,
 } from './srs';
+import { RecordOutcome } from './coach-plan';
+import { SILENCE_WATCHER, SilenceOptions } from './coach-ports';
 import { reciteDiff, ReciteDiff } from './recite-diff';
 import {
   splitVerses,
@@ -149,6 +151,13 @@ export class MemorizeStore {
   private recordedChunks: Blob[] = [];
   private mediaStream: MediaStream | null = null;
   private recordStopTimer: ReturnType<typeof setTimeout> | null = null;
+  // Audio coaching hooks (see recordAndGrade): who is waiting on the result, a cancel counter for a
+  // recording that is still opening, whether to throw the clip away, and the silence watcher.
+  private readonly watchSilence = inject(SILENCE_WATCHER);
+  private recordWaiter: ((o: RecordOutcome) => void) | null = null;
+  private recordToken = 0;
+  private discardNext = false;
+  private stopSilenceWatch: (() => void) | null = null;
   /** Max recitation length (ms) before recording auto-stops. */
   private static readonly MAX_RECORD_MS = 60_000;
 
@@ -949,13 +958,25 @@ export class MemorizeStore {
   }
 
   /** Begin recording the recitation. On any failure, degrade to manual grading. */
-  async startRecording(): Promise<void> {
-    if (!this.recordingSupported()) return;
-    if (this.gradeTarget() === 'test' && this.deckComplete()) return;
+  async startRecording(opts?: { autoStop?: Partial<SilenceOptions> }): Promise<void> {
+    if (!this.recordingSupported()) {
+      this.settleRecord({ kind: 'unavailable' });
+      return;
+    }
+    if (this.gradeTarget() === 'test' && this.deckComplete()) {
+      this.settleRecord({ kind: 'unavailable' });
+      return;
+    }
     this.testError.set(false);
     this.gradeResult.set(null);
+    const token = ++this.recordToken;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (token !== this.recordToken) {
+        // Cancelled while the permission prompt or device was opening: let go of the microphone.
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
       this.mediaStream = stream;
       this.recordedChunks = [];
       const recorder = new MediaRecorder(stream);
@@ -968,16 +989,24 @@ export class MemorizeStore {
       this.testPhase.set('recording');
       // Safety cap: auto-stop a runaway recording.
       this.recordStopTimer = setTimeout(() => this.stopRecording(), MemorizeStore.MAX_RECORD_MS);
+      if (opts?.autoStop) {
+        // Audio coaching: end the recording when the student goes quiet, or give up if they never start.
+        this.stopSilenceWatch = this.watchSilence(stream, opts.autoStop, (why) =>
+          why === 'silence' ? this.stopRecording() : this.discardRecording(),
+        );
+      }
     } catch {
       // Permission denied / no device: fall back to manual grading for this card.
       this.teardownStream();
       this.testError.set(true);
       this.testPhase.set('idle');
+      this.settleRecord({ kind: 'unavailable' });
     }
   }
 
   /** Stop recording; the recorder's onstop handler runs the grade flow. */
   stopRecording(): void {
+    this.endSilenceWatch();
     if (this.recordStopTimer) {
       clearTimeout(this.recordStopTimer);
       this.recordStopTimer = null;
@@ -987,6 +1016,58 @@ export class MemorizeStore {
     }
   }
 
+  /** Stop recording and throw the clip away: nothing is graded. */
+  discardRecording(): void {
+    this.discardNext = true;
+    this.stopRecording();
+  }
+
+  /**
+   * Audio coaching: listen to one recitation and grade it. Resolves with what happened. The grade is
+   * applied exactly as in Test mode's Drive mode (auto-commit); the result is returned first, before the
+   * deck moves on, so it can be spoken.
+   */
+  recordAndGrade(autoStop: Partial<SilenceOptions>): Promise<RecordOutcome> {
+    return new Promise<RecordOutcome>((resolve) => {
+      this.settleRecord({ kind: 'unavailable' }); // a stale waiter never hangs
+      this.recordWaiter = resolve;
+      void this.startRecording({ autoStop });
+    });
+  }
+
+  /** Stop an in-progress coached recording without grading it. Safe to call at any time. */
+  cancelCoachedRecording(): void {
+    if (!this.recordWaiter && !this.mediaRecorder) return; // nothing coached is in progress
+    this.recordToken += 1; // a recording still opening will release the microphone when it arrives
+    this.recordWaiter = null;
+    this.endSilenceWatch();
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.discardNext = true;
+      this.stopRecording();
+    } else {
+      this.teardownStream();
+      this.testPhase.set('idle');
+    }
+  }
+
+  /** Drop the current Test card without grading it and move to the next. */
+  skipCurrentCard(): void {
+    if (this.deckComplete()) return;
+    this.advanceDeck();
+    this.resetTestCard();
+  }
+
+  private settleRecord(outcome: RecordOutcome): void {
+    const waiter = this.recordWaiter;
+    this.recordWaiter = null;
+    waiter?.(outcome);
+  }
+
+  private endSilenceWatch(): void {
+    this.stopSilenceWatch?.();
+    this.stopSilenceWatch = null;
+  }
+
   /** Assemble the clip and send it for grading. */
   private onRecordingStopped(): void {
     this.teardownStream();
@@ -994,9 +1075,16 @@ export class MemorizeStore {
     const clip = new Blob(this.recordedChunks, { type });
     this.recordedChunks = [];
     this.mediaRecorder = null;
+    if (this.discardNext) {
+      this.discardNext = false;
+      this.testPhase.set('idle');
+      this.settleRecord({ kind: 'silent' });
+      return;
+    }
     if (clip.size === 0) {
       this.testError.set(true);
       this.testPhase.set('idle');
+      this.settleRecord({ kind: 'silent' });
       return;
     }
     this.gradeClip(clip);
@@ -1012,6 +1100,8 @@ export class MemorizeStore {
       next: (result) => {
         this.gradeResult.set(result);
         this.testPhase.set('graded');
+        // Hand the result to a coached session before the grade commits and the deck moves on.
+        this.settleRecord({ kind: 'graded', result });
         if (learning) {
           // Learn: show the result only. It never writes the SM-2 schedule.
           this.learnRevealed.set(true);
@@ -1027,6 +1117,7 @@ export class MemorizeStore {
         this.testError.set(true);
         this.gradeResult.set(null);
         this.testPhase.set('graded');
+        this.settleRecord({ kind: 'failed' });
         if (learning) this.learnRevealed.set(true);
       },
     });

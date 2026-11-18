@@ -1,14 +1,26 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter } from '@angular/router';
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { MemorizeViewComponent } from './memorize-view.component';
 import { MemorizeStore } from './memorize-store';
+import { SILENCE_WATCHER } from './coach-ports';
 import { ScrollStudy, ScrollStudyService } from '../scroll-study.service';
 import { MemorizationStudyService } from '../memorization-study.service';
 import { RecitationGradeService } from '../recitation-grade.service';
 import { OutlineStudyService } from '../outline-study.service';
 import { MemorizationChunk, MemorizationStudy, OutlineStudy, OutlineParagraph } from '../models';
+
+// Audio coaching listens for silence through the microphone; capture the callback so a test can fire it.
+const silenceHandlers: ((why: 'silence' | 'no-speech') => void)[] = [];
+const fakeWatchSilence = (
+  _stream: unknown,
+  _opts: unknown,
+  cb: (why: 'silence' | 'no-speech') => void,
+): (() => void) => {
+  silenceHandlers.push(cb);
+  return () => undefined;
+};
 
 // A scroll whose text carries verse markers 1,2,3 — the boundaries the by-verses seed walks.
 const SCROLL_TEXT = '1 In the beginning. 2 And the earth was formless. 3 Let there be light.';
@@ -106,6 +118,7 @@ describe('MemorizeViewComponent', () => {
       imports: [MemorizeViewComponent],
       providers: [
         provideRouter([]),
+        { provide: SILENCE_WATCHER, useValue: fakeWatchSilence },
         { provide: ScrollStudyService, useValue: scrollService },
         { provide: MemorizationStudyService, useValue: studyService },
         { provide: OutlineStudyService, useValue: outlineService },
@@ -1230,6 +1243,168 @@ describe('MemorizeViewComponent', () => {
       store.setViewMode('learn');
       fixture.detectChanges();
       expect(query('[data-testid="learn-no-chunks"]')).toBeTruthy();
+    });
+  });
+
+  describe('coached recording (audio coaching)', () => {
+    class FakeRecorder {
+      static last: FakeRecorder | null = null;
+      state: 'inactive' | 'recording' = 'inactive';
+      mimeType = 'audio/webm';
+      ondataavailable: ((e: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      constructor(public stream: unknown) {
+        FakeRecorder.last = this;
+      }
+      start(): void {
+        this.state = 'recording';
+      }
+      stop(): void {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['audio-bytes']) });
+        this.onstop?.();
+      }
+    }
+
+    let tracksStopped: number;
+    let getUserMedia: ReturnType<typeof vi.fn>;
+    const realMediaRecorder = (globalThis as { MediaRecorder?: unknown }).MediaRecorder;
+    const realDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+
+    const TODAY = new Date(2026, 10, 2);
+
+    function enterCoachedTest(): void {
+      configure();
+      getScrollSpy.mockReturnValue(of(makeScroll()));
+      getStudySpy.mockReturnValue(
+        of(makeStudy({ chunks: [chunk({ verseRef: '1', dueDate: '' })] })),
+      );
+      fixture.detectChanges();
+      store.setToday(TODAY);
+      store.setViewMode('test');
+      fixture.detectChanges();
+    }
+
+    beforeEach(() => {
+      silenceHandlers.length = 0;
+      tracksStopped = 0;
+      FakeRecorder.last = null;
+      (globalThis as { MediaRecorder?: unknown }).MediaRecorder = FakeRecorder;
+      getUserMedia = vi.fn(() =>
+        Promise.resolve({
+          getTracks: () => [{ stop: () => (tracksStopped += 1) }],
+        }),
+      );
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia },
+      });
+    });
+
+    afterEach(() => {
+      (globalThis as { MediaRecorder?: unknown }).MediaRecorder = realMediaRecorder;
+      if (realDevices) Object.defineProperty(navigator, 'mediaDevices', realDevices);
+      else delete (navigator as unknown as Record<string, unknown>)['mediaDevices'];
+    });
+
+    const flushPromises = () => new Promise<void>((r) => setTimeout(r, 0));
+
+    it('listens, grades, and hands the result back before the card commits', async () => {
+      enterCoachedTest();
+      store.setTestDriveMode('drive');
+      const deckBefore = store.deckPos();
+      const outcome = store.recordAndGrade({ silenceMs: 2500 });
+      await flushPromises();
+      expect(store.testPhase()).toBe('recording');
+      expect(silenceHandlers.length).toBe(1);
+
+      silenceHandlers[0]('silence'); // the student went quiet: stop and grade
+      const result = await outcome;
+      expect(result.kind).toBe('graded');
+      expect(gradeRecitationSpy).toHaveBeenCalledTimes(1);
+      // Drive mode auto-committed the grade and moved on, exactly as it does without the coach.
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(store.deckPos()).toBe(deckBefore + 1);
+    });
+
+    it('gives up without grading when the student never starts speaking', async () => {
+      enterCoachedTest();
+      const outcome = store.recordAndGrade({});
+      await flushPromises();
+      silenceHandlers[0]('no-speech');
+      expect(await outcome).toEqual({ kind: 'silent' });
+      expect(gradeRecitationSpy).not.toHaveBeenCalled();
+      expect(store.testPhase()).toBe('idle');
+      expect(tracksStopped).toBe(1); // the microphone was released
+    });
+
+    it('reports an unavailable microphone when permission is denied', async () => {
+      enterCoachedTest();
+      getUserMedia.mockReturnValueOnce(Promise.reject(new Error('denied')));
+      const outcome = store.recordAndGrade({});
+      expect(await outcome).toEqual({ kind: 'unavailable' });
+      expect(store.testError()).toBe(true);
+    });
+
+    it('reports unavailable when the browser cannot record', async () => {
+      enterCoachedTest();
+      vi.spyOn(store, 'recordingSupported').mockReturnValue(false);
+      expect(await store.recordAndGrade({})).toEqual({ kind: 'unavailable' });
+    });
+
+    it('reports failed, and leaves the card for manual grading, when the grade service errors', async () => {
+      enterCoachedTest();
+      gradeRecitationSpy.mockReturnValueOnce(throwError(() => new Error('down')));
+      const outcome = store.recordAndGrade({});
+      await flushPromises();
+      silenceHandlers[0]('silence');
+      expect(await outcome).toEqual({ kind: 'failed' });
+      expect(store.testError()).toBe(true);
+      expect(saveSpy).not.toHaveBeenCalled();
+    });
+
+    it('releases the microphone if the session is cancelled while it is still opening', async () => {
+      enterCoachedTest();
+      void store.recordAndGrade({});
+      store.cancelCoachedRecording(); // before getUserMedia has resolved
+      await flushPromises();
+      expect(FakeRecorder.last).toBeNull(); // never started a recorder
+      expect(tracksStopped).toBe(1);
+    });
+
+    it('cancelling a live coached recording throws the clip away without grading', async () => {
+      enterCoachedTest();
+      void store.recordAndGrade({});
+      await flushPromises();
+      store.cancelCoachedRecording();
+      await flushPromises();
+      expect(gradeRecitationSpy).not.toHaveBeenCalled();
+      expect(store.testPhase()).toBe('idle');
+      expect(tracksStopped).toBe(1);
+    });
+
+    it('does nothing when no coached recording is in progress', () => {
+      enterCoachedTest();
+      store.cancelCoachedRecording();
+      expect(store.testPhase()).toBe('idle');
+    });
+
+    it('skipCurrentCard moves on without grading', () => {
+      enterCoachedTest();
+      const pos = store.deckPos();
+      store.skipCurrentCard();
+      expect(store.deckPos()).toBe(pos + 1);
+      expect(saveSpy).not.toHaveBeenCalled();
+    });
+
+    it('leaves the ordinary Record button alone: no waiter, no silence watching', async () => {
+      enterCoachedTest();
+      await store.startRecording();
+      expect(store.testPhase()).toBe('recording');
+      expect(silenceHandlers.length).toBe(0);
+      store.stopRecording();
+      await flushPromises();
+      expect(gradeRecitationSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
