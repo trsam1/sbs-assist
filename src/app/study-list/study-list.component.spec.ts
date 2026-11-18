@@ -480,4 +480,163 @@ describe('StudyListComponent', () => {
       expect(queryAll('[data-testid="study-row"]').length).toBe(1);
     });
   });
+
+  describe('sorting, language and grouping (issues #3, #5, #6)', () => {
+    const entry = (word: string, strongs: string) => ({
+      word,
+      strongsNumber: strongs,
+      englishDefinition: null,
+      strongsDefinition: '',
+      originalWord: '',
+      transliteration: '',
+      lexiconEntry: '',
+      crossReferences: [],
+      aiSummary: '',
+      notes: '',
+      definitionNotes: '',
+      strongsNotes: '',
+      lexiconNotes: '',
+    });
+    const mk = (id: string, word: string, strongs: string, updatedAt: string) =>
+      makeStudy({ id, updatedAt, wordStudies: [entry(word, strongs)] });
+
+    // Arrives newest first, as the API returns it.
+    const LIST = () => [
+      mk('s1', 'love', 'G25', '2026-05-04T00:00:00.000Z'),
+      mk('s2', 'mercy', 'H2617', '2026-05-03T00:00:00.000Z'),
+      mk('s3', 'Love', 'G5368', '2026-05-02T00:00:00.000Z'),
+      mk('s4', 'faith', 'G4102', '2026-05-01T00:00:00.000Z'),
+      mk('s5', 'peace', '', '2026-04-30T00:00:00.000Z'),
+    ];
+
+    function load(): void {
+      fixture.detectChanges();
+      httpTesting = getHttpTesting();
+      httpTesting.expectOne(`${environment.apiUrl}/studies`).flush(LIST());
+      httpTesting.expectOne(`${environment.apiUrl}/books`).flush([]);
+      fixture.detectChanges();
+    }
+
+    const words = () => queryAll('[data-testid="study-word"]').map((e) => e.textContent?.trim());
+    const click = (id: string) => {
+      (query(`[data-testid="${id}"]`) as HTMLElement).click();
+      fixture.detectChanges();
+    };
+
+    it("shows each study's language from its Strong's number", () => {
+      load();
+      const langs = queryAll('[data-testid="study-language"]').map((e) => e.textContent?.trim());
+      expect(langs).toEqual(['Greek', 'Hebrew', 'Greek', 'Greek', '—']);
+    });
+
+    it("filters to Greek, Hebrew, or studies with no Strong's number", () => {
+      load();
+      const pick = (v: string) => {
+        const sel = query('[data-testid="language-filter"]') as HTMLSelectElement;
+        sel.value = v;
+        sel.dispatchEvent(new Event('change'));
+        fixture.detectChanges();
+      };
+      pick('hebrew');
+      expect(words()).toEqual(['mercy']);
+      pick('greek');
+      expect(words()).toEqual(['love', 'Love', 'faith']);
+      pick('none');
+      expect(words()).toEqual(['peace']);
+      pick('all');
+      expect(words().length).toBe(5);
+      expect(query('[data-testid="study-count"]')?.textContent).toContain('5 study');
+    });
+
+    it('starts newest first and marks that column as sorted', () => {
+      load();
+      expect(words()).toEqual(['love', 'mercy', 'Love', 'faith', 'peace']);
+      const th = query('[data-testid="sort-updated"]')?.closest('th');
+      expect(th?.getAttribute('aria-sort')).toBe('descending');
+    });
+
+    it('sorts by word when its header is pressed, and reverses on a second press', () => {
+      load();
+      click('sort-word');
+      expect(words()).toEqual(['faith', 'love', 'Love', 'mercy', 'peace']);
+      expect(query('[data-testid="sort-word"]')?.closest('th')?.getAttribute('aria-sort')).toBe(
+        'ascending',
+      );
+      expect(query('[data-testid="sort-word"]')?.textContent).toContain('▲');
+
+      click('sort-word');
+      expect(words()).toEqual(['peace', 'mercy', 'love', 'Love', 'faith']);
+      expect(query('[data-testid="sort-word"]')?.closest('th')?.getAttribute('aria-sort')).toBe(
+        'descending',
+      );
+    });
+
+    it("sorts Strong's numbers by number, not as text", () => {
+      load();
+      click('sort-strongs');
+      const nums = queryAll('[data-testid="study-strongs"]').map((e) => e.textContent?.trim());
+      expect(nums).toEqual(['G25', 'G4102', 'G5368', 'H2617', '']);
+    });
+
+    it('sorts by language', () => {
+      load();
+      click('sort-language');
+      const langs = queryAll('[data-testid="study-language"]').map((e) => e.textContent?.trim());
+      expect(langs).toEqual(['Greek', 'Greek', 'Greek', 'Hebrew', '—']);
+    });
+
+    it('only the sorted column has aria-sort set', () => {
+      load();
+      click('sort-word');
+      const sorted = queryAll('th[aria-sort]').filter(
+        (t) => t.getAttribute('aria-sort') !== 'none',
+      );
+      expect(sorted.length).toBe(1);
+    });
+
+    it('groups studies of the same English word under a heading, ignoring case', () => {
+      load();
+      click('group-by-word');
+      const rows = queryAll('[data-testid="group-row"], [data-testid="study-row"]').map((r) =>
+        r.getAttribute('data-testid') === 'group-row'
+          ? `group: ${r.textContent?.replace(/\s+/g, ' ').trim()}`
+          : r.querySelector('[data-testid="study-word"]')?.textContent?.trim(),
+      );
+      expect(rows).toEqual([
+        'group: love — 2 studies: G25, G5368',
+        'love',
+        'Love',
+        'mercy',
+        'faith',
+        'peace',
+      ]);
+    });
+
+    it('gives no heading to a word with a single study, and ungrouping brings the old order back', () => {
+      load();
+      click('group-by-word');
+      expect(queryAll('[data-testid="group-row"]').length).toBe(1);
+      click('group-by-word');
+      expect(queryAll('[data-testid="group-row"]').length).toBe(0);
+      expect(words()).toEqual(['love', 'mercy', 'Love', 'faith', 'peace']);
+    });
+
+    it('grouping follows the chosen sort and the language filter', () => {
+      load();
+      click('sort-word');
+      click('group-by-word');
+      const first = query('[data-testid="group-row"], [data-testid="study-row"]');
+      expect(first?.getAttribute('data-testid')).toBe('study-row'); // faith comes first and is alone
+      expect(first?.textContent).toContain('faith');
+    });
+
+    it('still opens and deletes from a grouped list', () => {
+      load();
+      click('group-by-word');
+      const router = TestBed.inject(Router);
+      const nav = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+      (queryAll('[data-testid="open-study-button"]')[0] as HTMLElement).click();
+      expect(nav).toHaveBeenCalledWith(['/study', 's1']);
+    });
+  });
 });
