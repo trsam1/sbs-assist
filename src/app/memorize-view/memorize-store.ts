@@ -857,6 +857,77 @@ export class MemorizeStore {
     this.learnFillRevealed.update((r) => !r);
   }
 
+  // --- Fill stage: typed answers ---
+
+  /** Answers are kept per chunk, verse and blank size: changing any of them starts a clean slate. */
+  private readonly learnFillKey = computed(
+    () => `${this.learnIndex()}:${this.learnProgress().unlocked}:${this.clozeN()}`,
+  );
+  private readonly learnFillState = signal<{
+    key: string;
+    typed: Record<number, string>;
+    result: Record<number, boolean>;
+  }>({ key: '', typed: {}, result: {} });
+
+  /** What the student typed into each blank, by token index. */
+  readonly learnFillTyped = computed(() => {
+    const s = this.learnFillState();
+    return s.key === this.learnFillKey() ? s.typed : {};
+  });
+
+  /** Right or wrong for each blank that has been checked, by token index. */
+  readonly learnFillResult = computed<Record<number, boolean>>(() => {
+    const s = this.learnFillState();
+    return s.key === this.learnFillKey() ? s.result : {};
+  });
+
+  /** Blank numbers (1-based) by token index, for the "Blank 3 of 9" labels. */
+  readonly learnFillBlankNumbers = computed(() => {
+    const numbers: Record<number, number> = {};
+    let n = 0;
+    this.learnFillTokens().forEach((t, i) => {
+      if (t.blank) numbers[i] = ++n;
+    });
+    return numbers;
+  });
+
+  /** How many blanks there are, and how many were right the last time the student checked. */
+  readonly learnFillScore = computed(() => {
+    const result = this.learnFillResult();
+    const checked = Object.keys(result).length > 0;
+    return {
+      total: this.learnFillTokens().filter((t) => t.blank).length,
+      correct: Object.values(result).filter(Boolean).length,
+      checked,
+    };
+  });
+
+  learnFillTypedAt(index: number): string {
+    return this.learnFillTyped()[index] ?? '';
+  }
+
+  /** Record a typed answer. Editing a blank clears its right-or-wrong mark until the next check. */
+  setLearnFillTyped(index: number, value: string): void {
+    const key = this.learnFillKey();
+    this.learnFillState.update((s) => {
+      const base = s.key === key ? s : { key, typed: {}, result: {} };
+      const result = { ...base.result };
+      delete result[index];
+      return { key, typed: { ...base.typed, [index]: value }, result };
+    });
+  }
+
+  /** Mark every blank right or wrong against the verse. Entirely client-side; answers stay hidden. */
+  checkLearnFill(): void {
+    const key = this.learnFillKey();
+    const typed = this.learnFillTyped();
+    const result: Record<number, boolean> = {};
+    this.learnFillTokens().forEach((tok, i) => {
+      if (tok.blank) result[i] = clozeMatches(typed[i] ?? '', tok.text);
+    });
+    this.learnFillState.update((s) => ({ key, typed: s.key === key ? s.typed : {}, result }));
+  }
+
   revealLearn(): void {
     this.learnRevealed.set(true);
   }

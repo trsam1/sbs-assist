@@ -1091,6 +1091,128 @@ describe('MemorizeViewComponent', () => {
       expect(store.viewMode()).toBe('edit');
     });
 
+    describe('Fill stage with typed answers', () => {
+      function enterFill(): void {
+        loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
+        store.setClozeN(2); // verse 2: "And [the] earth [was] formless."
+        store.setLearnStage('fill');
+        fixture.detectChanges();
+      }
+
+      const inputs = () =>
+        Array.from(
+          fixture.nativeElement.querySelectorAll('[data-testid="learn-fill-input"]'),
+        ) as HTMLInputElement[];
+
+      function type(i: number, value: string): void {
+        const el = inputs()[i];
+        el.value = value;
+        el.dispatchEvent(new Event('input'));
+        fixture.detectChanges();
+      }
+
+      it('shows a text box for each blank, labeled by number', () => {
+        enterFill();
+        expect(inputs().length).toBe(2);
+        expect(inputs()[0].getAttribute('aria-label')).toBe('Blank 1 of 2');
+        expect(inputs()[1].getAttribute('aria-label')).toBe('Blank 2 of 2');
+      });
+
+      it('marks right answers green and wrong ones red when checked, ignoring case and punctuation', () => {
+        enterFill();
+        type(0, 'The');
+        type(1, 'is');
+        (query('[data-testid="learn-fill-check"]') as HTMLButtonElement).click();
+        fixture.detectChanges();
+        expect(inputs()[0].classList.contains('is-success')).toBe(true);
+        expect(inputs()[1].classList.contains('is-danger')).toBe(true);
+        expect(inputs()[1].getAttribute('aria-invalid')).toBe('true');
+        expect(query('[data-testid="learn-fill-score"]')?.textContent).toContain('1 of 2 correct');
+      });
+
+      it('says all correct without the "fix" hint', () => {
+        enterFill();
+        type(0, 'the');
+        type(1, 'WAS');
+        (query('[data-testid="learn-fill-check"]') as HTMLButtonElement).click();
+        fixture.detectChanges();
+        const text = query('[data-testid="learn-fill-score"]')?.textContent ?? '';
+        expect(text).toContain('2 of 2 correct');
+        expect(text).not.toContain('fix');
+      });
+
+      it('checks when Enter is pressed in a blank', () => {
+        enterFill();
+        type(0, 'the');
+        inputs()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        fixture.detectChanges();
+        expect(inputs()[0].classList.contains('is-success')).toBe(true);
+      });
+
+      it("clears a blank's mark as soon as it is edited", () => {
+        enterFill();
+        type(0, 'nope');
+        store.checkLearnFill();
+        fixture.detectChanges();
+        expect(inputs()[0].classList.contains('is-danger')).toBe(true);
+        type(0, 'th');
+        expect(inputs()[0].classList.contains('is-danger')).toBe(false);
+        expect(query('[data-testid="learn-fill-score"]')).toBeTruthy(); // the other blank is still checked
+      });
+
+      it('keeps what was typed when the student moves to another stage and back', () => {
+        enterFill();
+        type(0, 'the');
+        store.setLearnStage('read');
+        store.setLearnStage('fill');
+        fixture.detectChanges();
+        expect(inputs()[0].value).toBe('the');
+      });
+
+      it('starts clean when the blank size changes or a new verse is unlocked', () => {
+        enterFill();
+        type(0, 'the');
+        store.checkLearnFill();
+        store.setClozeN(3);
+        fixture.detectChanges();
+        expect(store.learnFillScore().checked).toBe(false);
+        expect(inputs().every((i) => i.value === '')).toBe(true);
+
+        store.setClozeN(2);
+        type(0, 'the');
+        store.learnUnlockNext();
+        fixture.detectChanges();
+        expect(store.learnFillTyped()).toEqual({});
+      });
+
+      it('Show answers replaces the boxes with the words, and nothing is graded or saved', () => {
+        enterFill();
+        type(0, 'the');
+        (query('[data-testid="learn-fill-reveal"]') as HTMLButtonElement).click();
+        fixture.detectChanges();
+        expect(inputs().length).toBe(0);
+        const text = query('[data-testid="learn-fill-text"]')?.textContent ?? '';
+        expect(text).toContain('the');
+        expect(text).toContain('was');
+        expect(saveSpy).not.toHaveBeenCalled();
+      });
+
+      it('counts empty blanks as wrong when checked', () => {
+        enterFill();
+        store.checkLearnFill();
+        fixture.detectChanges();
+        expect(store.learnFillScore()).toEqual({ total: 2, correct: 0, checked: true });
+      });
+
+      it('typing never changes Learn progress', () => {
+        enterFill();
+        const before = store.learnProgress();
+        type(0, 'the');
+        store.checkLearnFill();
+        expect(store.learnProgress()).toEqual(before);
+      });
+    });
+
     it('moves Read to Fill to Recite and hides the cumulative range until revealed', () => {
       loadLearn([chunk({ ...ALL, learn: { unlocked: 2, learned: 1, done: false } })]);
       fixture.detectChanges();
