@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
 import { MemorizeCoach } from './memorize-coach';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeTest } from './memorize-test.service';
 
 /**
  * The start button for audio coaching plus the coach's settings. Used in the Learn pane ("Coach me") and the
@@ -32,7 +33,7 @@ import { MemorizeStore } from './memorize-store';
             type="button"
             class="button is-link"
             [disabled]="
-              coach.mode() !== 'off' || store.deckComplete() || !store.recordingSupported()
+              coach.mode() !== 'off' || store.deckComplete() || !test.recordingSupported()
             "
             (click)="coach.startTest()"
             data-testid="coach-start-test"
@@ -127,5 +128,6 @@ import { MemorizeStore } from './memorize-store';
 export class MemorizeCoachControlsComponent {
   readonly coach = inject(MemorizeCoach);
   readonly store = inject(MemorizeStore);
+  readonly test = inject(MemorizeTest);
   readonly kind = input.required<'learn' | 'test'>();
 }

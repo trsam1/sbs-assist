@@ -28,6 +28,7 @@ import {
 import { CoachPorts, CoachRunner } from './coach-runner';
 import { rangeText } from './learn';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeTest } from './memorize-test.service';
 
 /** The browser pieces a coaching session uses, behind one seam so tests can replace all of them. */
 export interface CoachPlatform {
@@ -69,6 +70,7 @@ const NO_SPEECH_MS = 12_000;
 @Injectable()
 export class MemorizeCoach implements OnDestroy {
   private readonly store = inject(MemorizeStore);
+  private readonly test = inject(MemorizeTest);
 
   private readonly platform = inject(COACH_PLATFORM)({
     rate: () => this.prefs().rate,
@@ -206,7 +208,7 @@ export class MemorizeCoach implements OnDestroy {
       this.notice.set('There is nothing to test right now.');
       return;
     }
-    if (!this.store.recordingSupported()) {
+    if (!this.test.recordingSupported()) {
       this.notice.set('This browser cannot record, so Test coach is not available.');
       return;
     }
@@ -266,8 +268,8 @@ export class MemorizeCoach implements OnDestroy {
       cancelSpeech: () => this.platform.speaker.cancel(),
       tone: () => this.platform.tone(),
       record: () =>
-        this.store.recordAndGrade({ silenceMs: this.prefs().silenceMs, noSpeechMs: NO_SPEECH_MS }),
-      cancelRecord: () => this.store.cancelCoachedRecording(),
+        this.test.recordAndGrade({ silenceMs: this.prefs().silenceMs, noSpeechMs: NO_SPEECH_MS }),
+      cancelRecord: () => this.test.cancelCoachedRecording(),
     };
   }
 
@@ -294,7 +296,7 @@ export class MemorizeCoach implements OnDestroy {
 
       // The student skipped the listening step: drop this card without grading it.
       if (outcome === null) {
-        this.store.skipCurrentCard();
+        this.test.skipCurrentCard();
         continue;
       }
 
@@ -312,10 +314,10 @@ export class MemorizeCoach implements OnDestroy {
         this.finish('The microphone is not available, so Test coach stopped.');
         return 'no-mic';
       }
-      if (outcome.kind === 'failed') this.store.skipCurrentCard();
-      if (outcome.kind === 'silent' && attempts >= 2) this.store.skipCurrentCard();
+      if (outcome.kind === 'failed') this.test.skipCurrentCard();
+      if (outcome.kind === 'silent' && attempts >= 2) this.test.skipCurrentCard();
       if (again && this.store.againMode() === 'now' && attempts >= MAX_ATTEMPTS_PER_CARD) {
-        this.store.skipCurrentCard();
+        this.test.skipCurrentCard();
       }
 
       // A pause before the next card; "Hear it" reads the verse back during it.

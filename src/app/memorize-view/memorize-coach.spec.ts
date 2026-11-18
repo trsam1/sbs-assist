@@ -10,6 +10,7 @@ import {
   MemorizeCoach,
 } from './memorize-coach';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeTest } from './memorize-test.service';
 
 const graded = (grade: RecitationGradeResult['grade'], missed: string[] = []): RecordOutcome => ({
   kind: 'graded',
@@ -43,6 +44,9 @@ function fakeStore() {
       calls.push(`drive:${m}`);
       store.testDriveMode.set(m);
     },
+  };
+  // Recording and grading live on their own service (`MemorizeTest`); the coach calls it directly.
+  const test = {
     recordingSupported: () => true,
     recordAndGrade: vi.fn((): Promise<RecordOutcome> => {
       calls.push('record');
@@ -60,6 +64,7 @@ function fakeStore() {
   };
   return {
     store,
+    test,
     calls,
     outcomes,
     setCard: (n: number) => (card = n),
@@ -97,6 +102,7 @@ describe('MemorizeCoach', () => {
       providers: [
         MemorizeCoach,
         { provide: MemorizeStore, useValue: fs.store },
+        { provide: MemorizeTest, useValue: fs.test },
         { provide: COACH_PLATFORM, useValue: () => fp.platform },
       ],
     });
@@ -147,7 +153,7 @@ describe('MemorizeCoach', () => {
       const started = coach.startLearn();
       await settle();
       await started;
-      expect(fs.store.recordAndGrade).not.toHaveBeenCalled();
+      expect(fs.test.recordAndGrade).not.toHaveBeenCalled();
       expect(fs.calls.filter((c) => c !== 'cancelRecord')).toEqual([]);
     });
 
@@ -260,11 +266,11 @@ describe('MemorizeCoach', () => {
       fs.setTotal(1);
       for (let i = 0; i < MAX_ATTEMPTS_PER_CARD; i += 1) fs.outcomes.push(graded('again', ['x']));
       await runTest();
-      expect(fs.store.recordAndGrade).toHaveBeenCalledTimes(MAX_ATTEMPTS_PER_CARD);
+      expect(fs.test.recordAndGrade).toHaveBeenCalledTimes(MAX_ATTEMPTS_PER_CARD);
       expect(fp.log.filter((t) => t.includes('Try again.'))).toHaveLength(
         MAX_ATTEMPTS_PER_CARD - 1,
       );
-      expect(fs.store.skipCurrentCard).toHaveBeenCalledTimes(1);
+      expect(fs.test.skipCurrentCard).toHaveBeenCalledTimes(1);
     });
 
     it('does not repeat an "Again" card when it will be re-queued for later', async () => {
@@ -280,10 +286,10 @@ describe('MemorizeCoach', () => {
       fs.setTotal(1);
       fs.outcomes.push({ kind: 'silent' }, { kind: 'silent' });
       await runTest();
-      expect(fs.store.recordAndGrade).toHaveBeenCalledTimes(2);
+      expect(fs.test.recordAndGrade).toHaveBeenCalledTimes(2);
       expect(fp.log).toContain("I didn't hear anything.");
       expect(fp.log).toContain("I didn't hear anything. Moving on.");
-      expect(fs.store.skipCurrentCard).toHaveBeenCalledTimes(1);
+      expect(fs.test.skipCurrentCard).toHaveBeenCalledTimes(1);
     });
 
     it('skips a card whose grading failed, and says so', async () => {
@@ -292,7 +298,7 @@ describe('MemorizeCoach', () => {
       fs.outcomes.push({ kind: 'failed' });
       await runTest();
       expect(fp.log).toContain("I couldn't check that one. Moving on.");
-      expect(fs.store.skipCurrentCard).toHaveBeenCalledTimes(1);
+      expect(fs.test.skipCurrentCard).toHaveBeenCalledTimes(1);
     });
 
     it('stops with a notice when the microphone is unavailable', async () => {
@@ -301,7 +307,7 @@ describe('MemorizeCoach', () => {
       await runTest();
       expect(coach.mode()).toBe('off');
       expect(coach.notice()).toContain('microphone');
-      expect(fs.store.recordAndGrade).toHaveBeenCalledTimes(1);
+      expect(fs.test.recordAndGrade).toHaveBeenCalledTimes(1);
     });
 
     it('reads the verse back on "Hear it"', async () => {
@@ -329,7 +335,7 @@ describe('MemorizeCoach', () => {
 
       TestBed.resetTestingModule();
       setup();
-      fs.store.recordingSupported = () => false;
+      fs.test.recordingSupported = () => false;
       fs.store.viewMode.set('test');
       await coach.startTest();
       expect(coach.notice()).toContain('cannot record');

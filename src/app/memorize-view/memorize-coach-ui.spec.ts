@@ -6,6 +6,7 @@ import { MemorizeCoach, CoachMode } from './memorize-coach';
 import { MemorizeCoachBarComponent } from './memorize-coach-bar.component';
 import { MemorizeCoachControlsComponent } from './memorize-coach-controls.component';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeTest } from './memorize-test.service';
 
 function fakeCoach(over: { supported?: boolean; mode?: CoachMode } = {}) {
   return {
@@ -33,7 +34,6 @@ function fakeCoach(over: { supported?: boolean; mode?: CoachMode } = {}) {
 const fakeStore = (over: { chunk?: boolean; deckDone?: boolean; rec?: boolean } = {}) => ({
   learnChunk: () => (over.chunk === false ? null : { verseRef: '1:1' }),
   deckComplete: () => over.deckDone ?? false,
-  recordingSupported: () => over.rec ?? true,
 });
 
 describe('MemorizeCoachBarComponent', () => {
@@ -134,6 +134,7 @@ describe('MemorizeCoachControlsComponent', () => {
       providers: [
         { provide: MemorizeCoach, useValue: coach },
         { provide: MemorizeStore, useValue: fakeStore(storeOver) },
+        { provide: MemorizeTest, useValue: { recordingSupported: () => storeOver.rec ?? true } },
       ],
     });
     const fixture = TestBed.createComponent(HostComponent);
