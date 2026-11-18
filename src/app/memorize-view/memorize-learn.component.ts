@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeCoachControlsComponent } from './memorize-coach-controls.component';
 import { MEMORIZE_STYLES } from './memorize-styles';
 
 /** The Learn pane of the Memorize page. Reads and drives the page's `MemorizeStore`. */
 @Component({
   selector: 'app-memorize-learn',
-  imports: [FormsModule],
+  imports: [FormsModule, MemorizeCoachControlsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- ===== Learn mode: one chunk, verse by verse, at the student's pace ===== -->
@@ -27,6 +28,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
           </button>
         </div>
       } @else {
+        <app-memorize-coach-controls kind="learn" />
         <div class="field mb-3">
           <label class="label is-small" for="learn-chunk">Chunk to learn</label>
           <div class="select is-fullwidth">

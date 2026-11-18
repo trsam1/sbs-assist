@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeCoachControlsComponent } from './memorize-coach-controls.component';
 import { MEMORIZE_STYLES } from './memorize-styles';
 
 /** The Test pane of the Memorize page. Reads and drives the page's `MemorizeStore`. */
 @Component({
   selector: 'app-memorize-test',
-  imports: [],
+  imports: [MemorizeCoachControlsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- ===== Test mode: recite aloud → auto-grade (Transcribe + Bedrock) ===== -->
@@ -31,6 +32,7 @@ import { MEMORIZE_STYLES } from './memorize-styles';
           <p class="has-text-grey">Nothing due to test right now — well memorized.</p>
         </div>
       } @else {
+        <app-memorize-coach-controls kind="test" />
         <!-- Deck progress + drive/desk toggle -->
         <div class="level is-mobile mb-2">
           <div class="level-left">

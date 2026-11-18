@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { ToolShellComponent } from '../tool-shell/tool-shell.component';
 import { ScrollToolContext } from '../tool-shell/scroll-tool-context';
 import { MemorizeStore } from './memorize-store';
+import { MemorizeCoach } from './memorize-coach';
+import { MemorizeCoachBarComponent } from './memorize-coach-bar.component';
 import { MemorizeLearnComponent } from './memorize-learn.component';
 import { MemorizeReviewComponent } from './memorize-review.component';
 import { MemorizeTestComponent } from './memorize-test.component';
@@ -17,8 +19,9 @@ import { MemorizeEditComponent } from './memorize-edit.component';
     MemorizeReviewComponent,
     MemorizeTestComponent,
     MemorizeEditComponent,
+    MemorizeCoachBarComponent,
   ],
-  providers: [ScrollToolContext, MemorizeStore],
+  providers: [ScrollToolContext, MemorizeStore, MemorizeCoach],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Memorize the scroll">
@@ -146,6 +149,7 @@ import { MemorizeEditComponent } from './memorize-edit.component';
             <app-memorize-edit />
           }
         </app-tool-shell>
+        <app-memorize-coach-bar />
       </div>
     </section>
   `,
