@@ -16,6 +16,18 @@ export const MEMORIZE_STYLES = `
         font-size: 1.15rem;
         line-height: 1.6;
       }
+      .fill-input {
+        display: inline-block;
+        width: auto;
+        max-width: 100%;
+        height: auto;
+        min-width: 4ch;
+        padding: 0 0.3em;
+        margin: 0 0.1em;
+        font: inherit;
+        text-align: center;
+        vertical-align: baseline;
+      }
       .learn-locked {
         opacity: 0.7;
       }

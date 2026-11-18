@@ -156,7 +156,28 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                         <p class="learn-text mb-3" data-testid="learn-fill-text">
                           @for (t of store.learnFillTokens(); track $index) {
                             @if (t.blank && !store.learnFillRevealed()) {
-                              <span aria-label="blank">{{ store.blankOf(t.text) }}</span>
+                              <input
+                                class="input is-small fill-input"
+                                [class.is-success]="store.learnFillResult()[$index] === true"
+                                [class.is-danger]="store.learnFillResult()[$index] === false"
+                                type="text"
+                                autocomplete="off"
+                                autocapitalize="off"
+                                autocorrect="off"
+                                spellcheck="false"
+                                [value]="store.learnFillTypedAt($index)"
+                                (input)="store.setLearnFillTyped($index, $any($event.target).value)"
+                                (keydown.enter)="store.checkLearnFill()"
+                                [style.width.ch]="t.text.length + 3"
+                                [attr.aria-label]="
+                                  'Blank ' +
+                                  store.learnFillBlankNumbers()[$index] +
+                                  ' of ' +
+                                  store.learnFillScore().total
+                                "
+                                [attr.aria-invalid]="store.learnFillResult()[$index] === false"
+                                data-testid="learn-fill-input"
+                              />
                             } @else if (t.blank) {
                               <strong>{{ t.text }}</strong>
                             } @else {
@@ -164,14 +185,34 @@ import { MEMORIZE_STYLES } from './memorize-styles';
                             }
                           }
                         </p>
+                        @if (store.learnFillScore().checked) {
+                          <p class="mb-3" aria-live="polite" data-testid="learn-fill-score">
+                            {{ store.learnFillScore().correct }} of
+                            {{ store.learnFillScore().total }} correct
+                            @if (store.learnFillScore().correct < store.learnFillScore().total) {
+                              <span class="has-text-grey">
+                                — fix the red ones, or show the answers.</span
+                              >
+                            }
+                          </p>
+                        }
                         <div class="buttons">
+                          <button
+                            type="button"
+                            class="button is-link is-light"
+                            [disabled]="store.learnFillRevealed()"
+                            (click)="store.checkLearnFill()"
+                            data-testid="learn-fill-check"
+                          >
+                            Check my answers
+                          </button>
                           <button
                             type="button"
                             class="button"
                             (click)="store.toggleLearnFill()"
-                            data-testid="learn-fill-check"
+                            data-testid="learn-fill-reveal"
                           >
-                            {{ store.learnFillRevealed() ? 'Hide answers' : 'Check' }}
+                            {{ store.learnFillRevealed() ? 'Hide answers' : 'Show answers' }}
                           </button>
                           <button
                             type="button"
