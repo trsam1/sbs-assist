@@ -10,6 +10,7 @@ import {
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { StrongsStudyResult, CrossReference } from '../models';
 import { TruncatePipe } from '../truncate.pipe';
+import { BlbRefDirective } from '../blb-tagger/blb-ref.directive';
 import { EnglishDictionaryResult } from '../english-definition.service';
 
 export type AiSummaryState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -28,7 +29,7 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
 
 @Component({
   selector: 'app-study-worksheet',
-  imports: [ReactiveFormsModule, TruncatePipe],
+  imports: [ReactiveFormsModule, TruncatePipe, BlbRefDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="section" aria-label="Word study worksheet">
@@ -388,6 +389,7 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                       } @else {
                         <p class="has-text-grey is-size-7 mb-3">
                           {{ refs.length }} cross-reference(s) found. Click a verse to add notes.
+                          Hover a reference to read the verse (shown by Blue Letter Bible).
                         </p>
                         <div class="cross-ref-list">
                           @for (ref of refs; track ref.reference; let i = $index) {
@@ -401,9 +403,11 @@ const STRONGS_PATTERN = /^[GH]\d+$/;
                                 [attr.aria-expanded]="isCrossRefExpanded(i)"
                               >
                                 <span class="cross-ref-num">{{ i + 1 }}</span>
-                                <strong class="is-size-7" data-testid="cross-ref-reference">{{
-                                  ref.reference
-                                }}</strong>
+                                <strong
+                                  class="is-size-7"
+                                  data-testid="cross-ref-reference"
+                                  [appBlbRef]="ref.reference"
+                                ></strong>
                                 @if (ref.notes) {
                                   <span class="tag is-info is-light is-small ml-2">noted</span>
                                 }
